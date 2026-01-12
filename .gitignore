@@ -2,6 +2,7 @@ YOLO/yolo_pose_dataset/
 YOLO/runs/
 *.pt
 .DS_Store
+sandbox/
 # Python-generated files
 __pycache__/
 *.py[oc]

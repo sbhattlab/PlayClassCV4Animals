@@ -1,7 +1,6 @@
 import json
 import os
-from argparse import ArgumentDefaultsHelpFormatter, ArgumentParser
-from pathlib import Path
+from argparse import ArgumentParser
 
 import cv2
 import numpy as np
@@ -19,10 +18,8 @@ from utils.track_utils import sample_points_from_masks
 
 
 def parse_args():
-    parser = ArgumentParser(formatter_class=ArgumentDefaultsHelpFormatter)
-    parser.add_argument(
-        "grounded_sam_2_repo_path", type=str, default="./Grounded-SAM-2"
-    )
+    parser = ArgumentParser()
+
     parser.add_argument(
         "-i",
         "--video_dir",
@@ -104,18 +101,12 @@ if torch.cuda.get_device_properties(0).major >= 8:
     torch.backends.cuda.matmul.allow_tf32 = True
     torch.backends.cudnn.allow_tf32 = True
 
-# Verify location of Grounded-SAM-2
-gs2_p = Path(args.grounded_sam_2_repo_path)
-assert gs2_p.exists(), (
-    f"Could not verify location of input grounded-SAM-2 path: {gs2_p.resolve()}"
-)
-
 # init sam image predictor and video predictor model
-sam2_checkpoint = Path(gs2_p / f"checkpoints/sam2.1_hiera_{args.size}.pt").resolve()
+sam2_checkpoint = f"./checkpoints/sam2.1_hiera_{args.size}.pt"
 model_cfg_size = args.size[0].split("_")[0].lower()
 if "plus" in args.size:
     model_cfg_size += "+"
-model_cfg = Path(gs2_p / f"configs/sam2.1/sam2.1_hiera_{model_cfg_size}.yaml").resolve()
+model_cfg = f"configs/sam2.1/sam2.1_hiera_{model_cfg_size}.yaml"
 
 video_predictor = build_sam2_video_predictor(model_cfg, sam2_checkpoint)
 sam2_image_model = build_sam2(model_cfg, sam2_checkpoint)
@@ -174,7 +165,8 @@ if args.mask_file is None:
     results = processor.post_process_grounded_object_detection(
         outputs,
         inputs.input_ids,
-        box_threshold=args.box_threshold,
+        # box_threshold=args.box_threshold,
+        threshold=args.box_threshold,
         text_threshold=args.text_threshold,
         target_sizes=[image.size[::-1]],
     )
