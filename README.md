@@ -2,7 +2,10 @@
 - Small and tabular data in `data` directory
 - Larger video data in symlinked to `video-data-dir`
 ```sh
+# e.g. macOS
 ln -s  "$HOME/Library/CloudStorage/OneDrive-UniversityofCopenhagen/IFSV/proj/chicken-behaviour-classifier-data/video-raw-data" video-data
+# ku-01
+ln -s "/mnt/birds/rebecca2025/raw" video-data
 ```
 
 # Methods tested

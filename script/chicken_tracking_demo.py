@@ -174,27 +174,87 @@ if args.mask_file is None:
     # prompt SAM image predictor to get the mask for the object
     image_predictor.set_image(np.array(image.convert("RGB")))
 
+    # # process the detection results
+    # input_boxes = results[0]["boxes"].cpu().numpy()
+    # OBJECTS = [str(_) for _ in range(len(results[0]["labels"]))]
+
+    # # prompt SAM 2 image predictor to get the mask for the object
+    # masks, scores, logits = image_predictor.predict(
+    #     point_coords=None,
+    #     point_labels=None,
+    #     box=input_boxes,
+    #     multimask_output=False,
+    # )
+
+    # # convert the mask shape to (n, H, W)
+    # if masks.ndim == 3:
+    #     masks = masks[None]
+    #     scores = scores[None]
+    #     logits = logits[None]
+    # elif masks.ndim == 4:
+    #     masks = masks.squeeze(1)
+
+    # PROMPT_TYPE_FOR_VIDEO = "box"  # or "point"
+
     # process the detection results
-    input_boxes = results[0]["boxes"].cpu().numpy()
-    OBJECTS = [str(_) for _ in range(len(results[0]["labels"]))]
+    input_boxes = results[0]["boxes"].cpu().numpy()  # (K, 4) or (0, 4)
+    labels = results[0]["labels"]
+    OBJECTS = [str(_) for _ in range(len(labels))]
 
-    # prompt SAM 2 image predictor to get the mask for the object
-    masks, scores, logits = image_predictor.predict(
-        point_coords=None,
-        point_labels=None,
-        box=input_boxes,
-        multimask_output=False,
-    )
+    # Early exit if no detections (avoid SAM2 call altogether)
+    if input_boxes.shape[0] == 0:
+        print(
+            f"[WARN] No detections for text='{text}' at thresholds "
+            f"box={args.box_threshold}, text={args.text_threshold}."
+        )
+        masks = np.zeros((0, image.size[1], image.size[0]), dtype=np.uint8)  # (0, H, W)
+        scores = np.zeros((0,), dtype=np.float32)
+        logits = np.zeros((0, 1, image.size[1], image.size[0]), dtype=np.float32)
+        PROMPT_TYPE_FOR_VIDEO = "box"  # we still use box prompts downstream
+    else:
+        # Run SAM2 per box to keep batch=1 (avoid assertion)
+        all_masks = []
+        all_scores = []
+        all_logits = []
 
-    # convert the mask shape to (n, H, W)
-    if masks.ndim == 3:
-        masks = masks[None]
-        scores = scores[None]
-        logits = logits[None]
-    elif masks.ndim == 4:
-        masks = masks.squeeze(1)
+        for k in range(input_boxes.shape[0]):
+            box_k = np.asarray(input_boxes[k], dtype=np.float32)[None, ...]  # (1, 4)
 
-    PROMPT_TYPE_FOR_VIDEO = "box"  # or "point"
+            m_k, s_k, l_k = image_predictor.predict(
+                point_coords=None,  # batch=1
+                point_labels=None,
+                box=box_k,  # (1, 4)
+                multimask_output=False,
+            )
+
+            # m_k: (1, 1, H, W) or (1, H, W) depending on predictor version
+            # Standardize to (H, W) per detection for downstream code
+            if m_k.ndim == 4:  # (B=1, 1, H, W) -> (H, W)
+                m_k = m_k.squeeze(0).squeeze(0)
+            elif m_k.ndim == 3:  # (B=1, H, W) -> (H, W)
+                m_k = m_k.squeeze(0)
+
+            all_masks.append(m_k)
+            all_scores.append(np.array(s_k).reshape(-1))  # to (<=1,) per detection
+            all_logits.append(l_k)  # keep original shape; you use logits later
+
+        # Stack masks to (K, H, W)
+        masks = np.stack(all_masks, axis=0)
+        # Concatenate scores/logits across detections
+        scores = (
+            np.concatenate(all_scores, axis=0)
+            if len(all_scores) > 0
+            else np.zeros((0,), dtype=np.float32)
+        )
+        # If logits have shape (1, 1, H, W) per detection, stack to (K, 1, H, W)
+        try:
+            logits = np.concatenate(all_logits, axis=0)
+        except Exception:
+            # Fallback: stack if concatenate fails due to shape diff
+            logits = np.stack([np.asarray(l) for l in all_logits], axis=0)
+
+        PROMPT_TYPE_FOR_VIDEO = "box"  # or "point" as needed
+
 else:
     with open(args.mask_file, "r", encoding="utf-8") as f:
         annotations = json.load(f)["annotations"]
