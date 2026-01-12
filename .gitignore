@@ -1,5 +1,5 @@
-yolo_pose_dataset/
-runs/
+YOLO/yolo_pose_dataset/
+YOLO/runs/
 *.pt
 .DS_Store
 # Python-generated files
