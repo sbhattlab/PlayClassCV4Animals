@@ -1,26 +1,28 @@
 import json
 import os
-
-from argparse import ArgumentParser
+from argparse import ArgumentDefaultsHelpFormatter, ArgumentParser
+from pathlib import Path
 
 import cv2
-import torch
 import numpy as np
 import pycocotools.mask as mask_util
 import supervision as sv
+import torch
 from PIL import Image
-from tqdm import tqdm
-from sam2.build_sam import build_sam2_video_predictor, build_sam2
+from sam2.build_sam import build_sam2, build_sam2_video_predictor
 from sam2.sam2_image_predictor import SAM2ImagePredictor
-from transformers import AutoProcessor, AutoModelForZeroShotObjectDetection
+from tqdm import tqdm
+from transformers import AutoModelForZeroShotObjectDetection, AutoProcessor
 from utils.track_utils import sample_points_from_masks
 
 # from utils.video_utils import create_video_from_images
 
 
 def parse_args():
-    parser = ArgumentParser()
-
+    parser = ArgumentParser(formatter_class=ArgumentDefaultsHelpFormatter)
+    parser.add_argument(
+        "grounded_sam_2_repo_path", type=str, default="./Grounded-SAM-2"
+    )
     parser.add_argument(
         "-i",
         "--video_dir",
@@ -102,12 +104,18 @@ if torch.cuda.get_device_properties(0).major >= 8:
     torch.backends.cuda.matmul.allow_tf32 = True
     torch.backends.cudnn.allow_tf32 = True
 
+# Verify location of Grounded-SAM-2
+gs2_p = Path(args.grounded_sam_2_repo_path)
+assert gs2_p.exists(), (
+    f"Could not verify location of input grounded-SAM-2 path: {gs2_p.resolve()}"
+)
+
 # init sam image predictor and video predictor model
-sam2_checkpoint = f"./checkpoints/sam2.1_hiera_{args.size}.pt"
+sam2_checkpoint = Path(gs2_p / f"checkpoints/sam2.1_hiera_{args.size}.pt").resolve()
 model_cfg_size = args.size[0].split("_")[0].lower()
 if "plus" in args.size:
     model_cfg_size += "+"
-model_cfg = f"configs/sam2.1/sam2.1_hiera_{model_cfg_size}.yaml"
+model_cfg = Path(gs2_p / f"configs/sam2.1/sam2.1_hiera_{model_cfg_size}.yaml").resolve()
 
 video_predictor = build_sam2_video_predictor(model_cfg, sam2_checkpoint)
 sam2_image_model = build_sam2(model_cfg, sam2_checkpoint)
