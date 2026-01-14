@@ -6,13 +6,13 @@ import numpy as np
 import supervision as sv
 import torch
 from PIL import Image
-from torchcodec.decoders import VideoDecoder
-from transformers import AutoModelForZeroShotObjectDetection, AutoProcessor
-
 from sam2.build_sam import build_sam2, build_sam2_video_predictor
 from sam2.sam2_image_predictor import SAM2ImagePredictor
+from torchcodec.decoders import VideoDecoder
+from transformers import AutoModelForZeroShotObjectDetection, AutoProcessor
 from utils.track_utils import sample_points_from_masks
 from utils.video_utils import create_video_from_images
+
 
 def torchcodec_frame_to_rgb_numpy(frame: torch.Tensor) -> np.ndarray:
     """
@@ -59,18 +59,18 @@ image_predictor = SAM2ImagePredictor(sam2_image_model)
 model_id = "IDEA-Research/grounding-dino-tiny"
 processor = AutoProcessor.from_pretrained(model_id)
 grounding_model = (
-    AutoModelForZeroShotObjectDetection.from_pretrained(model_id)
-    .to(device)
-    .eval()
+    AutoModelForZeroShotObjectDetection.from_pretrained(model_id).to(device).eval()
 )
 
-text_prompt = "car."  # must be lowercase + end with dot
+text_prompt = "chicken.bird."  # must be lowercase + end with dot
 
 # ============================================================
 # Step 2: Video decoding (streaming)
 # ============================================================
 
-video_path = "notebooks/videos/car/out.mp4"
+# video_path = "notebooks/videos/car/out.mp4"
+# video_path = "/home/prince/proj/chicken-behaviour-classifier/data/test.mp4"
+video_path = "/mnt/birds/rebecca2025/test/video_1_5min.mp4"
 decoder = VideoDecoder(video_path)
 
 num_frames = len(decoder)
@@ -200,8 +200,6 @@ for frame_idx, segments in video_segments.items():
     frame = decoder[frame_idx]
     frame_np = torchcodec_frame_to_rgb_numpy(frame)
     img = cv2.cvtColor(frame_np, cv2.COLOR_RGB2BGR)
-    
-
 
     object_ids = list(segments.keys())
     masks = np.concatenate(list(segments.values()), axis=0)
@@ -233,4 +231,3 @@ for frame_idx, segments in video_segments.items():
 output_video_path = "./children_tracking_demo_video.mp4"
 create_video_from_images(str(save_dir), output_video_path)
 print(f"Wrote results to {output_video_path}")
-
