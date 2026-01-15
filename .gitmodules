@@ -1,3 +1,9 @@
 [submodule "Grounded-SAM-2"]
 	path = Grounded-SAM-2
 	url = https://github.com/IDEA-Research/Grounded-SAM-2
+[submodule "transformers"]
+	path = transformers
+	url = https://github.com/huggingface/transformers.git
+[submodule "sam3"]
+	path = sam3
+	url = https://github.com/facebookresearch/sam3.git
