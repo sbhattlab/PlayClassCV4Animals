@@ -61,13 +61,15 @@ grounding_model = (
 )
 
 TEXT_PROMPT = "chicken.bird."  # must be lowercase + end with dot
-
+BOX_THRESHOLD = 0.30
+TEXT_THRESHOLD = 0.25
 
 # ============================================================
 # Video
 # ============================================================
 
-video_path = "/mnt/birds/rebecca2025/test/video_1_5min.mp4"
+# video_path = "/mnt/birds/rebecca2025/test/video_1_5min.mp4"
+video_path = "../data/test.mp4"
 decoder = VideoDecoder(video_path)
 num_frames = len(decoder)
 
@@ -108,13 +110,74 @@ with torch.no_grad():
     results = processor.post_process_grounded_object_detection(
         outputs,
         inputs.input_ids,
-        threshold=0.25,
-        text_threshold=0.3,
+        threshold=BOX_THRESHOLD,
+        text_threshold=TEXT_THRESHOLD,
         target_sizes=[image_pil.size[::-1]],
     )
 
 boxes = results[0]["boxes"].cpu().numpy()
 labels = results[0]["labels"]
+
+# process the detection results
+input_boxes = results[0]["boxes"].cpu().numpy()  # (K, 4) or (0, 4)
+labels = results[0]["labels"]
+OBJECTS = [str(_) for _ in range(len(labels))]
+
+# Early exit if no detections (avoid SAM2 call altogether)
+if input_boxes.shape[0] == 0:
+    print(
+        f"[WARN] No detections for text='{TEXT_PROMPT}' at thresholds "
+        f"box={BOX_THRESHOLD}, text={TEXT_THRESHOLD}."
+    )
+    masks = np.zeros(
+        (0, image_pil.size[1], image_pil.size[0]), dtype=np.uint8
+    )  # (0, H, W)
+    scores = np.zeros((0,), dtype=np.float32)
+    logits = np.zeros((0, 1, image_pil.size[1], image_pil.size[0]), dtype=np.float32)
+    PROMPT_TYPE_FOR_VIDEO = "box"  # we still use box prompts downstream
+else:
+    # Run SAM2 per box to keep batch=1 (avoid assertion)
+    all_masks = []
+    all_scores = []
+    all_logits = []
+
+    for k in range(input_boxes.shape[0]):
+        box_k = np.asarray(input_boxes[k], dtype=np.float32)[None, ...]  # (1, 4)
+
+        m_k, s_k, l_k = image_predictor.predict(
+            point_coords=None,  # batch=1
+            point_labels=None,
+            box=box_k,  # (1, 4)
+            multimask_output=False,
+        )
+
+        # m_k: (1, 1, H, W) or (1, H, W) depending on predictor version
+        # Standardize to (H, W) per detection for downstream code
+        if m_k.ndim == 4:  # (B=1, 1, H, W) -> (H, W)
+            m_k = m_k.squeeze(0).squeeze(0)
+        elif m_k.ndim == 3:  # (B=1, H, W) -> (H, W)
+            m_k = m_k.squeeze(0)
+
+        all_masks.append(m_k)
+        all_scores.append(np.array(s_k).reshape(-1))  # to (<=1,) per detection
+        all_logits.append(l_k)  # keep original shape; you use logits later
+
+    # Stack masks to (K, H, W)
+    masks = np.stack(all_masks, axis=0)
+    # Concatenate scores/logits across detections
+    scores = (
+        np.concatenate(all_scores, axis=0)
+        if len(all_scores) > 0
+        else np.zeros((0,), dtype=np.float32)
+    )
+    # If logits have shape (1, 1, H, W) per detection, stack to (K, 1, H, W)
+    try:
+        logits = np.concatenate(all_logits, axis=0)
+    except Exception:
+        # Fallback: stack if concatenate fails due to shape diff
+        logits = np.stack([np.asarray(l) for l in all_logits], axis=0)
+
+    PROMPT_TYPE_FOR_VIDEO = "box"  # or "point" as needed
 
 # ---- SAM image predictor ----
 image_predictor.set_image(frame0)
@@ -149,8 +212,12 @@ with torch.no_grad():
     for frame_idx, obj_ids, mask_logits in video_predictor.propagate_in_video(
         inference_state
     ):
+        # video_segments[frame_idx] = {
+        #     obj_id: (mask_logits[i] > 0).cpu().numpy()
+        #     for i, obj_id in enumerate(obj_ids)
+        # }
         video_segments[frame_idx] = {
-            obj_id: (mask_logits[i] > 0).cpu().numpy()
+            obj_id: np.squeeze((mask_logits[i] > 0).cpu().numpy())
             for i, obj_id in enumerate(obj_ids)
         }
 

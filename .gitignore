@@ -1,3 +1,4 @@
+notebook/runs/*
 video-data
 YOLO/yolo_pose_dataset/
 YOLO/runs/

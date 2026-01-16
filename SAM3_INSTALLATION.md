@@ -4,9 +4,13 @@
 ```
 mamba create -n sam3 python=3.12 uv ffmpeg nvidia::cudatoolkit -y
 mamba activate sam3
-# uv pip install torch==2.7.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
+
+### if _no_ torchcodec
+uv pip install torch==2.7.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
+### if torchcodec
 uv pip install torch torchvision torchaudio
 uv pip install torchcodec --index-url=https://download.pytorch.org/whl/cu128
+
 cd sam3
 uv pip install -e .
 uv pip install -e ".[notebooks]"
