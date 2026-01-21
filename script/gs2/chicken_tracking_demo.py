@@ -118,7 +118,17 @@ def single_mask_to_rle(mask):
 # Begin main script logic
 # -----------------------
 args = parse_args()
+if args.create_video:
+    assert args.create_video and args.save_masks, (
+        "Must invoke --create-video MUST be invoked together with --save-images"
+    )
 device = resolve_device(args.gpu_id)
+print(f"Input device resolved to: {device}")
+
+if device.type == "cuda":
+    torch.cuda.set_device(device)  # or torch.cuda.set_device(args.gpu_id)
+    print("[DEBUG] torch.cuda.current_device() =", torch.cuda.current_device())
+
 
 gs2_repo_path = Path(args.gs2_repo_path)
 assert gs2_repo_path.exists(), "Grounded-SAM-2 repo path not found."
