@@ -1,3 +1,19 @@
+"""
+Grounded-SAM-2.chicken_tracking_demo_v2
+- v2 is a chunked streaming system
+- v2 supports raw video input
+- Mask carryover between chunks in v2
+- v2 reuses SAM2 models across chunks
+- New flags
+    --video-file
+    --decoder
+    --chunk-size
+    --chunk-overlap
+    --offload-video-to-cpu
+    --seed-frame-index
+- Global Output Indexing in v2
+"""
+
 import json
 import os
 import shutil
@@ -14,8 +30,9 @@ from PIL import Image
 from sam2.build_sam import build_sam2, build_sam2_video_predictor
 from sam2.sam2_image_predictor import SAM2ImagePredictor
 from tqdm import tqdm
-from transformers import AutoModelForZeroShotObjectDetection, AutoProcessor
 from utils.track_utils import sample_points_from_masks
+
+from transformers import AutoModelForZeroShotObjectDetection, AutoProcessor
 
 # ---------------------------
 # Args and small utilities
