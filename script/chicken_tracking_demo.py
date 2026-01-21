@@ -1,6 +1,7 @@
 import json
 import os
 from argparse import ArgumentParser
+from pathlib import Path
 
 import cv2
 import numpy as np
@@ -11,75 +12,100 @@ from PIL import Image
 from sam2.build_sam import build_sam2, build_sam2_video_predictor
 from sam2.sam2_image_predictor import SAM2ImagePredictor
 from tqdm import tqdm
-from transformers import AutoModelForZeroShotObjectDetection, AutoProcessor
 from utils.track_utils import sample_points_from_masks
+from utils.video_utils import create_video_from_images
 
-# from utils.video_utils import create_video_from_images
+from transformers import AutoModelForZeroShotObjectDetection, AutoProcessor
 
 
 def parse_args():
     parser = ArgumentParser()
-
+    parser.add_argument(
+        "--gs2-repo-path",
+        default="/home/prince/proj/chicken-behaviour-classifier/Grounded-SAM-2",
+        type=str,
+        help="Path to Grounded-SAM-2 repo",
+    )
     parser.add_argument(
         "-i",
-        "--video_dir",
+        "--video-dir",
         type=str,
         required=True,
-        help="a directory of JPEG frames with filenames like `<frame_index>.jpg",
+        help="Directory of JPEG frames named <frame_index>.jpg",
     )
     parser.add_argument(
         "--text",
         type=str,
-        help="text queries. Need to be lowercased + end with a dot",
         required=True,
+        help="Text queries (lowercase, ending with a dot)",
     )
     parser.add_argument(
-        "-m", "--mask_file", type=str, help="Path to .json file containing masks"
+        "-m",
+        "--mask-file",
+        type=str,
+        help="Path to .json file containing masks",
     )
-    parser.add_argument(
-        "--fps",
-        type=int,
-        default=25,
-        help="frame rate of the output video",
-    )
+    parser.add_argument("--fps", type=int, default=25, help="FPS of output video")
     parser.add_argument(
         "--size",
         type=str,
         choices=("large", "base_plus", "small", "tiny"),
         default="large",
-        help="SAM2 model size to be used",
+        help="SAM2 model size",
     )
     parser.add_argument(
         "--box-threshold",
         type=float,
         default=0.25,
-        help="box threshold for grounding DINO",
+        help="Box threshold for GroundingDINO",
     )
     parser.add_argument(
         "--text-threshold",
         type=float,
         default=0.3,
-        help="text threshold for grounding DINO",
+        help="Text threshold for GroundingDINO",
+    )
+    parser.add_argument(
+        "--gpu-id",
+        type=int,
+        default=0,
+        help="CUDA GPU index to use (e.g. 0 or 1). Defaults to 0.",
     )
     parser.add_argument(
         "-o",
         "--save-dir",
         type=str,
         default="./tracking_results",
-        help="directory to save the tracking results",
+        help="Directory to save results",
     )
     parser.add_argument(
-        "--save-masks",
-        action="store_true",
-        help="save the masks for each object",
+        "--save-masks", action="store_true", help="Save mask JSON files"
     )
     parser.add_argument(
-        "--save-images",
-        action="store_true",
-        help="remove the images after creating the video",
+        "--save-images", action="store_true", help="Save annotated JPGs"
+    )
+    parser.add_argument(
+        "--create-video", action="store_true", help="Create annotated video"
     )
 
     return parser.parse_args()
+
+
+def resolve_device(gpu_id: int):
+    """Safely select GPU device or fall back to CPU."""
+    if torch.cuda.is_available():
+        num_gpus = torch.cuda.device_count()
+        if gpu_id < num_gpus:
+            print(f"[INFO] Using GPU {gpu_id} / {num_gpus} available GPUs")
+            return torch.device(f"cuda:{gpu_id}")
+        else:
+            print(
+                f"[WARN] Requested GPU {gpu_id} but only {num_gpus} GPUs available. Falling back to CPU."
+            )
+    else:
+        print("[WARN] CUDA not available, running on CPU.")
+
+    return torch.device("cpu")
 
 
 def single_mask_to_rle(mask):
@@ -88,21 +114,29 @@ def single_mask_to_rle(mask):
     return rle
 
 
+# -----------------------
+# Begin main script logic
+# -----------------------
 args = parse_args()
+device = resolve_device(args.gpu_id)
 
-###
-# Step 1: Environment settings and model initialization
-###
-# use bfloat16 for the entire notebook
-torch.autocast(device_type="cuda", dtype=torch.bfloat16).__enter__()
+gs2_repo_path = Path(args.gs2_repo_path)
+assert gs2_repo_path.exists(), "Grounded-SAM-2 repo path not found."
 
-if torch.cuda.get_device_properties(0).major >= 8:
-    # turn on tfloat32 for Ampere GPUs (https://pytorch.org/docs/stable/notes/cuda.html#tensorfloat-32-tf32-on-ampere-devices)
+# Mixed precision setup
+torch.autocast(
+    device_type="cuda" if device.type == "cuda" else "cpu", dtype=torch.bfloat16
+).__enter__()
+
+if device.type == "cuda" and torch.cuda.get_device_properties(device.index).major >= 8:
     torch.backends.cuda.matmul.allow_tf32 = True
     torch.backends.cudnn.allow_tf32 = True
 
-# init sam image predictor and video predictor model
-sam2_checkpoint = f"./checkpoints/sam2.1_hiera_{args.size}.pt"
+# Load SAM2
+# sam2_checkpoint = f"./checkpoints/sam2.1_hiera_{args.size}.pt"
+sam2_checkpoint = Path(
+    gs2_repo_path, f"checkpoints/sam2.1_hiera_{args.size}.pt"
+).as_posix()
 model_cfg_size = args.size[0].split("_")[0].lower()
 if "plus" in args.size:
     model_cfg_size += "+"
@@ -112,10 +146,8 @@ video_predictor = build_sam2_video_predictor(model_cfg, sam2_checkpoint)
 sam2_image_model = build_sam2(model_cfg, sam2_checkpoint)
 image_predictor = SAM2ImagePredictor(sam2_image_model)
 
-
-# init grounding dino model from huggingface
+# Load GroundingDINO on selected device
 model_id = "IDEA-Research/grounding-dino-tiny"
-device = "cuda" if torch.cuda.is_available() else "cpu"
 processor = AutoProcessor.from_pretrained(model_id)
 grounding_model = AutoModelForZeroShotObjectDetection.from_pretrained(model_id).to(
     device
@@ -398,4 +430,5 @@ for frame_idx, segments in tqdm(video_segments.items(), desc="Annotating frames"
 video_writer.release()
 print(f"Video saved at {output_video_path}")
 
-# create_video_from_images(args.save_dir, output_video_path)
+if args.create_video:
+    create_video_from_images(args.save_dir, output_video_path)
