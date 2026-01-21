@@ -5,6 +5,7 @@ from pathlib import Path
 
 import cv2
 import numpy as np
+import pandas as pd
 import pycocotools.mask as mask_util
 import supervision as sv
 import torch
@@ -196,7 +197,8 @@ ann_obj_id = (
 
 if args.mask_file is None:
     # prompt grounding dino to get the box coordinates on specific frame
-    img_path = os.path.join(video_dir, frame_names[ann_frame_idx])
+    # img_path = os.path.join(video_dir, frame_names[ann_frame_idx])
+    img_path = Path(video_dir, frame_names[ann_frame_idx]).resolve().as_posix()
     image = Image.open(img_path)
 
     # run Grounding DINO on the image
@@ -216,32 +218,11 @@ if args.mask_file is None:
     # prompt SAM image predictor to get the mask for the object
     image_predictor.set_image(np.array(image.convert("RGB")))
 
-    # # process the detection results
-    # input_boxes = results[0]["boxes"].cpu().numpy()
-    # OBJECTS = [str(_) for _ in range(len(results[0]["labels"]))]
-
-    # # prompt SAM 2 image predictor to get the mask for the object
-    # masks, scores, logits = image_predictor.predict(
-    #     point_coords=None,
-    #     point_labels=None,
-    #     box=input_boxes,
-    #     multimask_output=False,
-    # )
-
-    # # convert the mask shape to (n, H, W)
-    # if masks.ndim == 3:
-    #     masks = masks[None]
-    #     scores = scores[None]
-    #     logits = logits[None]
-    # elif masks.ndim == 4:
-    #     masks = masks.squeeze(1)
-
-    # PROMPT_TYPE_FOR_VIDEO = "box"  # or "point"
-
     # process the detection results
     input_boxes = results[0]["boxes"].cpu().numpy()  # (K, 4) or (0, 4)
-    labels = results[0]["labels"]
-    OBJECTS = [str(_) for _ in range(len(labels))]
+    dino_scores = results[0]["scores"].cpu().numpy()  # numpy array of scores
+    labels = results[0]["labels"]  # e.g., ['chicken', 'bird', ...]
+    OBJECTS = [str(l) for l in labels]  # keep class names as-is
 
     # Early exit if no detections (avoid SAM2 call altogether)
     if input_boxes.shape[0] == 0:
@@ -386,6 +367,8 @@ height, width, _ = first_image.shape
 fourcc = cv2.VideoWriter_fourcc(*"mp4v")  # codec for saving the video
 video_writer = cv2.VideoWriter(output_video_path, fourcc, args.fps, (width, height))
 
+all_results = {}
+
 ID_TO_OBJECTS = dict(enumerate(OBJECTS, start=1))
 for frame_idx, segments in tqdm(video_segments.items(), desc="Annotating frames"):
     img_path = os.path.join(video_dir, frame_names[frame_idx])
@@ -398,21 +381,24 @@ for frame_idx, segments in tqdm(video_segments.items(), desc="Annotating frames"
     input_boxes = sv.mask_to_xyxy(masks)
 
     if args.save_masks:
-        # convert mask into rle format
-        mask_rles = [single_mask_to_rle(mask) for mask in masks]
+        frame_dict = {}
 
-        results = {
-            "image_path": img_path,
-            "annotations": [
-                {"segmentation": mask_rle, "bbox": box}
-                for mask_rle, box in zip(mask_rles, input_boxes.tolist())
-            ],
-        }
+        for idx, obj_id in enumerate(object_ids):
+            mask = masks[idx]
+            mask_rle = single_mask_to_rle(mask)
+            bbox = sv.mask_to_xyxy(mask[None, ...])[0].tolist()
 
-        with open(
-            os.path.join(args.save_dir, f"{frame_idx:05d}.json"), "w", encoding="utf-8"
-        ) as f:
-            json.dump(results, f, indent=4)
+            class_name = ID_TO_OBJECTS[obj_id]
+            score = dino_scores[obj_id - 1]
+
+            frame_dict[obj_id] = {
+                "class_name": class_name,
+                "score": float(score),
+                "segmentation": mask_rle,
+                "bbox": bbox,
+            }
+
+        all_results[frame_idx] = frame_dict
 
     detections = sv.Detections(
         xyxy=input_boxes,  # (n, 4)
@@ -437,6 +423,55 @@ for frame_idx, segments in tqdm(video_segments.items(), desc="Annotating frames"
             os.path.join(args.save_dir, f"annotated_frame_{frame_idx:05d}.jpg"),
             annotated_frame,
         )
+
+output_json_path = os.path.join(
+    args.save_dir,
+    f"{os.path.basename(os.path.normpath(args.video_dir))}_{args.size}.json",
+)
+with open(output_json_path, "w", encoding="utf-8") as f:
+    json.dump(all_results, f, indent=4)
+
+print(f"[INFO] Saved masks JSON at: {output_json_path}")
+
+
+# ---- Build MultiIndex DataFrame: (frame, object_id) ----
+records = []
+mi_tuples = []
+
+# Sort for deterministic ordering
+for frame_idx in sorted(all_results.keys()):
+    obj_map = all_results[frame_idx]
+    for obj_id in sorted(obj_map.keys()):
+        det = obj_map[obj_id]
+        rle = det["segmentation"]  # {'size': [H, W], 'counts': str}
+        size = rle.get("size", None)  # [H, W]
+        counts = rle.get("counts", None)  # str (RLE)
+        bbox = det.get("bbox", None)  # [x1, y1, x2, y2]
+        cls = det.get("class_name", None)
+        score = det.get("score", None)
+
+        # Ensure empty string classes become NaN
+        if isinstance(cls, str) and cls.strip() == "":
+            cls = np.nan
+
+        records.append([size, counts, bbox, cls, score])
+        mi_tuples.append((int(frame_idx), int(obj_id)))
+
+df = pd.DataFrame(
+    records,
+    index=pd.MultiIndex.from_tuples(mi_tuples, names=["frame", "object_id"]),
+    columns=["size", "counts", "bbox", "class", "score"],
+)
+
+# ---- Save to Parquet ----
+parquet_path = os.path.join(
+    args.save_dir,
+    f"{os.path.basename(os.path.normpath(args.video_dir))}_{args.size}.parquet",
+)
+df.to_parquet(parquet_path, index=True, engine="pyarrow")
+print(f"[INFO] Saved annotations DataFrame (parquet) at: {parquet_path}")
+
+
 video_writer.release()
 print(f"Video saved at {output_video_path}")
 
