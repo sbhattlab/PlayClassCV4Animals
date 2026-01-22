@@ -8,7 +8,24 @@ ln -s  "$HOME/Library/CloudStorage/OneDrive-UniversityofCopenhagen/IFSV/proj/chi
 ln -s "/mnt/birds/rebecca2025/raw" video-data
 ```
 
+# Recreate main environemnt
+```sh
+mamba env create -p ENV/chicken-behav/ENV.yml && mamba activate -y
+uv pip install ENV/chicken-behav/requirements_linux.txt 
+```
+
 # Methods tested
-- Pre-trained dlc model
-- YOLO pose estimation based model trained on dlc points
-- Grounded-SAM-2 
+- Background‑subtraction–based multi‑object tracking (trad.)
+    - OpenCV + SciPy (Segmentation‑based MOT with Hungarian assignment)
+- Object tracking (trad.)
+    - YOLO (yolo11x)
+- Pose-estimation with fine-tuning data from bespoke dataset
+    - Pre-trained dlc model 
+    - YOLO model (yolo11x-pose) finetuned on dlc-derived points
+- Segmenter
+    - Grounded-SAM-2 (segmentation) – so far, best overall 
+    - SAM3 (segmentation)
+
+# Future methods to test
+- DINOv2/v3-derived features
+    - Possibly adding trad. bbox object tracking or segmenter as preprocessing step to isolate subjects
