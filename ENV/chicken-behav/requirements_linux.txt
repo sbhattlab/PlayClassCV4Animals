@@ -18,6 +18,7 @@ debugpy==1.8.19
 decorator==5.2.1
 deeplabcut2yolo==2.2.8
 defusedxml==0.7.1
+et-xmlfile==2.0.0
 executing==2.2.1
 fastjsonschema==2.21.2
 filelock==3.20.2
@@ -86,6 +87,7 @@ nvidia-nvjitlink-cu12==12.8.93
 nvidia-nvshmem-cu12==3.3.20
 nvidia-nvtx-cu12==12.8.90
 opencv-python==4.11.0.86
+openpyxl==3.1.5
 packaging @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_packaging_1745345660/work
 pandas==2.3.3
 pandocfilters==1.5.1
