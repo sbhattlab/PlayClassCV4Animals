@@ -1,3 +1,5 @@
+import contextlib
+import gc
 import json
 import os
 from argparse import ArgumentParser
@@ -12,6 +14,7 @@ import torch
 from PIL import Image
 from sam2.build_sam import build_sam2, build_sam2_video_predictor
 from sam2.sam2_image_predictor import SAM2ImagePredictor
+from simpler_timer import SimplerTimer
 from tqdm import tqdm
 from utils.track_utils import sample_points_from_masks
 from utils.video_utils import create_video_from_images
@@ -115,6 +118,8 @@ def single_mask_to_rle(mask):
     return rle
 
 
+timer = SimplerTimer()
+
 # -----------------------
 # Begin main script logic
 # -----------------------
@@ -135,9 +140,11 @@ gs2_repo_path = Path(args.gs2_repo_path)
 assert gs2_repo_path.exists(), "Grounded-SAM-2 repo path not found."
 
 # Mixed precision setup
-torch.autocast(
-    device_type="cuda" if device.type == "cuda" else "cpu", dtype=torch.bfloat16
-).__enter__()
+# torch.autocast(
+#     device_type="cuda" if device.type == "cuda" else "cpu", dtype=torch.bfloat16
+# ).__enter__()
+
+use_amp = device.type == "cuda"
 
 if device.type == "cuda" and torch.cuda.get_device_properties(device.index).major >= 8:
     torch.backends.cuda.matmul.allow_tf32 = True
@@ -203,6 +210,11 @@ if args.mask_file is None:
 
     # run Grounding DINO on the image
     inputs = processor(images=image, text=text, return_tensors="pt").to(device)
+    amp_ctx = (
+        torch.autocast(device_type="cuda", dtype=torch.bfloat16)
+        if use_amp
+        else contextlib.nullcontext()
+    )
     with torch.no_grad():
         outputs = grounding_model(**inputs)
 
@@ -214,6 +226,12 @@ if args.mask_file is None:
         text_threshold=args.text_threshold,
         target_sizes=[image.size[::-1]],
     )
+
+    # Free DINO inputs/outputs ASAP
+    del outputs, inputs
+    if device.type == "cuda":
+        torch.cuda.empty_cache()
+    gc.collect()
 
     # prompt SAM image predictor to get the mask for the object
     image_predictor.set_image(np.array(image.convert("RGB")))
@@ -340,140 +358,328 @@ else:
 ###
 # Step 4: Propagate the video predictor to get the segmentation results for each frame
 ###
-video_segments = {}  # video_segments contains the per-frame segmentation results
-for out_frame_idx, out_obj_ids, out_mask_logits in video_predictor.propagate_in_video(
-    inference_state
-):
-    video_segments[out_frame_idx] = {
-        out_obj_id: (out_mask_logits[i] > 0.0).cpu().numpy()
-        for i, out_obj_id in enumerate(out_obj_ids)
-    }
+# video_segments = {}  # video_segments contains the per-frame segmentation results
 
-###
-# Step 5: Visualize the segment results across the video and save them
-###
 
+# --- Prepare writers / outputs ---
 if not os.path.exists(args.save_dir):
     os.makedirs(args.save_dir)
 
-# load the first image to get the dimensions of the video
 output_video_path = f"{args.save_dir}/{os.path.basename(os.path.normpath(args.video_dir))}_{args.size}.mp4"
 
 first_image_path = os.path.join(video_dir, frame_names[0])
 first_image = cv2.imread(first_image_path)
 height, width, _ = first_image.shape
 
-# create a video writer
-fourcc = cv2.VideoWriter_fourcc(*"mp4v")  # codec for saving the video
+fourcc = cv2.VideoWriter_fourcc(*"mp4v")
 video_writer = cv2.VideoWriter(output_video_path, fourcc, args.fps, (width, height))
 
-all_results = {}
+# Optional: stream JSON as JSONL to avoid storing everything in RAM
+jsonl_path = os.path.join(
+    args.save_dir,
+    f"{os.path.basename(os.path.normpath(args.video_dir))}_{args.size}.jsonl",
+)
+jsonl_fh = open(jsonl_path, "w", encoding="utf-8") if args.save_masks else None
 
 ID_TO_OBJECTS = dict(enumerate(OBJECTS, start=1))
-for frame_idx, segments in tqdm(video_segments.items(), desc="Annotating frames"):
-    img_path = os.path.join(video_dir, frame_names[frame_idx])
+
+box_annotator = sv.BoxAnnotator()
+label_annotator = sv.LabelAnnotator()
+mask_annotator = sv.MaskAnnotator()
+
+
+# --- Stream processing directly from predictor ---
+for out_frame_idx, out_obj_ids, out_mask_logits in tqdm(
+    video_predictor.propagate_in_video(inference_state),
+    desc="Propagate + annotate (streaming)",
+):
+    # Threshold and move to CPU ASAP
+    # out_mask_logits: (num_objs, 1, H, W) or similar
+    mask_batch = (out_mask_logits > 0.0).to("cpu").numpy()
+    # Ensure shape (n, H, W)
+    if mask_batch.ndim == 4:
+        mask_batch = mask_batch.squeeze(1)  # (n, H, W)
+
+    object_ids = list(out_obj_ids)
+    # Compose detections per-frame
+    input_boxes = sv.mask_to_xyxy(mask_batch)
+
+    # Read frame and annotate
+    img_path = os.path.join(video_dir, frame_names[out_frame_idx])
     img = cv2.imread(img_path)
 
-    object_ids = list(segments.keys())
-    masks = list(segments.values())
-    masks = np.concatenate(masks, axis=0)
-
-    input_boxes = sv.mask_to_xyxy(masks)
-
-    if args.save_masks:
-        frame_dict = {}
-
-        for idx, obj_id in enumerate(object_ids):
-            mask = masks[idx]
-            mask_rle = single_mask_to_rle(mask)
-            bbox = sv.mask_to_xyxy(mask[None, ...])[0].tolist()
-
-            class_name = ID_TO_OBJECTS[obj_id]
-            score = dino_scores[obj_id - 1]
-
-            frame_dict[obj_id] = {
-                "class_name": class_name,
-                "score": float(score),
-                "segmentation": mask_rle,
-                "bbox": bbox,
-            }
-
-        all_results[frame_idx] = frame_dict
-
     detections = sv.Detections(
-        xyxy=input_boxes,  # (n, 4)
-        mask=masks,  # (n, h, w)
+        xyxy=input_boxes,
+        mask=mask_batch,
         class_id=np.array(object_ids, dtype=np.int32),
     )
-    box_annotator = sv.BoxAnnotator()
-    annotated_frame = box_annotator.annotate(scene=img.copy(), detections=detections)
-    label_annotator = sv.LabelAnnotator()
+
+    annotated_frame = img.copy()
+    annotated_frame = box_annotator.annotate(
+        scene=annotated_frame, detections=detections
+    )
     annotated_frame = label_annotator.annotate(
         annotated_frame,
         detections=detections,
         labels=[ID_TO_OBJECTS[i] for i in object_ids],
     )
-    mask_annotator = sv.MaskAnnotator()
     annotated_frame = mask_annotator.annotate(
         scene=annotated_frame, detections=detections
     )
+
     video_writer.write(annotated_frame)
     if args.save_images:
         cv2.imwrite(
-            os.path.join(args.save_dir, f"annotated_frame_{frame_idx:05d}.jpg"),
+            os.path.join(args.save_dir, f"annotated_frame_{out_frame_idx:05d}.jpg"),
             annotated_frame,
         )
 
-output_json_path = os.path.join(
-    args.save_dir,
-    f"{os.path.basename(os.path.normpath(args.video_dir))}_{args.size}.json",
-)
-with open(output_json_path, "w", encoding="utf-8") as f:
-    json.dump(all_results, f, indent=4)
+    # Stream mask metadata as JSONL (one line per frame)
+    if args.save_masks:
+        frame_dict = {}
+        for idx, obj_id in enumerate(object_ids):
+            mask = mask_batch[idx]
+            mask_rle = single_mask_to_rle(mask)
+            bbox = sv.mask_to_xyxy(mask[None, ...])[0].tolist()
+            class_name = ID_TO_OBJECTS[obj_id]
+            # dino_scores are from first frame detections; guard if fewer object_ids than dino_scores
+            score = (
+                float(dino_scores[obj_id - 1])
+                if (obj_id - 1) < len(dino_scores)
+                else float("nan")
+            )
 
-print(f"[INFO] Saved masks JSON at: {output_json_path}")
+            frame_dict[obj_id] = {
+                "class_name": class_name,
+                "score": score,
+                "segmentation": mask_rle,
+                "bbox": bbox,
+            }
 
+        # Write one compact JSON record for the frame
+        json_record = {"frame": int(out_frame_idx), "objects": frame_dict}
+        jsonl_fh.write(json.dumps(json_record) + "\n")
+        jsonl_fh.flush()
 
-# ---- Build MultiIndex DataFrame: (frame, object_id) ----
-records = []
-mi_tuples = []
+    # Proactively free memory this iteration
+    del mask_batch, detections, annotated_frame, img, input_boxes
+    if device.type == "cuda":
+        torch.cuda.empty_cache()
+    gc.collect()
 
-# Sort for deterministic ordering
-for frame_idx in sorted(all_results.keys()):
-    obj_map = all_results[frame_idx]
-    for obj_id in sorted(obj_map.keys()):
-        det = obj_map[obj_id]
-        rle = det["segmentation"]  # {'size': [H, W], 'counts': str}
-        size = rle.get("size", None)  # [H, W]
-        counts = rle.get("counts", None)  # str (RLE)
-        bbox = det.get("bbox", None)  # [x1, y1, x2, y2]
-        cls = det.get("class_name", None)
-        score = det.get("score", None)
-
-        # Ensure empty string classes become NaN
-        if isinstance(cls, str) and cls.strip() == "":
-            cls = np.nan
-
-        records.append([size, counts, bbox, cls, score])
-        mi_tuples.append((int(frame_idx), int(obj_id)))
-
-df = pd.DataFrame(
-    records,
-    index=pd.MultiIndex.from_tuples(mi_tuples, names=["frame", "object_id"]),
-    columns=["size", "counts", "bbox", "class", "score"],
-)
-
-# ---- Save to Parquet ----
-parquet_path = os.path.join(
-    args.save_dir,
-    f"{os.path.basename(os.path.normpath(args.video_dir))}_{args.size}.parquet",
-)
-df.to_parquet(parquet_path, index=True, engine="pyarrow")
-print(f"[INFO] Saved annotations DataFrame (parquet) at: {parquet_path}")
-
-
+# Close handles
 video_writer.release()
+if jsonl_fh:
+    jsonl_fh.close()
+
 print(f"Video saved at {output_video_path}")
+if args.save_masks:
+    print(f"[INFO] Streamed per-frame JSONL saved at: {jsonl_path}")
+
+
+# Optional post-pass to build Parquet without huge RAM usage
+if args.save_masks:
+    parquet_path = os.path.join(
+        args.save_dir,
+        f"{os.path.basename(os.path.normpath(args.video_dir))}_{args.size}.parquet",
+    )
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    schema = pa.schema(
+        [
+            ("frame", pa.int32()),
+            ("object_id", pa.int32()),
+            ("size", pa.list_(pa.int32(), 2)),  # [H, W]
+            ("counts", pa.string()),
+            ("bbox", pa.list_(pa.float32(), 4)),
+            ("class", pa.string()),
+            ("score", pa.float32()),
+        ]
+    )
+    writer = None
+
+    with open(jsonl_path, "r", encoding="utf-8") as fh:
+        batch_rows = []
+        for line in fh:
+            rec = json.loads(line)
+            frame_idx = rec["frame"]
+            for obj_id_str, det in rec["objects"].items():
+                obj_id = int(obj_id_str)
+                rle = det["segmentation"]
+                size = rle.get("size", None)
+                counts = rle.get("counts", None)
+                bbox = det.get("bbox", None)
+                cls = det.get("class_name", None)
+                score = det.get("score", None)
+                batch_rows.append(
+                    {
+                        "frame": frame_idx,
+                        "object_id": obj_id,
+                        "size": size,
+                        "counts": counts,
+                        "bbox": bbox,
+                        "class": cls
+                        if (isinstance(cls, str) and cls.strip() != "")
+                        else None,
+                        "score": None if score is None else float(score),
+                    }
+                )
+                # Flush in chunks to keep memory low
+                if len(batch_rows) >= 2048:
+                    table = pa.Table.from_pylist(batch_rows, schema=schema)
+                    if writer is None:
+                        writer = pq.ParquetWriter(parquet_path, schema)
+                    writer.write_table(table)
+                    batch_rows = []
+
+        # Flush the tail
+        if batch_rows:
+            table = pa.Table.from_pylist(batch_rows, schema=schema)
+            if writer is None:
+                writer = pq.ParquetWriter(parquet_path, schema)
+            writer.write_table(table)
+
+    if writer is not None:
+        writer.close()
+    print(f"[INFO] Saved annotations DataFrame (parquet) at: {parquet_path}")
+
+
+# for out_frame_idx, out_obj_ids, out_mask_logits in video_predictor.propagate_in_video(
+#     inference_state
+# ):
+#     video_segments[out_frame_idx] = {
+#         out_obj_id: (out_mask_logits[i] > 0.0).cpu().numpy()
+#         for i, out_obj_id in enumerate(out_obj_ids)
+#     }
+
+# ###
+# # Step 5: Visualize the segment results across the video and save them
+# ###
+
+# if not os.path.exists(args.save_dir):
+#     os.makedirs(args.save_dir)
+
+# # load the first image to get the dimensions of the video
+# output_video_path = f"{args.save_dir}/{os.path.basename(os.path.normpath(args.video_dir))}_{args.size}.mp4"
+
+# first_image_path = os.path.join(video_dir, frame_names[0])
+# first_image = cv2.imread(first_image_path)
+# height, width, _ = first_image.shape
+
+# # create a video writer
+# fourcc = cv2.VideoWriter_fourcc(*"mp4v")  # codec for saving the video
+# video_writer = cv2.VideoWriter(output_video_path, fourcc, args.fps, (width, height))
+
+# all_results = {}
+
+# ID_TO_OBJECTS = dict(enumerate(OBJECTS, start=1))
+# for frame_idx, segments in tqdm(video_segments.items(), desc="Annotating frames"):
+#     img_path = os.path.join(video_dir, frame_names[frame_idx])
+#     img = cv2.imread(img_path)
+
+#     object_ids = list(segments.keys())
+#     masks = list(segments.values())
+#     masks = np.concatenate(masks, axis=0)
+
+#     input_boxes = sv.mask_to_xyxy(masks)
+
+#     if args.save_masks:
+#         frame_dict = {}
+
+#         for idx, obj_id in enumerate(object_ids):
+#             mask = masks[idx]
+#             mask_rle = single_mask_to_rle(mask)
+#             bbox = sv.mask_to_xyxy(mask[None, ...])[0].tolist()
+
+#             class_name = ID_TO_OBJECTS[obj_id]
+#             score = dino_scores[obj_id - 1]
+
+#             frame_dict[obj_id] = {
+#                 "class_name": class_name,
+#                 "score": float(score),
+#                 "segmentation": mask_rle,
+#                 "bbox": bbox,
+#             }
+
+#         all_results[frame_idx] = frame_dict
+
+#     detections = sv.Detections(
+#         xyxy=input_boxes,  # (n, 4)
+#         mask=masks,  # (n, h, w)
+#         class_id=np.array(object_ids, dtype=np.int32),
+#     )
+#     box_annotator = sv.BoxAnnotator()
+#     annotated_frame = box_annotator.annotate(scene=img.copy(), detections=detections)
+#     label_annotator = sv.LabelAnnotator()
+#     annotated_frame = label_annotator.annotate(
+#         annotated_frame,
+#         detections=detections,
+#         labels=[ID_TO_OBJECTS[i] for i in object_ids],
+#     )
+#     mask_annotator = sv.MaskAnnotator()
+#     annotated_frame = mask_annotator.annotate(
+#         scene=annotated_frame, detections=detections
+#     )
+#     video_writer.write(annotated_frame)
+#     if args.save_images:
+#         cv2.imwrite(
+#             os.path.join(args.save_dir, f"annotated_frame_{frame_idx:05d}.jpg"),
+#             annotated_frame,
+#         )
+
+# output_json_path = os.path.join(
+#     args.save_dir,
+#     f"{os.path.basename(os.path.normpath(args.video_dir))}_{args.size}.json",
+# )
+# with open(output_json_path, "w", encoding="utf-8") as f:
+#     json.dump(all_results, f, indent=4)
+
+# print(f"[INFO] Saved masks JSON at: {output_json_path}")
+
+
+# # ---- Build MultiIndex DataFrame: (frame, object_id) ----
+# records = []
+# mi_tuples = []
+
+# # Sort for deterministic ordering
+# for frame_idx in sorted(all_results.keys()):
+#     obj_map = all_results[frame_idx]
+#     for obj_id in sorted(obj_map.keys()):
+#         det = obj_map[obj_id]
+#         rle = det["segmentation"]  # {'size': [H, W], 'counts': str}
+#         size = rle.get("size", None)  # [H, W]
+#         counts = rle.get("counts", None)  # str (RLE)
+#         bbox = det.get("bbox", None)  # [x1, y1, x2, y2]
+#         cls = det.get("class_name", None)
+#         score = det.get("score", None)
+
+#         # Ensure empty string classes become NaN
+#         if isinstance(cls, str) and cls.strip() == "":
+#             cls = np.nan
+
+#         records.append([size, counts, bbox, cls, score])
+#         mi_tuples.append((int(frame_idx), int(obj_id)))
+
+# df = pd.DataFrame(
+#     records,
+#     index=pd.MultiIndex.from_tuples(mi_tuples, names=["frame", "object_id"]),
+#     columns=["size", "counts", "bbox", "class", "score"],
+# )
+
+# # ---- Save to Parquet ----
+# parquet_path = os.path.join(
+#     args.save_dir,
+#     f"{os.path.basename(os.path.normpath(args.video_dir))}_{args.size}.parquet",
+# )
+# df.to_parquet(parquet_path, index=True, engine="pyarrow")
+# print(f"[INFO] Saved annotations DataFrame (parquet) at: {parquet_path}")
+
+
+# video_writer.release()
+# print(f"Video saved at {output_video_path}")
 
 if args.create_video:
     create_video_from_images(args.save_dir, output_video_path)
+
+timer.end()
