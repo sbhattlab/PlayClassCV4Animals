@@ -17,13 +17,13 @@ uv pip install ENV/chicken-behav/requirements_linux.txt
 # Methods tested
 - Background‑subtraction–based multi‑object tracking (trad.)
     - OpenCV + SciPy (Segmentation‑based MOT with Hungarian assignment)
-- Object tracking (trad.)
+- Object detection (trad.)
     - YOLO (yolo11x)
-- Pose-estimation with fine-tuning data from bespoke dataset
-    - Pre-trained dlc model 
+- Pose-estimation w/ fine-tuning from manually-labelled data
+    - Pre-trained DeepLabCut model 
     - YOLO model (yolo11x-pose) finetuned on dlc-derived points
 - Segmenter
-    - Grounded-SAM-2 (segmentation) – so far, best overall 
+    - Grounded-SAM-2 (segmentation) – **best overall, so far**
     - SAM3 (segmentation)
 
 # Future methods to test
