@@ -483,4 +483,4 @@ video_writer.release()
 print(f"Video saved at {output_video_path}")
 
 if args.create_video:
-    create_video_from_images(args.save_dir, output_video_path)
+    create_video_from_images(args.save_dir, output_video_path, frame_rate=args.fps)
