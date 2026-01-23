@@ -181,8 +181,16 @@ frame_names = [
 frame_names.sort(key=lambda p: int(os.path.splitext(p)[0]))
 
 # init video predictor state
+# enable pseudo frame streaming
+# by enabling async frame loader
+# offloading the stored state to CPU
+# in addition to not storing loaded frames and manually stopping the loader from trying to get ahead of the model, as per https://github.com/facebookresearch/sam2/issues/264#issuecomment-2315805429
+# and https://github.com/facebookresearch/sam2/issues/196#issuecomment-2286352777
 inference_state = video_predictor.init_state(
-    video_path=video_dir, offload_video_to_cpu=True
+    video_path=video_dir,
+    # offload_video_to_cpu= True,
+    offload_state_to_cpu=True,
+    async_loading_frames=True,
 )
 
 ann_frame_idx = 0  # the frame index we interact with
@@ -209,7 +217,6 @@ if args.mask_file is None:
     results = processor.post_process_grounded_object_detection(
         outputs,
         inputs.input_ids,
-        # box_threshold=args.box_threshold,
         threshold=args.box_threshold,
         text_threshold=args.text_threshold,
         target_sizes=[image.size[::-1]],
