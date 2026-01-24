@@ -184,7 +184,8 @@ def main():
     image_predictor = SAM2ImagePredictor(sam2_image_model)
 
     # Load GroundingDINO on selected device
-    model_id = "IDEA-Research/grounding-dino-tiny"
+    # model_id = "IDEA-Research/grounding-dino-tiny"
+    model_id = "IDEA-Research/grounding-dino-base"
     processor = AutoProcessor.from_pretrained(model_id)
     grounding_model = AutoModelForZeroShotObjectDetection.from_pretrained(model_id).to(
         device
