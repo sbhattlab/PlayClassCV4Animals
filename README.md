@@ -10,8 +10,7 @@ ln -s "/mnt/birds/rebecca2025/raw" video-data
 
 # Recreate main environemnt
 ```sh
-mamba env create -p ENV/chicken-behav/ENV.yml && mamba activate -y
-uv pip install ENV/chicken-behav/requirements_linux.txt 
+uv sync
 ```
 
 # Methods tested
