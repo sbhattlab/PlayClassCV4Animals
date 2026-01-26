@@ -26,9 +26,9 @@ pixi shell -e sam3-hf
     - YOLO model (yolo11x-pose)
 - Segmenter
     - OpenCV + SciPy (i.e. "pure" computer vision, virtually no pre-trained model-based prediction)
-    - Grounded-SAM-2 (segmentation) 
-    - SAM3 (segmentation) - **best overall, so far**
+    - Grounded-SAM-2  
+    - SAM3 
 
 # Future methods to test
 - DINOv2/v3-derived features
-    - Possibly adding trad. bbox object tracking or segmenter as preprocessing step to isolate subjects
+    - Possibly adding trad. object detector or segmenter as preprocessing step to isolate subjects
