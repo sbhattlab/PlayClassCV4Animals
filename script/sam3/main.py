@@ -22,6 +22,7 @@ from simpler_timer import SimplerTimer
 # NEW: TorchCodec imports
 from torchcodec.decoders import VideoDecoder
 from tqdm.auto import tqdm
+
 from transformers import Sam3VideoModel, Sam3VideoProcessor
 
 try:
@@ -305,8 +306,7 @@ def main():
             # Decode frame via TorchCodec: [C,H,W] uint8 RGB on CPU or CUDA
             frame_chw = decoder[current_idx]
             # Convert to HWC RGB on CPU for processor + BGR for drawing
-            frame_rgb = frame_chw.permute(1, 2, 0).contiguous().cpu().numpy()  # HWC RGB
-            frame_bgr = frame_rgb[..., ::-1]  # HWC BGR
+            frame_rgb = frame_chw.permute(1, 2, 0).contiguous().cpu().numpy()
 
             # Prepare per-frame inputs (processor usually on CPU), then move only the tensor to GPU
             inputs = processor(images=frame_rgb, device="cpu", return_tensors="pt")
@@ -369,6 +369,8 @@ def main():
             }
 
             # Visualization
+            # HWC RGB
+            frame_bgr = frame_rgb[..., ::-1]  # HWC BGR
             xyxy = ensure_xyxy_pixels(xyxy_np, frame_bgr)
             if xyxy is not None and len(xyxy) > 0:
                 n = xyxy.shape[0]
@@ -534,6 +536,12 @@ def main():
         df.to_parquet(output_parquet_p, index=True, engine="pyarrow")
         logger.info(f"Wrote Parquet: {output_parquet_p}")
 
+        reserved_gb = torch.cuda.memory_reserved() / (1024**3)
+        allocated_gb = torch.cuda.memory_allocated() / (1024**3)
+        logger.info(
+            f"[After chunk {chunk_idx}, PRE session purging] VRAM allocated={allocated_gb:.2f} GB | reserved={reserved_gb:.2f} GB"
+        )
+
         # Teardown (free session + VRAM)
         del inference_session, outputs_per_frame, all_results, df, frames_annotated_bgr
         gc.collect()
@@ -543,7 +551,7 @@ def main():
             reserved_gb = torch.cuda.memory_reserved() / (1024**3)
             allocated_gb = torch.cuda.memory_allocated() / (1024**3)
             logger.info(
-                f"[After chunk {chunk_idx}] VRAM allocated={allocated_gb:.2f} GB | reserved={reserved_gb:.2f} GB"
+                f"[After chunk {chunk_idx}, POST session purging] VRAM allocated={allocated_gb:.2f} GB | reserved={reserved_gb:.2f} GB"
             )
 
     logger.info("\n🎉 All chunks processed and saved.")
