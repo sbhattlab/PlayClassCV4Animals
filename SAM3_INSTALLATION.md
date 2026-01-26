@@ -1,5 +1,13 @@
 # SAM3 installation instructions
 - Get approval for sam3 weights on huggingface
+
+# NEW METHOD
+```sh
+cd ENV/sam3
+uv sync
+```
+
+# OLD METHOD 
 - Clone / fetch git submodule for sam3, transformers
 ```
 mamba create -n sam3 python=3.12 uv ffmpeg nvidia::cudatoolkit -y

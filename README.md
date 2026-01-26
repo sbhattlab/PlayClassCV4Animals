@@ -22,8 +22,8 @@ uv pip install ENV/chicken-behav/requirements_linux.txt
     - YOLO model (yolo11x-pose)
 - Segmenter
     - OpenCV + SciPy (i.e. "pure" computer vision, virtually no pre-trained model-based prediction)
-    - Grounded-SAM-2 (segmentation) – **best overall, so far**
-    - SAM3 (segmentation)
+    - Grounded-SAM-2 (segmentation) 
+    - SAM3 (segmentation) - **best overall, so far**
 
 # Future methods to test
 - DINOv2/v3-derived features
