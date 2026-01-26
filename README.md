@@ -8,9 +8,14 @@ ln -s  "$HOME/Library/CloudStorage/OneDrive-UniversityofCopenhagen/IFSV/proj/chi
 ln -s "/mnt/birds/rebecca2025/raw" video-data
 ```
 
-# Recreate main environemnt
+# Environment
 ```sh
-uv sync
+# Main environment
+pixi install
+# All environments
+pixi install --all
+# Launch shell in specific environment
+pixi shell -e sam3-hf
 ```
 
 # Methods tested

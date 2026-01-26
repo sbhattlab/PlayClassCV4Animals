@@ -1,58 +1,77 @@
 [project]
-name = "chicken-behav"
+name = "chicken-behav-classifier"
 version = "0.1.0"
-description = "Add your description here"
-readme = "README.md"
 requires-python = ">=3.11,<3.12"
-dependencies = [
-    "accelerate>=1.12.0",
-    "accelerator>=2025.11.11",
-    "av>=16.1.0",
-    "kernels>=0.12.0",
-    "loguru>=0.7.3",
-    "matplotlib>=3.10.8",
-    "numpy>=1.26.4",
-    "opencv-python>=4.11.0.86",
-    "pandas>=3.0.0",
-    "pillow>=12.1.0",
-    "pyarrow>=23.0.0",
-    "pycocotools>=2.0.11",
-    "sam3>=0.1.0",
-    "simpler-timer>=0.0.2",
-    "supervision>=0.27.0",
-    "tqdm>=4.67.1",
-    "transformers",
-    "torchcodec==0.9",
-    # --- Linux/x86_64 CUDA 12.6 (align to cv_utils build) ---
-    "torch==2.9.1+cu126; sys_platform == 'linux' and platform_machine == 'x86_64'",
-    "torchvision==0.24.1+cu126; sys_platform == 'linux' and platform_machine == 'x86_64'",
-    # --- macOS fallback (MPS/CPU) ---
-    "torch>=2.10.0; sys_platform == 'darwin'",
-    "torchvision>=0.25.0; sys_platform == 'darwin'",
-    "seaborn>=0.13.2",
-    "scipy>=1.17.0",
-    "jupyter>=1.1.1",
-    "ipykernel>=7.1.0",
-    "ipywidgets>=8.1.8",
-    "ipython>=9.9.0",
-]
 
-[tool.uv.sources]
-sam3 = { git = "https://github.com/facebookresearch/sam3", rev = "11dec2936de97f2857c1f76b66d982d5a001155d" }
-transformers = { git = "https://github.com/huggingface/transformers", rev = "v5.0.0rc2" }
+[tool.pixi.workspace]
+channels = ["conda-forge"]
+platforms = ["linux-64"]
 
-# Route CUDA packages only on Linux/x86_64 to the cu126 index
-torch = [
-    { index = "pytorch-cu126", marker = "sys_platform == 'linux' and platform_machine == 'x86_64'" },
-]
-torchvision = [
-    { index = "pytorch-cu126", marker = "sys_platform == 'linux' and platform_machine == 'x86_64'" },
-]
-torchcodec = [
-    { index = "pytorch-cu126", marker = "sys_platform == 'linux' and platform_machine == 'x86_64'" },
-]
+[tool.pixi.dependencies]
+python = ">=3.11,<3.12"
+ffmpeg = "==8.0.1"
 
 [[tool.uv.index]]
 name = "pytorch-cu126"
 url = "https://download.pytorch.org/whl/cu126"
 explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu126" }
+torchvision = { index = "pytorch-cu126" }
+
+[tool.pixi.feature.sam3-hf.pypi-dependencies]
+transformers = { git = "https://github.com/huggingface/transformers", rev = "v5.0.0rc2" }
+accelerate = ">=1.12.0"
+ftfy = "==6.1.1"
+simpler-timer = ">=0.0.2"
+supervision = ">=0.27.0"
+av = ">=16.1.0"
+numpy = ">=1.26.4"
+opencv-python = "*"
+pillow = "*"
+loguru = ">=0.7.3"
+tqdm = "*"
+pandas = ">=3.0.0"
+pycocotools = ">=2.0.11"
+kernels = ">=0.12.0"
+ipywidgets = ">=8.1.8"
+ipykernel = ">=7.1.0"
+ipython = "*"
+jupyter = ">=1.1.1"
+
+[tool.pixi.feature.sam3-native.pypi-dependencies]
+sam3 = { git = "https://github.com/facebookresearch/sam3", rev = "11dec2936de97f2857c1f76b66d982d5a001155d" }
+transformers = { git = "https://github.com/huggingface/transformers", rev = "v5.0.0rc2" }
+accelerate = ">=1.12.0"
+ftfy = "==6.1.1"
+simpler-timer = ">=0.0.2"
+supervision = ">=0.27.0"
+av = ">=16.1.0"
+numpy = ">=1.26.4"
+opencv-python = "*"
+pillow = "*"
+loguru = ">=0.7.3"
+tqdm = "*"
+pandas = ">=3.0.0"
+pycocotools = ">=2.0.11"
+kernels = ">=0.12.0"
+ipywidgets = ">=8.1.8"
+ipykernel = ">=7.1.0"
+jupyter = ">=1.1.1"
+
+[tool.pixi.feature.cuda]
+platforms = ["linux-64"]
+
+[tool.pixi.feature.cuda.pypi-options]
+extra-index-urls = ["https://download.pytorch.org/whl/cu126"]
+index-strategy = "unsafe-best-match"
+
+[tool.pixi.feature.cuda.pypi-dependencies]
+torch = "==2.9.1+cu126"
+torchvision = "==0.24.1+cu126"
+torchcodec = "==0.9"
+
+[tool.pixi.environments]
+sam3-hf = { features = ["sam3-hf", "cuda"], solve-group = "default" }
+sam3-native = { features = ["sam3-native", "cuda"], solve-group = "default" }
