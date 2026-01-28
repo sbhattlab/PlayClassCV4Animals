@@ -1,13 +1,13 @@
 import logging
-import sys
 from pathlib import Path
 
-# Add workspace root to Python path
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
+import matplotlib
+import numpy as np
 import torch
 from PIL import Image
 from transformers import Sam3Model, Sam3Processor
+
+from script.sam3.utils import autoselect_torch_device
 
 # Configure logging
 logging.basicConfig(
@@ -16,23 +16,24 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def autoselect_torch_device():
-    """
-    Automatically selects the best available PyTorch device:
-    - Prioritizes CUDA if available.
-    - Fallback to MPS if CUDA is not available.
-    - Default to CPU if neither CUDA nor MPS are available.
+def overlay_masks(image, masks):
+    image = image.convert("RGBA")
+    masks = 255 * masks.cpu().numpy().astype(np.uint8)
 
-           torch.device: The selected device.
-    """
-    if torch.cuda.is_available():
-        device = torch.device("cuda")
-    elif torch.backends.mps.is_available():
-        device = torch.device("mps")
-    else:
-        device = torch.device("cpu")
+    n_masks = masks.shape[0]
+    cmap = matplotlib.colormaps.get_cmap("rainbow").resampled(n_masks)
+    colors = [tuple(int(c * 255) for c in cmap(i)[:3]) for i in range(n_masks)]
 
-    return device
+    for mask, color in zip(masks, colors):
+        mask = Image.fromarray(mask)
+        # Resize mask to match image dimensions if needed
+        if mask.size != image.size:
+            mask = mask.resize(image.size, Image.Resampling.NEAREST)
+        overlay = Image.new("RGBA", image.size, color + (0,))
+        alpha = mask.point(lambda v: int(v * 0.5))
+        overlay.putalpha(alpha)
+        image = Image.alpha_composite(image, overlay)
+    return image
 
 
 TEXT = "bird"
@@ -66,4 +67,14 @@ results = processor.post_process_instance_segmentation(
 )[0]
 
 print(f"Found {len(results['masks'])} objects")
+
+# Overlay masks on the image and save
+logger.info("Overlaying masks on image...")
+output_dir = Path("sandbox")
+output_dir.mkdir(exist_ok=True)
+result_image = overlay_masks(image.copy(), results["masks"])
+output_path = output_dir / "sam3_hf_image_result.png"
+result_image.save(output_path)
+logger.info(f"Saved result image to {output_path}")
+
 logger.info("Test completed successfully.")

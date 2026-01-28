@@ -1,9 +1,5 @@
 import logging
-import sys
 from pathlib import Path
-
-# Add workspace root to Python path
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import matplotlib
 import matplotlib.pyplot as plt
@@ -14,6 +10,8 @@ from transformers import Sam3VideoModel, Sam3VideoProcessor
 from transformers.video_utils import load_video
 
 from script.sam3.utils import autoselect_torch_device
+
+TEXT = "bird"
 
 
 def overlay_masks(image, masks):
@@ -51,9 +49,10 @@ processor = Sam3VideoProcessor.from_pretrained("facebook/sam3")
 
 # Load video frames
 logger.info("Loading test video...")
-video_url = "https://huggingface.co/datasets/hf-internal-testing/sam2-fixtures/resolve/main/bedroom.mp4"
-video_frames, _ = load_video(video_url)
-logger.info(f"Loaded video from {video_url}")
+# video_url = "https://huggingface.co/datasets/hf-internal-testing/sam2-fixtures/resolve/main/bedroom.mp4"
+video_frames, _ = load_video("data/test_15_sec.mp4")
+# logger.info(f"Loaded video from {video_url}")
+logger.info(f"Loaded video with {len(video_frames)} frames")
 
 # Initialize video inference session
 logger.info("Initializing video inference session...")
@@ -65,19 +64,18 @@ inference_session = processor.init_video_session(
     dtype=torch.bfloat16,
 )
 
-# Add text prompt to detect and track objects
-text = "person"
-logger.info(f"Adding text prompt to inference session: {text}")
+# Add TEXT prompt to detect and track objects
+logger.info(f"Adding text prompt to inference session: {TEXT}")
 inference_session = processor.add_text_prompt(
     inference_session=inference_session,
-    text=text,
+    text=TEXT,
 )
 
 # Process all frames in the video
 logger.info("Processing video frames...")
 outputs_per_frame = {}
 for model_outputs in model.propagate_in_video_iterator(
-    inference_session=inference_session, max_frame_num_to_track=25
+    inference_session=inference_session, max_frame_num_to_track=25 * 5
 ):
     processed_outputs = processor.postprocess_outputs(inference_session, model_outputs)
     outputs_per_frame[model_outputs.frame_idx] = processed_outputs
@@ -97,8 +95,15 @@ print(f"Masks shape: {frame_0_outputs['masks'].shape}")
 
 # Convert numpy array to PIL Image
 output_img_path = "sandbox/sam3-hf-video-frame-0-masks.png"
-frame_0_image = Image.fromarray(video_frames[0]).convert("RGB")
-Path("sandbox").mkdir(exist_ok=True)
-frame_0_image_with_masks = overlay_masks(frame_0_image, frame_0_outputs["masks"])
-frame_0_image_with_masks.save(output_img_path)
-logger.info(f"Saved frame 0 with masks overlay to {output_img_path}")
+for i in range(0, 25 * 5, 25):
+    frame_image = Image.fromarray(video_frames[i]).convert("RGB")
+    frame_image_with_masks = overlay_masks(frame_image, outputs_per_frame[i]["masks"])
+    frame_image_with_masks.save(f"sandbox/sam3-hf-video-frame-{i}-masks.png")
+    logger.info(
+        f"Saved frame {i} with masks overlay to sandbox/sam3-hf-video-frame-{i}-masks.png"
+    )
+# frame_0_image = Image.fromarray(video_frames[0]).convert("RGB")
+# Path("sandbox").mkdir(exist_ok=True)
+# frame_0_image_with_masks = overlay_masks(frame_0_image, frame_0_outputs["masks"])
+# frame_0_image_with_masks.save(output_img_path)
+# logger.info(f"Saved frame 0 with masks overlay to {output_img_path}")

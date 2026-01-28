@@ -73,12 +73,12 @@ torchvision = "==0.24.1"
 torchcodec = "==0.9"
 
 [tool.pixi.feature.cuda.tasks]
-test-sam3-hf-image = "python test/sam3-hf-basic-image.py"
-test-sam3-hf-video = "python test/sam3-hf-basic-video.py"
+test-sam3-hf-image = "python -m test.sam3-hf-basic-image"
+test-sam3-hf-video = "python -m test.sam3-hf-basic-video"
 
 [tool.pixi.feature.macos.tasks]
-test-sam3-hf-image = "python test/sam3-hf-basic-image.py"
-test-sam3-hf-video = "python test/sam3-hf-basic-video.py"
+test-sam3-hf-image = "python -m test.sam3-hf-basic-image"
+test-sam3-hf-video = "python -m test.sam3-hf-basic-video"
 
 [tool.pixi.environments]
 sam3-hf = { features = ["sam3-hf", "cuda"], solve-group = "cuda" }

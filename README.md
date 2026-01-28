@@ -32,10 +32,11 @@ pixi shell -e sam3-hf
 
 # Overview of currently implemented test scripts
 ```sh
-# SAM3-hf
-pixi run test-sam3-hf
+# SAM3-hf (select appropriate environment in interactive prompt)
+pixi run test-sam3-hf-image
+pixi run test-sam3-hf-video
 ```
 
-# Future methods to test
+# Future methods to implemented
 - DINOv2/v3-derived features
     - Possibly adding trad. object detector or segmenter as preprocessing step to isolate subjects
