@@ -10,7 +10,7 @@ from PIL import Image
 from transformers import Sam3VideoModel, Sam3VideoProcessor
 from transformers.video_utils import load_video
 
-from script.sam3.utils import autoselect_torch_device
+from src.utils import autoselect_torch_device
 
 TEXT = "bird"
 

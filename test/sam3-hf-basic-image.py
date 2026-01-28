@@ -8,7 +8,7 @@ import torch
 from PIL import Image
 from transformers import Sam3Model, Sam3Processor
 
-from script.sam3.utils import autoselect_torch_device
+from src.utils import autoselect_torch_device
 
 # Configure logging
 logging.basicConfig(
