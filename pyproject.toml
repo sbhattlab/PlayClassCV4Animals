@@ -5,20 +5,12 @@ requires-python = ">=3.11,<3.12"
 
 [tool.pixi.workspace]
 channels = ["conda-forge"]
-platforms = ["linux-64"]
+platforms = ["linux-64", "osx-arm64"]
 
 [tool.pixi.dependencies]
 python = ">=3.11,<3.12"
 ffmpeg = "==8.0.1"
-
-[[tool.uv.index]]
-name = "pytorch-cu126"
-url = "https://download.pytorch.org/whl/cu126"
-explicit = true
-
-[tool.uv.sources]
-torch = { index = "pytorch-cu126" }
-torchvision = { index = "pytorch-cu126" }
+pkg-config = "*"
 
 [tool.pixi.feature.sam3-hf.pypi-dependencies]
 transformers = { git = "https://github.com/huggingface/transformers", rev = "v5.0.0rc2" }
@@ -72,6 +64,25 @@ torch = "==2.9.1+cu126"
 torchvision = "==0.24.1+cu126"
 torchcodec = "==0.9"
 
+[tool.pixi.feature.macos]
+platforms = ["osx-arm64"]
+
+[tool.pixi.feature.macos.pypi-dependencies]
+torch = "==2.9.1"
+torchvision = "==0.24.1"
+torchcodec = "==0.9"
+
+[tool.pixi.feature.cuda.tasks]
+test-sam3-hf = "python test/sam3-hf-basic-image.py"
+
+[tool.pixi.feature.macos.tasks]
+test-sam3-hf = "python test/sam3-hf-basic-image.py"
+
 [tool.pixi.environments]
-sam3-hf = { features = ["sam3-hf", "cuda"], solve-group = "default" }
-sam3-native = { features = ["sam3-native", "cuda"], solve-group = "default" }
+sam3-hf = { features = ["sam3-hf", "cuda"], solve-group = "cuda" }
+sam3-hf-macos = { features = ["sam3-hf", "macos"], solve-group = "macos" }
+sam3-native = { features = ["sam3-native", "cuda"], solve-group = "cuda" }
+sam3-native-macos = { features = [
+    "sam3-native",
+    "macos",
+], solve-group = "macos" }

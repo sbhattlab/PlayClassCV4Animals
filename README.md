@@ -10,8 +10,9 @@ ln -s "/mnt/birds/rebecca2025/raw" video-data
 
 # Environment
 ```sh
-# Main environment
+# Install main (default) environment
 pixi install
+
 # All environments
 pixi install --all
 # Launch shell in specific environment
