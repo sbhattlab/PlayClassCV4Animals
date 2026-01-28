@@ -1,4 +1,5 @@
 import logging
+import os
 from pathlib import Path
 
 import matplotlib
@@ -42,6 +43,11 @@ TEXT = "bird"
 device = autoselect_torch_device()
 logger.info(f"Using device: {device}")
 
+CUDA_GPU_ID = os.environ.get("CUDA_VISIBLE_DEVICES")
+logger.info(f"CUDA_VISIBLE_DEVICES: {CUDA_GPU_ID}")
+logger.info(f"Using GPU ID: {CUDA_GPU_ID}")
+
+
 logger.info("Loading SAM3-HF Image and Processor Model...")
 model = Sam3Model.from_pretrained("facebook/sam3").to(device)
 processor = Sam3Processor.from_pretrained("facebook/sam3")
@@ -70,10 +76,10 @@ print(f"Found {len(results['masks'])} objects")
 
 # Overlay masks on the image and save
 logger.info("Overlaying masks on image...")
-output_dir = Path("sandbox")
-output_dir.mkdir(exist_ok=True)
+output_dir = Path("sandbox/test/sam3-hf-image/")
+output_dir.mkdir(parents=True, exist_ok=True)
 result_image = overlay_masks(image.copy(), results["masks"])
-output_path = output_dir / "sam3_hf_image_result.png"
+output_path = output_dir / "result.png"
 result_image.save(output_path)
 logger.info(f"Saved result image to {output_path}")
 

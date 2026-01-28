@@ -1,4 +1,5 @@
 import logging
+import os
 from pathlib import Path
 
 import matplotlib
@@ -43,15 +44,17 @@ logger = logging.getLogger(__name__)
 device = autoselect_torch_device()
 logger.info(f"Using device: {device}")
 
+CUDA_GPU_ID = os.environ.get("CUDA_VISIBLE_DEVICES")
+logger.info(f"CUDA_VISIBLE_DEVICES: {CUDA_GPU_ID}")
+logger.info(f"Using GPU ID: {CUDA_GPU_ID}")
+
 logger.info("Loading SAM3-HF Video and Processor Model...")
 model = Sam3VideoModel.from_pretrained("facebook/sam3").to(device, dtype=torch.bfloat16)
 processor = Sam3VideoProcessor.from_pretrained("facebook/sam3")
 
 # Load video frames
 logger.info("Loading test video...")
-# video_url = "https://huggingface.co/datasets/hf-internal-testing/sam2-fixtures/resolve/main/bedroom.mp4"
 video_frames, _ = load_video("data/test_15_sec.mp4")
-# logger.info(f"Loaded video from {video_url}")
 logger.info(f"Loaded video with {len(video_frames)} frames")
 
 # Initialize video inference session
@@ -75,7 +78,8 @@ inference_session = processor.add_text_prompt(
 logger.info("Processing video frames...")
 outputs_per_frame = {}
 for model_outputs in model.propagate_in_video_iterator(
-    inference_session=inference_session, max_frame_num_to_track=25 * 5
+    inference_session=inference_session,
+    max_frame_num_to_track=len(video_frames),
 ):
     processed_outputs = processor.postprocess_outputs(inference_session, model_outputs)
     outputs_per_frame[model_outputs.frame_idx] = processed_outputs
@@ -94,16 +98,11 @@ print(
 print(f"Masks shape: {frame_0_outputs['masks'].shape}")
 
 # Convert numpy array to PIL Image
-output_img_path = "sandbox/sam3-hf-video-frame-0-masks.png"
-for i in range(0, 25 * 5, 25):
+output_dir = Path("sandbox/test/sam3-hf-video/")
+output_dir.mkdir(parents=True, exist_ok=True)
+for i in range(0, len(video_frames), 25):
     frame_image = Image.fromarray(video_frames[i]).convert("RGB")
     frame_image_with_masks = overlay_masks(frame_image, outputs_per_frame[i]["masks"])
-    frame_image_with_masks.save(f"sandbox/sam3-hf-video-frame-{i}-masks.png")
-    logger.info(
-        f"Saved frame {i} with masks overlay to sandbox/sam3-hf-video-frame-{i}-masks.png"
-    )
-# frame_0_image = Image.fromarray(video_frames[0]).convert("RGB")
-# Path("sandbox").mkdir(exist_ok=True)
-# frame_0_image_with_masks = overlay_masks(frame_0_image, frame_0_outputs["masks"])
-# frame_0_image_with_masks.save(output_img_path)
-# logger.info(f"Saved frame 0 with masks overlay to {output_img_path}")
+    output_img_path = output_dir / f"sam3-hf-video-frame-{i}-masks.png"
+    frame_image_with_masks.save(output_img_path)
+    logger.info(f"Saved frame {i} with masks overlay to {output_img_path}")

@@ -36,6 +36,7 @@ jupyter = ">=1.1.1"
 sam3 = { git = "https://github.com/facebookresearch/sam3", rev = "11dec2936de97f2857c1f76b66d982d5a001155d" }
 transformers = { git = "https://github.com/huggingface/transformers", rev = "v5.0.0rc2" }
 accelerate = ">=1.12.0"
+einops = "*"
 ftfy = "==6.1.1"
 simpler-timer = ">=0.0.2"
 supervision = ">=0.27.0"
@@ -72,19 +73,29 @@ torch = "==2.9.1"
 torchvision = "==0.24.1"
 torchcodec = "==0.9"
 
-[tool.pixi.feature.cuda.tasks]
-test-sam3-hf-image = "python -m test.sam3-hf-basic-image"
-test-sam3-hf-video = "python -m test.sam3-hf-basic-video"
+[tool.pixi.feature.sam3-native-linux]
+platforms = ["linux-64"]
 
-[tool.pixi.feature.macos.tasks]
-test-sam3-hf-image = "python -m test.sam3-hf-basic-image"
-test-sam3-hf-video = "python -m test.sam3-hf-basic-video"
+[tool.pixi.feature.sam3-native-linux.pypi-dependencies]
+decord = "*"
+scikit-image = "*"
+scikit-learn = "*"
 
 [tool.pixi.environments]
 sam3-hf = { features = ["sam3-hf", "cuda"], solve-group = "cuda" }
 sam3-hf-macos = { features = ["sam3-hf", "macos"], solve-group = "macos" }
-sam3-native = { features = ["sam3-native", "cuda"], solve-group = "cuda" }
+sam3-native = { features = ["sam3-native", "cuda", "sam3-native-linux"], solve-group = "cuda" }
 sam3-native-macos = { features = [
     "sam3-native",
     "macos",
 ], solve-group = "macos" }
+
+[tool.pixi.feature.cuda.tasks]
+test-sam3-hf-image = "python -m test.sam3-hf-basic-image"
+test-sam3-hf-video = "python -m test.sam3-hf-basic-video"
+
+[tool.pixi.feature.sam3-native.tasks]
+test-sam3-native-video = "python -m test.sam3-native-video"
+
+# [tool.pixi.feature.macos.tasks]
+test-sam3-hf-image = "python -m test.sam3-hf-basic-image"
