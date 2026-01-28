@@ -550,6 +550,14 @@ def process_chunk(
                 input_labels=labels,
             )
 
+            # IMPORTANT: Must run inference on the first frame before propagating
+            # This initializes the tracking state
+            logger.info("Running initial inference on frame 0...")
+            _ = model(
+                inference_session=inference_session,
+                frame_idx=ann_frame_idx,
+            )
+
             # Process all frames in the chunk
             logger.info("Running inference...")
             outputs_per_frame = {}

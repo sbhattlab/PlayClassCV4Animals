@@ -1,12 +1,23 @@
+import json
 import math
+from pathlib import Path
 from typing import Optional, Tuple
 
+import cv2
 import matplotlib.patches as patches
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import pycocotools.mask as mask_util
 import torch
+
+# Try to import supervision, fall back gracefully if not available
+try:
+    import supervision as sv
+
+    SUPERVISION_AVAILABLE = True
+except ImportError:
+    SUPERVISION_AVAILABLE = False
 
 
 def autoselect_torch_device():
@@ -205,3 +216,288 @@ def plot_frame_from_df(
     if created_fig:
         fig.tight_layout()
     return fig, ax
+
+
+def render_annotated_video(
+    json_path: str | Path,
+    video_path: str | Path,
+    output_path: str | Path,
+    *,
+    mask_opacity: float = 0.4,
+    box_thickness: int = 2,
+    label_font_scale: float = 0.5,
+    label_thickness: int = 1,
+    fps: Optional[float] = None,
+) -> None:
+    """
+    Render an annotated video with bounding boxes, object IDs, and masks.
+
+    Uses the Supervision library if available, otherwise falls back to pure OpenCV.
+
+    Args:
+        json_path: Path to the JSON results file from sam3-hf-chunking-test.py
+        video_path: Path to the original input video
+        output_path: Path to save the output annotated .mp4 file
+        mask_opacity: Opacity of mask overlays (0.0-1.0)
+        box_thickness: Thickness of bounding box lines
+        label_font_scale: Font scale for labels
+        label_thickness: Thickness of label text
+        fps: Output video FPS. If None, uses the source video FPS.
+
+    Returns:
+        None. Writes the annotated video to output_path.
+    """
+    json_path = Path(json_path)
+    video_path = Path(video_path)
+    output_path = Path(output_path)
+
+    # Create output directory if needed
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Load JSON results
+    with open(json_path, "r") as f:
+        data = json.load(f)
+
+    results = data.get("results", {})
+
+    # Flatten results: chunk_idx -> frame_idx -> results
+    # into: frame_idx -> results
+    flat_results: dict[int, dict] = {}
+    for chunk_idx, chunk_data in results.items():
+        for frame_idx, frame_results in chunk_data.items():
+            flat_results[int(frame_idx)] = frame_results
+
+    # Open video
+    cap = cv2.VideoCapture(str(video_path))
+    if not cap.isOpened():
+        raise RuntimeError(f"Could not open video: {video_path}")
+
+    # Get video properties
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    source_fps = cap.get(cv2.CAP_PROP_FPS)
+    output_fps = fps if fps is not None else source_fps
+
+    # Setup video writer
+    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+    writer = cv2.VideoWriter(str(output_path), fourcc, output_fps, (width, height))
+
+    if not writer.isOpened():
+        cap.release()
+        raise RuntimeError(f"Could not create video writer: {output_path}")
+
+    print(f"Rendering annotated video: {total_frames} frames at {output_fps:.2f} FPS")
+    print(f"Output: {output_path}")
+
+    # Color generator for consistent object colors
+    def get_color_for_id(obj_id: int) -> tuple[int, int, int]:
+        """Generate consistent BGR color for an object ID."""
+        rng = np.random.default_rng(obj_id * 9767 + 1337)
+        return tuple(int(c) for c in rng.integers(50, 255, size=3))
+
+    if SUPERVISION_AVAILABLE:
+        # Use Supervision for annotation
+        # Use TRACK color lookup since we have tracker_id, not class_id
+        box_annotator = sv.BoxAnnotator(
+            thickness=box_thickness,
+            color_lookup=sv.ColorLookup.TRACK,
+        )
+        label_annotator = sv.LabelAnnotator(
+            text_scale=label_font_scale,
+            text_thickness=label_thickness,
+            text_position=sv.Position.TOP_LEFT,
+            color_lookup=sv.ColorLookup.TRACK,
+        )
+        mask_annotator = sv.MaskAnnotator(
+            opacity=mask_opacity,
+            color_lookup=sv.ColorLookup.TRACK,
+        )
+
+    frame_idx = 0
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+
+        # Get results for this frame
+        frame_results = flat_results.get(frame_idx)
+
+        if frame_results is not None:
+            masks_rle = frame_results.get("masks_rle", [])
+            boxes = frame_results.get("boxes", [])
+            object_ids = frame_results.get("object_ids", [])
+            scores = frame_results.get("scores", [])
+
+            if SUPERVISION_AVAILABLE and len(boxes) > 0:
+                # Decode masks from RLE
+                masks = []
+                for rle in masks_rle:
+                    if rle and "counts" in rle and "size" in rle:
+                        try:
+                            mask = mask_util.decode(rle)
+                            if mask.ndim == 3:
+                                mask = mask[..., 0]
+                            masks.append(mask.astype(bool))
+                        except Exception:
+                            masks.append(np.zeros((height, width), dtype=bool))
+                    else:
+                        masks.append(np.zeros((height, width), dtype=bool))
+
+                # Convert to numpy arrays
+                xyxy = np.array(boxes, dtype=np.float32)
+                masks_np = np.array(masks, dtype=bool) if masks else None
+                tracker_ids = np.array(object_ids, dtype=int)
+
+                # Create Supervision Detections
+                detections = sv.Detections(
+                    xyxy=xyxy,
+                    mask=masks_np,
+                    tracker_id=tracker_ids,
+                    confidence=np.array(scores, dtype=np.float32) if scores else None,
+                )
+
+                # Create labels
+                labels = [
+                    f"id:{oid} ({score:.2f})" if score else f"id:{oid}"
+                    for oid, score in zip(
+                        object_ids, scores or [None] * len(object_ids)
+                    )
+                ]
+
+                # Annotate frame
+                frame = mask_annotator.annotate(scene=frame, detections=detections)
+                frame = box_annotator.annotate(scene=frame, detections=detections)
+                frame = label_annotator.annotate(
+                    scene=frame, detections=detections, labels=labels
+                )
+
+            elif len(boxes) > 0:
+                # Fallback to pure OpenCV
+                frame = _annotate_frame_opencv(
+                    frame=frame,
+                    masks_rle=masks_rle,
+                    boxes=boxes,
+                    object_ids=object_ids,
+                    scores=scores,
+                    mask_opacity=mask_opacity,
+                    box_thickness=box_thickness,
+                    label_font_scale=label_font_scale,
+                    label_thickness=label_thickness,
+                    get_color_for_id=get_color_for_id,
+                )
+
+        writer.write(frame)
+        frame_idx += 1
+
+        # Progress indicator
+        if frame_idx % 100 == 0:
+            print(f"  Processed {frame_idx}/{total_frames} frames...")
+
+    cap.release()
+    writer.release()
+    print(f"Done! Output saved to: {output_path}")
+
+
+def _annotate_frame_opencv(
+    frame: np.ndarray,
+    masks_rle: list[dict],
+    boxes: list[list[float]],
+    object_ids: list[int],
+    scores: list[float],
+    mask_opacity: float,
+    box_thickness: int,
+    label_font_scale: float,
+    label_thickness: int,
+    get_color_for_id: callable,
+) -> np.ndarray:
+    """
+    Annotate a frame using pure OpenCV (fallback when Supervision is not available).
+
+    Args:
+        frame: BGR image (H, W, 3)
+        masks_rle: List of RLE-encoded masks
+        boxes: List of [x1, y1, x2, y2] bounding boxes
+        object_ids: List of object IDs
+        scores: List of confidence scores
+        mask_opacity: Opacity for mask overlay
+        box_thickness: Line thickness for boxes
+        label_font_scale: Font scale for labels
+        label_thickness: Text thickness for labels
+        get_color_for_id: Function to get consistent color for object ID
+
+    Returns:
+        Annotated frame
+    """
+    height, width = frame.shape[:2]
+    overlay = frame.copy()
+
+    for i, (rle, box, obj_id) in enumerate(zip(masks_rle, boxes, object_ids)):
+        color = get_color_for_id(obj_id)
+        score = scores[i] if i < len(scores) else None
+
+        # Draw mask
+        if rle and "counts" in rle and "size" in rle:
+            try:
+                mask = mask_util.decode(rle)
+                if mask.ndim == 3:
+                    mask = mask[..., 0]
+                mask = mask.astype(bool)
+
+                # Create colored overlay where mask is True
+                overlay[mask] = [
+                    int(overlay[mask, c] * (1 - mask_opacity) + color[c] * mask_opacity)
+                    for c in range(3)
+                ]
+                # Simpler approach: blend colors
+                colored = np.zeros_like(frame)
+                colored[mask] = color
+                overlay = cv2.addWeighted(
+                    overlay,
+                    1 - mask_opacity * mask.any(),
+                    colored,
+                    mask_opacity,
+                    0,
+                )
+            except Exception:
+                pass
+
+        # Draw bounding box
+        x1, y1, x2, y2 = [int(c) for c in box]
+        cv2.rectangle(overlay, (x1, y1), (x2, y2), color, box_thickness)
+
+        # Draw label
+        label = f"id:{obj_id}"
+        if score is not None:
+            label += f" ({score:.2f})"
+
+        # Get text size for background
+        (text_w, text_h), baseline = cv2.getTextSize(
+            label, cv2.FONT_HERSHEY_SIMPLEX, label_font_scale, label_thickness
+        )
+
+        # Draw label background
+        cv2.rectangle(
+            overlay,
+            (x1, y1 - text_h - baseline - 4),
+            (x1 + text_w + 4, y1),
+            color,
+            -1,
+        )
+
+        # Draw label text
+        cv2.putText(
+            overlay,
+            label,
+            (x1 + 2, y1 - baseline - 2),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            label_font_scale,
+            (255, 255, 255),
+            label_thickness,
+            cv2.LINE_AA,
+        )
+
+    # Blend overlay with original for mask effect
+    frame = cv2.addWeighted(frame, 1 - mask_opacity, overlay, mask_opacity, 0)
+
+    return overlay
