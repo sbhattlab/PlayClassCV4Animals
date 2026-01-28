@@ -45,6 +45,7 @@ pixi run -e sam3-native python -c "import torch; print(f'PyTorch is installed: {
 # SAM3-hf
 pixi run test-sam3-hf-image # Only test currently available on macOS
 pixi run test-sam3-hf-video
+pixi run test-sam3-hf-chunking
 
 # SAM3-native 
 pixi run test-sam3-native-video  
