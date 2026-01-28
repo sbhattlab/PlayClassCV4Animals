@@ -67,6 +67,74 @@ def setup_logger(log_dir: Path, debug: bool = False) -> Path:
     return log_filename
 
 
+def save_results_json(
+    all_results: dict[int, dict],
+    metadata: dict,
+    chunk_metadata: dict[int, dict],
+    video_frames: list,
+    output_path: Path,
+    vis_output_dir: Path,
+    overlay_func: callable,
+    vis_stride: int = 25,
+) -> None:
+    """
+    Save segmentation results to JSON and optionally generate frame visualizations.
+
+    Args:
+        all_results: Results dictionary {chunk_idx -> {frame_idx -> results}}
+        metadata: Dictionary of metadata to include in the output
+        chunk_metadata: Metadata for each chunk {chunk_idx -> metadata_dict}
+        video_frames: List of video frames (PIL Images or numpy arrays)
+        output_path: Path to save JSON results
+        vis_output_dir: Directory to save visualizations
+        overlay_func: Function to overlay masks on frames (frame, masks) -> PIL Image
+        vis_stride: Save every Nth frame for visualization
+    """
+    # Convert keys to strings for JSON serialization
+    json_results = {
+        str(chunk_idx): {
+            str(frame_idx): frame_results
+            for frame_idx, frame_results in chunk_data.items()
+        }
+        for chunk_idx, chunk_data in all_results.items()
+    }
+
+    # Build output structure
+    json_output = {
+        "metadata": metadata,
+        "chunk_metadata": {
+            str(chunk_idx): meta for chunk_idx, meta in chunk_metadata.items()
+        },
+        "results": json_results,
+    }
+
+    # Save JSON
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(output_path, "w") as f:
+        json.dump(json_output, f, indent=2)
+    logger.info(f"Results saved to {output_path}")
+
+    # Save visualizations for frames
+    vis_output_dir.mkdir(parents=True, exist_ok=True)
+
+    for _chunk_idx, chunk_data in all_results.items():
+        for frame_idx, frame_results in chunk_data.items():
+            if int(frame_idx) % vis_stride != 0:
+                continue
+
+            output_img_path = vis_output_dir / f"frame_{int(frame_idx):06d}.png"
+            if output_img_path.exists():
+                continue  # Skip already saved frames
+
+            # Decode RLE masks
+            masks_rle = frame_results.get("masks_rle", [])
+            if masks_rle:
+                masks = np.stack([mask_util.decode(rle) for rle in masks_rle])
+                frame = video_frames[int(frame_idx)]
+                vis_image = overlay_func(frame, masks)
+                vis_image.save(output_img_path)
+
+
 def autoselect_torch_device():
     """
     Automatically selects the best available PyTorch device:
