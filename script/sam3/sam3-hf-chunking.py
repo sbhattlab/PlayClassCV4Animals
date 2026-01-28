@@ -195,14 +195,15 @@ def main():
         # Pass ALL outputs to next chunk for multi-object tracking
         previous_outputs = outputs_per_frame
 
-        # INCREMENTAL SAVE: Save results after each chunk
+        # INCREMENTAL SAVE: Save results after each chunk with chunk suffix
         logger.info("Saving incremental results...")
+        incremental_path = OUTPUT_PATH.with_stem(f"{OUTPUT_PATH.stem}_{chunk_idx}")
         save_incremental_results(
             all_results=all_results,
             chunk_metadata=chunk_metadata,
             video_frames=video_frames,
             fps=fps,
-            output_path=OUTPUT_PATH,
+            output_path=incremental_path,
             vis_output_dir=VIS_OUTPUT_DIR,
             vis_stride=VIS_FRAME_STRIDE,
         )
