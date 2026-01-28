@@ -1,5 +1,7 @@
 import json
 import math
+import sys
+from datetime import datetime
 from pathlib import Path
 from typing import Optional, Tuple
 
@@ -10,6 +12,7 @@ import numpy as np
 import pandas as pd
 import pycocotools.mask as mask_util
 import torch
+from loguru import logger
 
 # Try to import supervision, fall back gracefully if not available
 try:
@@ -18,6 +21,50 @@ try:
     SUPERVISION_AVAILABLE = True
 except ImportError:
     SUPERVISION_AVAILABLE = False
+
+
+def setup_logger(log_dir: Path, debug: bool = False) -> Path:
+    """
+    Configure loguru logger with both console and file output.
+
+    Args:
+        log_dir: Directory to store log files
+        debug: Enable debug level logging
+
+    Returns:
+        Path to the log file
+    """
+    level = "DEBUG" if debug else "INFO"
+
+    # Create log directory
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    # Generate unique log filename with datetime
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_filename = log_dir / f"sam3_hf_chunking_{timestamp}.log"
+
+    # Remove default logger
+    logger.remove()
+
+    # Add console handler with colored output
+    logger.add(
+        sys.stderr,
+        format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> "
+        "[<level>{level}</level>] {message}",
+        level=level,
+    )
+
+    # Add file handler
+    logger.add(
+        str(log_filename),
+        format="{time:YYYY-MM-DD HH:mm:ss} [{level}] {message}",
+        level=level,
+        enqueue=True,
+        backtrace=True,
+        diagnose=True,
+    )
+
+    return log_filename
 
 
 def autoselect_torch_device():

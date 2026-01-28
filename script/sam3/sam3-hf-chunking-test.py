@@ -12,8 +12,6 @@ Usage:
 import gc
 import json
 import os
-import sys
-from datetime import datetime
 from pathlib import Path
 
 import numpy as np
@@ -30,7 +28,7 @@ from transformers import (
 )
 from transformers.video_utils import load_video
 
-from script.sam3.utils import autoselect_torch_device
+from script.sam3.utils import autoselect_torch_device, setup_logger
 
 # =============================================================================
 # Configuration
@@ -48,55 +46,6 @@ VIS_FRAME_STRIDE = 25  # Visualize every Nth frame
 # Multi-object tracking heuristics
 MIN_OBJECTS_FOR_TRACKING = 3  # Minimum objects to look for in previous chunk
 MAX_LOOKBACK_FRAMES = 15  # Max frames to look back (<1 second at 25fps)
-
-# =============================================================================
-# Logger Setup
-# =============================================================================
-
-
-def setup_logger(log_dir: Path, debug: bool = False) -> Path:
-    """
-    Configure loguru logger with both console and file output.
-
-    Args:
-        log_dir: Directory to store log files
-        debug: Enable debug level logging
-
-    Returns:
-        Path to the log file
-    """
-    level = "DEBUG" if debug else "INFO"
-
-    # Create log directory
-    log_dir.mkdir(parents=True, exist_ok=True)
-
-    # Generate unique log filename with datetime
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    log_filename = log_dir / f"sam3_hf_chunking_{timestamp}.log"
-
-    # Remove default logger
-    logger.remove()
-
-    # Add console handler with colored output
-    logger.add(
-        sys.stderr,
-        format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> "
-        "[<level>{level}</level>] {message}",
-        level=level,
-    )
-
-    # Add file handler
-    logger.add(
-        str(log_filename),
-        format="{time:YYYY-MM-DD HH:mm:ss} [{level}] {message}",
-        level=level,
-        enqueue=True,
-        backtrace=True,
-        diagnose=True,
-    )
-
-    return log_filename
-
 
 # =============================================================================
 # Helper Functions
@@ -321,7 +270,7 @@ def free_gpu_memory():
     if torch.cuda.is_available():
         torch.cuda.synchronize()
         torch.cuda.empty_cache()
-        torch.cuda.ipc_collect()  # Collect IPC shared memory
+        torch.cuda.ipc_collect()
         torch.cuda.synchronize()
         torch.cuda.reset_peak_memory_stats()
 
@@ -500,7 +449,7 @@ def process_chunk(
     # Determine if we should use tracker or text model
     use_tracker = False
     masks_list = []
-    boxes_list = []
+    _boxes_list = []  # Returned by find_frame_with_enough_objects but not used currently
     object_ids_list = []
     all_prompt_points = {}  # obj_id -> list of points
 
@@ -510,7 +459,7 @@ def process_chunk(
         chunk_info["fallback_reason"] = "first_chunk"
     else:
         # Try to find a frame with enough objects
-        source_frame_idx, masks_list, boxes_list, object_ids_list = (
+        source_frame_idx, masks_list, _boxes_list, object_ids_list = (
             find_frame_with_enough_objects(
                 previous_outputs,
                 min_objects=min_objects_for_tracking,
@@ -541,9 +490,13 @@ def process_chunk(
             else:
                 use_tracker = True
                 chunk_info["model_type"] = "Sam3TrackerVideoModel"
-                chunk_info["prompt_points"] = all_prompt_points
+                # Convert to native Python types for JSON serialization
+                chunk_info["prompt_points"] = {
+                    int(k): [[int(c) for c in pt] for pt in v]
+                    for k, v in all_prompt_points.items()
+                }
                 chunk_info["num_objects_tracked"] = len(all_prompt_points)
-                chunk_info["source_frame_idx"] = source_frame_idx
+                chunk_info["source_frame_idx"] = int(source_frame_idx)
                 logger.info(
                     f"Will track {len(all_prompt_points)} objects from frame {source_frame_idx}"
                 )
