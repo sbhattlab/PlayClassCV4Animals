@@ -43,7 +43,6 @@ pixi run -e sam3-hf python -c "import torch; print(f'PyTorch is installed: {torc
 pixi run -e sam3-native python -c "import torch; print(f'PyTorch is installed: {torch.__version__}'); print(f'CUDA available: {torch.cuda.is_available()}')"
 
 # SAM3-hf
-pixi run test-sam3-hf-image # Only test currently available on macOS
 pixi run test-sam3-hf-video
 pixi run test-sam3-hf-chunking
 

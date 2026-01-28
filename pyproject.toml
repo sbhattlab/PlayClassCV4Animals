@@ -12,10 +12,14 @@ python = ">=3.11,<3.12"
 ffmpeg = "==8.0.1"
 pkg-config = "*"
 
+[tool.pixi.feature.sam3-hf]
+platforms = ["linux-64", "osx-arm64"]
+
 [tool.pixi.feature.sam3-hf.pypi-dependencies]
 transformers = { git = "https://github.com/huggingface/transformers", rev = "v5.0.0rc2" }
 accelerate = ">=1.12.0"
 ftfy = "==6.1.1"
+omegaconf = ">=2.3.0"
 simpler-timer = ">=0.0.2"
 supervision = ">=0.27.0"
 av = ">=16.1.0"
@@ -31,6 +35,9 @@ ipywidgets = ">=8.1.8"
 ipykernel = ">=7.1.0"
 ipython = "*"
 jupyter = ">=1.1.1"
+
+[tool.pixi.feature.sam3-native]
+platforms = ["linux-64", "osx-arm64"]
 
 [tool.pixi.feature.sam3-native.pypi-dependencies]
 sam3 = { git = "https://github.com/facebookresearch/sam3", rev = "11dec2936de97f2857c1f76b66d982d5a001155d" }
@@ -82,16 +89,11 @@ scikit-image = "*"
 scikit-learn = "*"
 
 [tool.pixi.environments]
-sam3-hf = { features = ["sam3-hf", "cuda", "sam3-hf-tasks"], solve-group = "cuda" }
-sam3-hf-macos = { features = ["sam3-hf", "macos", "sam3-hf-tasks"], solve-group = "macos" }
-sam3-native = { features = ["sam3-native", "cuda", "sam3-native-linux", "sam3-native-tasks"], solve-group = "cuda" }
-sam3-native-macos = { features = [
-    "sam3-native",
-    "macos",
-    "sam3-native-tasks",
-], solve-group = "macos" }
+sam3-hf = { features = ["sam3-hf", "cuda", "sam3-hf-tasks"] }
+sam3-native = { features = ["sam3-native", "cuda", "sam3-native-linux", "sam3-native-tasks"] }
 
 [tool.pixi.feature.sam3-hf-tasks]
+platforms = ["linux-64", "osx-arm64"]
 [tool.pixi.feature.sam3-hf-tasks.tasks]
 test-sam3-hf-image = "python -m test.sam3-hf-basic-image"
 test-sam3-hf-video = "python -m test.sam3-hf-basic-video"
@@ -99,6 +101,7 @@ test-sam3-hf-chunking = "python -m test.test-sam3-hf-chunking"
 sam3-hf-chunking = { cmd = "python -m script.sam3.sam3-hf-chunking", env = { CUDA_VISIBLE_DEVICES = "1", PYTORCH_ALLOC_CONF = "expandable_segments:True,garbage_collection_threshold:0.6" } }
 
 [tool.pixi.feature.sam3-native-tasks]
+platforms = ["linux-64", "osx-arm64"]
 [tool.pixi.feature.sam3-native-tasks.tasks]
 test-sam3-native-video = "python -m test.sam3-native-video"
 

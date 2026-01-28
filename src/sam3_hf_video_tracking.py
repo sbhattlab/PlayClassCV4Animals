@@ -28,17 +28,21 @@ import numpy as np
 import pycocotools.mask as mask_util
 import torch
 from loguru import logger
+from omegaconf import DictConfig, OmegaConf
 from PIL import Image
 from tqdm import tqdm
 from transformers import (
     Sam3TrackerVideoModel,
     Sam3TrackerVideoProcessor,
+    Sam3VideoConfig,
     Sam3VideoModel,
     Sam3VideoProcessor,
 )
 from transformers.video_utils import load_video
 
 __all__ = [
+    # Config loading
+    "load_config",
     # Device selection
     "autoselect_torch_device",
     # Mask utilities
@@ -57,6 +61,30 @@ __all__ = [
     # Core processing
     "process_chunk",
 ]
+
+
+# =============================================================================
+# Config Loading
+# =============================================================================
+
+
+def load_config(config_path: str | Path) -> DictConfig:
+    """
+    Load configuration from a YAML file using OmegaConf.
+
+    Args:
+        config_path: Path to the YAML configuration file
+
+    Returns:
+        DictConfig object with configuration values
+    """
+    config_path = Path(config_path)
+    if not config_path.exists():
+        raise FileNotFoundError(f"Config file not found: {config_path}")
+
+    cfg = OmegaConf.load(config_path)
+    logger.info(f"Loaded config from {config_path}")
+    return cfg
 
 
 # =============================================================================
@@ -440,6 +468,14 @@ def process_chunk(
     previous_outputs: dict[int, dict] | None = None,
     min_objects_for_tracking: int = 3,
     max_lookback_frames: int = 25,
+    # Sam3VideoConfig tracking parameters
+    init_trk_keep_alive: int | None = None,
+    max_trk_keep_alive: int | None = None,
+    min_trk_keep_alive: int | None = None,
+    trk_assoc_iou_thresh: float | None = None,
+    hotstart_dup_thresh: int | None = None,
+    suppress_overlapping_based_on_recent_occlusion_threshold: float | None = None,
+    recondition_every_nth_frame: int | None = None,
 ) -> tuple[dict[int, dict], dict]:
     """
     Process a single video chunk with SAM3.
@@ -457,6 +493,19 @@ def process_chunk(
         previous_outputs: Outputs from previous chunk for continuity
         min_objects_for_tracking: Minimum objects needed to use tracker
         max_lookback_frames: Max frames to search back for enough objects
+
+        # Tracking config tweaks (Sam3VideoConfig parameters):
+        init_trk_keep_alive: Initial keep-alive counter for new tracks (default: 30)
+        max_trk_keep_alive: Maximum keep-alive counter value (default: 30)
+        min_trk_keep_alive: Minimum keep-alive counter value (default: -1)
+        trk_assoc_iou_thresh: IoU threshold for detection-to-track matching (default: 0.5)
+            Lower = more lenient matching, tracks persist longer
+        hotstart_dup_thresh: Overlapping frames required to remove duplicate (default: 8)
+            Higher = stricter duplicate detection
+        suppress_overlapping_based_on_recent_occlusion_threshold: IoU threshold for
+            suppressing overlapping objects (default: 0.7). Higher = stricter
+        recondition_every_nth_frame: Frequency of mask reconditioning (default: 16)
+            Lower = more frequent reconditioning, prevents drift
 
     Returns:
         Tuple of (outputs_per_frame, chunk_info_dict)
@@ -556,9 +605,54 @@ def process_chunk(
         # Use Sam3VideoModel with text prompt (PCS)
         # =====================================================================
         logger.info("Loading Sam3VideoModel for text-based segmentation...")
-        model = Sam3VideoModel.from_pretrained("facebook/sam3").to(
-            device, dtype=torch.bfloat16
-        )
+
+        # Build custom config if any tracking parameters are specified
+        config = Sam3VideoConfig.from_pretrained("facebook/sam3")
+        config_modified = False
+
+        if init_trk_keep_alive is not None:
+            config.init_trk_keep_alive = init_trk_keep_alive
+            config_modified = True
+        if max_trk_keep_alive is not None:
+            config.max_trk_keep_alive = max_trk_keep_alive
+            config_modified = True
+        if min_trk_keep_alive is not None:
+            config.min_trk_keep_alive = min_trk_keep_alive
+            config_modified = True
+        if trk_assoc_iou_thresh is not None:
+            config.trk_assoc_iou_thresh = trk_assoc_iou_thresh
+            config_modified = True
+        if hotstart_dup_thresh is not None:
+            config.hotstart_dup_thresh = hotstart_dup_thresh
+            config_modified = True
+        if suppress_overlapping_based_on_recent_occlusion_threshold is not None:
+            config.suppress_overlapping_based_on_recent_occlusion_threshold = (
+                suppress_overlapping_based_on_recent_occlusion_threshold
+            )
+            config_modified = True
+        if recondition_every_nth_frame is not None:
+            config.recondition_every_nth_frame = recondition_every_nth_frame
+            config_modified = True
+
+        if config_modified:
+            logger.info(
+                f"Using custom tracking config: "
+                f"init_trk_keep_alive={config.init_trk_keep_alive}, "
+                f"max_trk_keep_alive={config.max_trk_keep_alive}, "
+                f"min_trk_keep_alive={config.min_trk_keep_alive}, "
+                f"trk_assoc_iou_thresh={config.trk_assoc_iou_thresh}, "
+                f"hotstart_dup_thresh={config.hotstart_dup_thresh}, "
+                f"suppress_overlapping_thresh={config.suppress_overlapping_based_on_recent_occlusion_threshold}, "
+                f"recondition_every_nth_frame={config.recondition_every_nth_frame}"
+            )
+            model = Sam3VideoModel.from_pretrained("facebook/sam3", config=config).to(
+                device, dtype=torch.bfloat16
+            )
+        else:
+            model = Sam3VideoModel.from_pretrained("facebook/sam3").to(
+                device, dtype=torch.bfloat16
+            )
+
         processor = Sam3VideoProcessor.from_pretrained("facebook/sam3")
 
         # Initialize video inference session

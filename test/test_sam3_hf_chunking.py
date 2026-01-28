@@ -1,13 +1,12 @@
 """
-SAM3 HuggingFace Video Chunking Script
+SAM3 HuggingFace Video Chunking Test Script
 
-This script processes long videos by splitting them into chunks,
-running segmentation on each chunk, and passing the last mask/bbox to the
-next chunk as a prompt for tracking continuity.
+This is a shortened version for testing the multi-object tracking workflow.
+Uses smaller chunks (34 seconds) for faster iteration.
 
 Usage:
-    CUDA_VISIBLE_DEVICES=1 python -m script.sam3.sam3-hf-chunking
-    CUDA_VISIBLE_DEVICES=1 python -m script.sam3.sam3-hf-chunking --config config/my_custom_config.yaml
+    CUDA_VISIBLE_DEVICES=1 python -m test.test_sam3_hf_chunking
+    CUDA_VISIBLE_DEVICES=1 python -m test.test_sam3_hf_chunking --config config/my_custom_config.yaml
 """
 
 import argparse
@@ -27,14 +26,14 @@ from src.sam3_hf_video_tracking import (
 )
 from src.utils import save_results_json, setup_logger
 
-# Default config path
-DEFAULT_CONFIG = "config/sam3_hf_config.yaml"
+# Default config path (test config with shorter chunks)
+DEFAULT_CONFIG = "config/sam3_hf_config_test.yaml"
 
 
 def main():
-    """Main entry point for the chunking script."""
+    """Main entry point for the test chunking script."""
     # Parse command line arguments
-    parser = argparse.ArgumentParser(description="SAM3 HuggingFace Video Chunking")
+    parser = argparse.ArgumentParser(description="SAM3 HuggingFace Video Chunking Test")
     parser.add_argument(
         "--config",
         type=str,
@@ -51,7 +50,7 @@ def main():
     log_file = setup_logger(log_output_dir, debug=False)
 
     logger.info("=" * 60)
-    logger.info("SAM3 HuggingFace Video Chunking Script")
+    logger.info("SAM3 HuggingFace Video Chunking TEST Script")
     logger.info("=" * 60)
     logger.info(f"Config file: {args.config}")
     logger.info(f"Log file: {log_file}")
@@ -134,50 +133,23 @@ def main():
             "fps": fps,
         }
 
-        # INCREMENTAL SAVE: Save results after each chunk with chunk suffix
+        # INCREMENTAL SAVE: Save results after each chunk
         logger.info("Saving incremental results...")
-        incremental_path = output_path.with_stem(f"{output_path.stem}_{chunk_idx}")
         save_results_json(
             all_results=all_results,
             metadata=metadata,
             chunk_metadata=chunk_metadata,
             video_frames=video_frames,
-            output_path=incremental_path,
+            output_path=output_path,
             vis_output_dir=vis_output_dir,
             overlay_func=overlay_masks_on_frame,
             vis_stride=cfg.vis_frame_stride,
         )
 
-    # Build final metadata
-    final_metadata = {
-        "config_file": args.config,
-        "video_path": cfg.video_path,
-        "text_prompt": cfg.text_prompt,
-        "chunk_duration_seconds": cfg.chunk_duration_seconds,
-        "min_objects_for_tracking": cfg.min_objects_for_tracking,
-        "max_lookback_frames": cfg.max_lookback_frames,
-        "total_chunks_processed": len(all_results),
-        "total_frames": len(video_frames),
-        "fps": fps,
-    }
-
-    # FINAL SAVE: Save consolidated results with all chunks
-    logger.info("Saving final consolidated results...")
-    save_results_json(
-        all_results=all_results,
-        metadata=final_metadata,
-        chunk_metadata=chunk_metadata,
-        video_frames=video_frames,
-        output_path=output_path,
-        vis_output_dir=vis_output_dir,
-        overlay_func=overlay_masks_on_frame,
-        vis_stride=cfg.vis_frame_stride,
-    )
-
     logger.info("\n" + "=" * 60)
     logger.info("PROCESSING COMPLETE")
     logger.info("=" * 60)
-    logger.info(f"Final results: {output_path}")
+    logger.info(f"Results: {output_path}")
     logger.info(f"Visualizations: {vis_output_dir}")
     logger.info(f"Log file: {log_file}")
 
