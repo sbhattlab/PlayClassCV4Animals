@@ -66,7 +66,8 @@ logger.info(
 )
 predictor = build_sam3_video_predictor(gpus_to_use=[0])
 
-video_path = Path("data/test_15_sec.mp4")
+# video_path = Path("data/test_15_sec.mp4")
+video_path = Path("/mnt/birds/rebecca2025/test/video_1_5min.mp4")
 
 logger.info("Loading test video...")
 video_path_str = str(video_path)

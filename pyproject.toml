@@ -95,6 +95,7 @@ sam3-native-macos = { features = [
 [tool.pixi.feature.sam3-hf-tasks.tasks]
 test-sam3-hf-image = "python -m test.sam3-hf-basic-image"
 test-sam3-hf-video = "python -m test.sam3-hf-basic-video"
+sam3-hf-chunking = { cmd = "python -m script.sam3.sam3-hf-chunking-test", env = { CUDA_VISIBLE_DEVICES = "1", PYTORCH_CUDA_ALLOC_CONF = "expandable_segments:True,garbage_collection_threshold:0.6" } }
 
 [tool.pixi.feature.sam3-native-tasks]
 [tool.pixi.feature.sam3-native-tasks.tasks]

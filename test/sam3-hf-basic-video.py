@@ -54,7 +54,8 @@ processor = Sam3VideoProcessor.from_pretrained("facebook/sam3")
 
 # Load video frames
 logger.info("Loading test video...")
-video_frames, _ = load_video("data/test_15_sec.mp4")
+# video_frames, _ = load_video("data/test_15_sec.mp4")
+video_frames, _ = load_video("/mnt/birds/rebecca2025/test/video_1_1min.mp4")
 logger.info(f"Loaded video with {len(video_frames)} frames")
 
 # Initialize video inference session
