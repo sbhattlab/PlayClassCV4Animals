@@ -39,11 +39,11 @@ CUDA_VISIBLE_DEVICES=1 pixi run test-sam3-hf-image
 
 ```sh
 # SAM3-hf
-pixi run test-sam3-hf-image # Only test currently available on macOS
-pixi run test-sam3-hf-video
+CUDA_VISIBLE_DEVICES=1 pixi run test-sam3-hf-image # Only test currently available on macOS
+CUDA_VISIBLE_DEVICES=1 pixi run test-sam3-hf-video
 
 # SAM3-native 
-pixi run test-sam3-native-video  
+CUDA_VISIBLE_DEVICES=1 pixi run test-sam3-native-video  
 ```
 
 # Future methods to implemented

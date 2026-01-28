@@ -82,20 +82,30 @@ scikit-image = "*"
 scikit-learn = "*"
 
 [tool.pixi.environments]
-sam3-hf = { features = ["sam3-hf", "cuda"], solve-group = "cuda" }
-sam3-hf-macos = { features = ["sam3-hf", "macos"], solve-group = "macos" }
-sam3-native = { features = ["sam3-native", "cuda", "sam3-native-linux"], solve-group = "cuda" }
+sam3-hf = { features = ["sam3-hf", "cuda", "sam3-hf-tasks"], solve-group = "cuda" }
+sam3-hf-macos = { features = ["sam3-hf", "macos", "sam3-hf-tasks"], solve-group = "macos" }
+sam3-native = { features = ["sam3-native", "cuda", "sam3-native-linux", "sam3-native-tasks"], solve-group = "cuda" }
 sam3-native-macos = { features = [
     "sam3-native",
     "macos",
+    "sam3-native-tasks",
 ], solve-group = "macos" }
 
-[tool.pixi.feature.cuda.tasks]
+[tool.pixi.feature.sam3-hf-tasks]
+[tool.pixi.feature.sam3-hf-tasks.tasks]
 test-sam3-hf-image = "python -m test.sam3-hf-basic-image"
 test-sam3-hf-video = "python -m test.sam3-hf-basic-video"
 
-[tool.pixi.feature.sam3-native.tasks]
+[tool.pixi.feature.sam3-native-tasks]
+[tool.pixi.feature.sam3-native-tasks.tasks]
 test-sam3-native-video = "python -m test.sam3-native-video"
 
+# [tool.pixi.feature.cuda.tasks]
+# test-sam3-hf-image = "python -m test.sam3-hf-basic-image"
+# test-sam3-hf-video = "python -m test.sam3-hf-basic-video"
+
+# [tool.pixi.feature.sam3-native.tasks]
+# test-sam3-native-video = "python -m test.sam3-native-video"
+
 # [tool.pixi.feature.macos.tasks]
-test-sam3-hf-image = "python -m test.sam3-hf-basic-image"
+# test-sam3-hf-image = "python -m test.sam3-hf-basic-image"
