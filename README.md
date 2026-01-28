@@ -19,16 +19,18 @@ pixi install --all
 pixi shell -e sam3-hf
 ```
 
-# Methods tested
-- Object detection 
-    - YOLO (yolo8n, yolo11x)
-- Pose-estimation (w/ fine-tuning from manually-labelled data)
-    - DeepLabCut
-    - YOLO model (yolo11x-pose)
-- Segmenter
-    - OpenCV + SciPy (i.e. "pure" computer vision, virtually no pre-trained model-based prediction)
-    - Grounded-SAM-2  
-    - SAM3 (huggingface (hf) and native implementations)
+# How to run scripts
+```sh
+# Production script (uses main config by default)
+CUDA_VISIBLE_DEVICES=1 python -m script.sam3.sam3-hf-chunking
+
+# Test script (uses test config by default)
+CUDA_VISIBLE_DEVICES=1 python -m test.test_sam3_hf_chunking
+
+# Custom config
+CUDA_VISIBLE_DEVICES=1 python -m script.sam3.sam3-hf-chunking --config config/my_custom_config.yaml
+```
+
 
 # Overview of currently implemented test scripts
 > [!IMPORTANT]
@@ -49,6 +51,17 @@ pixi run test-sam3-hf-chunking
 # SAM3-native 
 pixi run test-sam3-native-video  
 ```
+
+# Methods tested
+- Object detection 
+    - YOLO (yolo8n, yolo11x)
+- Pose-estimation (w/ fine-tuning from manually-labelled data)
+    - DeepLabCut
+    - YOLO model (yolo11x-pose)
+- Segmenter
+    - OpenCV + SciPy (i.e. "pure" computer vision, virtually no pre-trained model-based prediction)
+    - Grounded-SAM-2  
+    - SAM3 (huggingface (hf) and native implementations)
 
 # Future methods to implemented
 - DINOv2/v3-derived features

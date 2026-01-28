@@ -9,9 +9,9 @@ video_path: "/mnt/birds/rebecca2025/test/video_1_5min.mp4"
 text_prompt: "bird"
 
 # Output paths
-output_path: "data/results/sam3-hf/results.json"
-vis_output_dir: "sandbox/test/sam3-hf-chunking/"
-log_output_dir: "sandbox/logs/sam3-hf-chunking/"
+output_path: "data/results/sam3-hf/new_config/results.json"
+vis_output_dir: "sandbox/test/sam3-hf-chunking/new_config"
+log_output_dir: "sandbox/logs/sam3-hf-chunking/new_config"
 
 # =============================================================================
 # Chunking Configuration
