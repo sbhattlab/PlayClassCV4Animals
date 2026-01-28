@@ -21,6 +21,7 @@ import pycocotools.mask as mask_util
 import torch
 from loguru import logger
 from PIL import Image
+from tqdm import tqdm
 from transformers import (
     Sam3TrackerVideoModel,
     Sam3TrackerVideoProcessor,
@@ -43,6 +44,10 @@ OUTPUT_PATH = Path("data/results/sam3-hf/results.json")
 VIS_OUTPUT_DIR = Path("sandbox/test/sam3-hf-chunking/")
 LOG_OUTPUT_DIR = Path("sandbox/logs/sam3-hf-chunking/")
 VIS_FRAME_STRIDE = 25  # Visualize every Nth frame
+
+# Multi-object tracking heuristics
+MIN_OBJECTS_FOR_TRACKING = 3  # Minimum objects to look for in previous chunk
+MAX_LOOKBACK_FRAMES = 15  # Max frames to look back (<1 second at 25fps)
 
 # =============================================================================
 # Logger Setup
@@ -169,44 +174,93 @@ def convert_results_for_json(results: dict) -> dict:
     }
 
 
-def get_best_object_from_results(
+def get_all_objects_from_results(
     results: dict,
-) -> tuple[np.ndarray | None, list | None]:
+) -> tuple[list[np.ndarray], list[list[float]], list[int]]:
     """
-    Extract the best (highest score) object's mask and bbox from results.
+    Extract ALL objects' masks, bboxes, and object IDs from results.
 
     Args:
-        results: dict with 'masks', 'boxes', 'scores'
+        results: dict with 'masks', 'boxes', 'object_ids', 'scores'
 
     Returns:
-        Tuple of (mask, bbox) for the highest-scoring object, or (None, None)
+        Tuple of (masks_list, boxes_list, object_ids_list)
+        Each list has one entry per object.
     """
-    scores = results.get("scores")
-    if scores is None or len(scores) == 0:
-        return None, None
-
-    if isinstance(scores, torch.Tensor):
-        scores = scores.cpu().numpy()
-
-    best_idx = int(np.argmax(scores))
-
     masks = results.get("masks")
-    if masks is not None:
-        if isinstance(masks, torch.Tensor):
-            masks = masks.cpu().numpy()
-        best_mask = masks[best_idx]
-    else:
-        best_mask = None
-
     boxes = results.get("boxes")
-    if boxes is not None:
-        if isinstance(boxes, torch.Tensor):
-            boxes = boxes.cpu().numpy()
-        best_bbox = [float(c) for c in boxes[best_idx]]
-    else:
-        best_bbox = None
+    object_ids = results.get("object_ids")
 
-    return best_mask, best_bbox
+    if masks is None or len(masks) == 0:
+        return [], [], []
+
+    if isinstance(masks, torch.Tensor):
+        masks = masks.cpu().numpy()
+    if isinstance(boxes, torch.Tensor):
+        boxes = boxes.cpu().numpy()
+    if isinstance(object_ids, torch.Tensor):
+        object_ids = object_ids.cpu().numpy()
+
+    masks_list = [masks[i] for i in range(len(masks))]
+    boxes_list = [[float(c) for c in boxes[i]] for i in range(len(boxes))]
+    object_ids_list = (
+        [int(object_ids[i]) for i in range(len(object_ids))]
+        if object_ids is not None
+        else list(range(1, len(masks) + 1))
+    )
+
+    return masks_list, boxes_list, object_ids_list
+
+
+def find_frame_with_enough_objects(
+    outputs_per_frame: dict[int, dict],
+    min_objects: int = 3,
+    max_lookback: int = 25,
+) -> tuple[int | None, list[np.ndarray], list[list[float]], list[int]]:
+    """
+    Search backwards through frame results to find a frame with enough objects.
+
+    Args:
+        outputs_per_frame: Dict mapping frame_idx -> results
+        min_objects: Minimum number of objects required
+        max_lookback: Maximum number of frames to search backwards
+
+    Returns:
+        Tuple of (frame_idx, masks_list, boxes_list, object_ids_list)
+        Returns (None, [], [], []) if no suitable frame found within lookback limit.
+    """
+    frame_indices = sorted(outputs_per_frame.keys(), reverse=True)
+
+    for i, frame_idx in enumerate(frame_indices):
+        if i >= max_lookback:
+            logger.warning(
+                f"Could not find frame with {min_objects}+ objects within {max_lookback} frames"
+            )
+            return None, [], [], []
+
+        results = outputs_per_frame[frame_idx]
+        masks_list, boxes_list, object_ids_list = get_all_objects_from_results(results)
+
+        if len(masks_list) >= min_objects:
+            logger.info(
+                f"Found frame {frame_idx} with {len(masks_list)} objects "
+                f"({i} frames back from end)"
+            )
+            return frame_idx, masks_list, boxes_list, object_ids_list
+
+    # If we get here, no frame had enough objects but we're within lookback
+    # Return the last frame's objects anyway
+    if frame_indices:
+        last_frame = frame_indices[0]
+        results = outputs_per_frame[last_frame]
+        masks_list, boxes_list, object_ids_list = get_all_objects_from_results(results)
+        if masks_list:
+            logger.warning(
+                f"No frame with {min_objects}+ objects found, using last frame with {len(masks_list)} objects"
+            )
+            return last_frame, masks_list, boxes_list, object_ids_list
+
+    return None, [], [], []
 
 
 def extract_equidistant_points_from_mask(
@@ -379,14 +433,16 @@ def process_chunk(
     chunk_range: tuple[int, int],
     device: torch.device,
     text_prompt: str,
-    previous_mask: np.ndarray | None = None,
-) -> tuple[dict[int, dict], np.ndarray | None, list | None, list | None]:
+    previous_outputs: dict[int, dict] | None = None,
+    min_objects_for_tracking: int = 3,
+    max_lookback_frames: int = 25,
+) -> tuple[dict[int, dict], dict | None]:
     """
     Process a single video chunk with SAM3.
 
     For the first chunk (chunk_idx=0), uses Sam3VideoModel with text prompt.
     For subsequent chunks, uses Sam3TrackerVideoModel with point prompts
-    extracted from the previous chunk's last mask.
+    extracted from ALL objects in the previous chunk.
 
     Args:
         chunk_idx: Index of this chunk
@@ -394,11 +450,13 @@ def process_chunk(
         chunk_range: (start_idx, end_idx) for this chunk
         device: PyTorch device
         text_prompt: Text prompt for segmentation (used for first chunk)
-        previous_mask: Mask from previous chunk for continuity (optional)
+        previous_outputs: Outputs from previous chunk for continuity
+        min_objects_for_tracking: Minimum objects needed to use tracker
+        max_lookback_frames: Max frames to search back for enough objects
 
     Returns:
-        Tuple of (outputs_per_frame, last_mask, last_bbox, prompt_points)
-        prompt_points is the list of points used as prompt (None for first chunk)
+        Tuple of (outputs_per_frame, chunk_info_dict)
+        chunk_info_dict contains model_type, prompt_points, num_objects, etc.
     """
     start_idx, end_idx = chunk_range
     chunk_frames = video_frames[start_idx:end_idx]
@@ -430,12 +488,69 @@ def process_chunk(
                 f"GPU memory after additional cleanup - Allocated: {allocated:.2f} GiB, Reserved: {reserved:.2f} GiB"
             )
 
-    # Track the prompt points used (for metadata)
-    prompt_points = None
+    # Track the chunk info for metadata
+    chunk_info = {
+        "model_type": None,
+        "prompt_points": None,
+        "num_objects_tracked": 0,
+        "source_frame_idx": None,
+        "fallback_reason": None,
+    }
 
-    if chunk_idx == 0 or previous_mask is None:
+    # Determine if we should use tracker or text model
+    use_tracker = False
+    masks_list = []
+    boxes_list = []
+    object_ids_list = []
+    all_prompt_points = {}  # obj_id -> list of points
+
+    if chunk_idx == 0 or previous_outputs is None:
+        # First chunk: always use text model
+        chunk_info["model_type"] = "Sam3VideoModel"
+        chunk_info["fallback_reason"] = "first_chunk"
+    else:
+        # Try to find a frame with enough objects
+        source_frame_idx, masks_list, boxes_list, object_ids_list = (
+            find_frame_with_enough_objects(
+                previous_outputs,
+                min_objects=min_objects_for_tracking,
+                max_lookback=max_lookback_frames,
+            )
+        )
+
+        if source_frame_idx is None or len(masks_list) == 0:
+            # No suitable frame found, fall back to text model
+            chunk_info["model_type"] = "Sam3VideoModel"
+            chunk_info["fallback_reason"] = "no_objects_found"
+            logger.warning(
+                "No objects found in previous chunk, falling back to text model"
+            )
+        else:
+            # Extract points from each object's mask
+            for obj_id, mask in zip(object_ids_list, masks_list):
+                points = extract_equidistant_points_from_mask(mask, num_points=3)
+                if points is not None:
+                    all_prompt_points[obj_id] = points
+
+            if len(all_prompt_points) == 0:
+                chunk_info["model_type"] = "Sam3VideoModel"
+                chunk_info["fallback_reason"] = "could_not_extract_points"
+                logger.warning(
+                    "Could not extract points from any mask, falling back to text model"
+                )
+            else:
+                use_tracker = True
+                chunk_info["model_type"] = "Sam3TrackerVideoModel"
+                chunk_info["prompt_points"] = all_prompt_points
+                chunk_info["num_objects_tracked"] = len(all_prompt_points)
+                chunk_info["source_frame_idx"] = source_frame_idx
+                logger.info(
+                    f"Will track {len(all_prompt_points)} objects from frame {source_frame_idx}"
+                )
+
+    if not use_tracker:
         # =====================================================================
-        # FIRST CHUNK: Use Sam3VideoModel with text prompt (PCS)
+        # Use Sam3VideoModel with text prompt (PCS)
         # =====================================================================
         logger.info("Loading Sam3VideoModel for text-based segmentation...")
         model = Sam3VideoModel.from_pretrained("facebook/sam3").to(
@@ -463,110 +578,96 @@ def process_chunk(
         # Process all frames in the chunk
         logger.info("Running inference...")
         outputs_per_frame = {}
-        for model_outputs in model.propagate_in_video_iterator(
-            inference_session=inference_session,
-            max_frame_num_to_track=len(chunk_frames),
-        ):
-            processed_outputs = processor.postprocess_outputs(
-                inference_session, model_outputs
-            )
-            global_frame_idx = start_idx + model_outputs.frame_idx
-            outputs_per_frame[global_frame_idx] = processed_outputs
-
-    else:
-        # =====================================================================
-        # SUBSEQUENT CHUNKS: Use Sam3TrackerVideoModel with point prompts (PVS)
-        # =====================================================================
-        # Extract equidistant points from previous mask
-        prompt_points = extract_equidistant_points_from_mask(
-            previous_mask, num_points=3
-        )
-        if prompt_points is None:
-            logger.warning(
-                "Could not extract points from previous mask, falling back to text prompt"
-            )
-            # Fallback to text-based model
-            model = Sam3VideoModel.from_pretrained("facebook/sam3").to(
-                device, dtype=torch.bfloat16
-            )
-            processor = Sam3VideoProcessor.from_pretrained("facebook/sam3")
-            inference_session = processor.init_video_session(
-                video=chunk_frames,
-                inference_device=device,
-                processing_device="cpu",
-                video_storage_device="cpu",
-                dtype=torch.bfloat16,
-            )
-            inference_session = processor.add_text_prompt(
-                inference_session=inference_session,
-                text=text_prompt,
-            )
-            outputs_per_frame = {}
-            for model_outputs in model.propagate_in_video_iterator(
-                inference_session=inference_session,
-                max_frame_num_to_track=len(chunk_frames),
+        with torch.inference_mode():
+            for model_outputs in tqdm(
+                model.propagate_in_video_iterator(
+                    inference_session=inference_session,
+                    max_frame_num_to_track=len(chunk_frames),
+                ),
+                total=len(chunk_frames),
+                desc=f"Chunk {chunk_idx} (text)",
+                unit="frame",
             ):
                 processed_outputs = processor.postprocess_outputs(
                     inference_session, model_outputs
                 )
                 global_frame_idx = start_idx + model_outputs.frame_idx
                 outputs_per_frame[global_frame_idx] = processed_outputs
-        else:
-            logger.info(
-                f"Using Sam3TrackerVideoModel with {len(prompt_points)} point prompts: {prompt_points}"
-            )
 
-            model = Sam3TrackerVideoModel.from_pretrained("facebook/sam3").to(
-                device, dtype=torch.bfloat16
-            )
-            processor = Sam3TrackerVideoProcessor.from_pretrained("facebook/sam3")
+    else:
+        # =====================================================================
+        # Use Sam3TrackerVideoModel with point prompts for ALL objects (PVS)
+        # =====================================================================
+        logger.info(
+            f"Using Sam3TrackerVideoModel to track {len(all_prompt_points)} objects"
+        )
+        for obj_id, points in all_prompt_points.items():
+            logger.info(f"  Object {obj_id}: points {points}")
 
-            # Initialize video inference session
-            # IMPORTANT: Keep video frames on CPU to reduce GPU memory pressure
-            logger.info("Initializing video inference session...")
-            inference_session = processor.init_video_session(
-                video=chunk_frames,
-                inference_device=device,
-                processing_device="cpu",  # Process on CPU to save GPU memory
-                video_storage_device="cpu",  # Store video frames on CPU
-                dtype=torch.bfloat16,
-            )
+        model = Sam3TrackerVideoModel.from_pretrained("facebook/sam3").to(
+            device, dtype=torch.bfloat16
+        )
+        processor = Sam3TrackerVideoProcessor.from_pretrained("facebook/sam3")
 
-            # Add point inputs on first frame of chunk
-            # Format: [[[[x1, y1], [x2, y2], ...]]] - 4D: batch, obj, points, coords
-            ann_frame_idx = 0
-            ann_obj_id = 1
-            points = [
-                [[[p[0], p[1]] for p in prompt_points]]
-            ]  # Wrap for batch/obj dims
-            labels = [[[1] * len(prompt_points)]]  # All positive points
+        # Initialize video inference session
+        logger.info("Initializing video inference session...")
+        inference_session = processor.init_video_session(
+            video=chunk_frames,
+            inference_device=device,
+            processing_device="cpu",
+            video_storage_device="cpu",
+            dtype=torch.bfloat16,
+        )
 
-            logger.info(f"Adding {len(prompt_points)} point prompts on frame 0")
-            processor.add_inputs_to_inference_session(
-                inference_session=inference_session,
-                frame_idx=ann_frame_idx,
-                obj_ids=ann_obj_id,
-                input_points=points,
-                input_labels=labels,
-            )
+        # Add point inputs for ALL objects on first frame
+        # Format for multiple objects: each object gets its own entry
+        ann_frame_idx = 0
+        obj_ids = list(all_prompt_points.keys())
 
-            # IMPORTANT: Must run inference on the first frame before propagating
-            # This initializes the tracking state
-            logger.info("Running initial inference on frame 0...")
+        # Build input_points and input_labels for multi-object tracking
+        # Format: [[obj1_points, obj2_points, ...]] where each obj_points is [[x1,y1], [x2,y2], ...]
+        input_points = [
+            [all_prompt_points[oid] for oid in obj_ids]
+        ]  # [batch[obj1_pts, obj2_pts, ...]]
+        input_labels = [
+            [[1] * len(all_prompt_points[oid]) for oid in obj_ids]
+        ]  # [batch[obj1_labels, obj2_labels, ...]]
+
+        logger.info(f"Adding prompts for {len(obj_ids)} objects on frame 0")
+        processor.add_inputs_to_inference_session(
+            inference_session=inference_session,
+            frame_idx=ann_frame_idx,
+            obj_ids=obj_ids,
+            input_points=input_points,
+            input_labels=input_labels,
+        )
+
+        # Run inference on the first frame to initialize tracking
+        logger.info("Running initial inference on frame 0...")
+        with torch.inference_mode():
             _ = model(
                 inference_session=inference_session,
                 frame_idx=ann_frame_idx,
             )
 
-            # Process all frames in the chunk
-            logger.info("Running inference...")
-            outputs_per_frame = {}
-            for tracker_output in model.propagate_in_video_iterator(inference_session):
+        # Process all frames in the chunk
+        logger.info("Running inference...")
+        outputs_per_frame = {}
+        with torch.inference_mode():
+            for tracker_output in tqdm(
+                model.propagate_in_video_iterator(inference_session),
+                total=len(chunk_frames),
+                desc=f"Chunk {chunk_idx} (tracker, {len(obj_ids)} objs)",
+                unit="frame",
+            ):
                 # Post-process masks
                 video_res_masks = processor.post_process_masks(
                     [tracker_output.pred_masks],
                     original_sizes=[
-                        [inference_session.video_height, inference_session.video_width]
+                        [
+                            inference_session.video_height,
+                            inference_session.video_width,
+                        ]
                     ],
                     binarize=True,
                 )[0]
@@ -599,21 +700,23 @@ def process_chunk(
                     else:
                         boxes.append([0.0, 0.0, 0.0, 0.0])
 
+                # Use the actual tracked object IDs
+                tracked_obj_ids = (
+                    list(inference_session.obj_ids)
+                    if hasattr(inference_session, "obj_ids")
+                    else obj_ids
+                )
+
                 outputs_per_frame[global_frame_idx] = {
                     "masks": masks_np,
                     "boxes": np.array(boxes),
-                    "object_ids": np.array([ann_obj_id]),
-                    "scores": np.array([1.0]),  # Tracker doesn't provide scores
+                    "object_ids": np.array(tracked_obj_ids[: len(masks_np)]),
+                    "scores": np.array(
+                        [1.0] * len(masks_np)
+                    ),  # Tracker doesn't provide scores
                 }
 
     logger.info(f"Processed {len(outputs_per_frame)} frames in chunk {chunk_idx}")
-
-    # Get the last frame's best object for continuity
-    last_frame_idx = max(outputs_per_frame.keys())
-    last_results = outputs_per_frame[last_frame_idx]
-    last_mask, last_bbox = get_best_object_from_results(last_results)
-
-    logger.info(f"Last frame bbox for next chunk: {last_bbox}")
 
     # Free GPU memory - MUST delete objects explicitly in this scope
     logger.info("Cleaning up GPU memory...")
@@ -630,7 +733,7 @@ def process_chunk(
     # Force garbage collection and clear cache
     free_gpu_memory()
 
-    return outputs_per_frame, last_mask, last_bbox, prompt_points
+    return outputs_per_frame, chunk_info
 
 
 def save_visualizations(
@@ -672,6 +775,82 @@ def save_visualizations(
 # =============================================================================
 
 
+def save_incremental_results(
+    all_results: dict[int, dict],
+    chunk_metadata: dict[int, dict],
+    video_frames: list,
+    fps: float,
+    output_path: Path,
+    vis_output_dir: Path,
+    vis_stride: int = 25,
+):
+    """
+    Save results incrementally after each chunk.
+
+    Args:
+        all_results: Results accumulated so far {chunk_idx -> {frame_idx -> results}}
+        chunk_metadata: Metadata for each chunk
+        video_frames: All video frames
+        fps: Video frames per second
+        output_path: Path to save JSON results
+        vis_output_dir: Directory to save visualizations
+        vis_stride: Save every Nth frame for visualization
+    """
+    # Convert keys to strings for JSON serialization
+    json_results = {
+        str(chunk_idx): {
+            str(frame_idx): frame_results
+            for frame_idx, frame_results in chunk_data.items()
+        }
+        for chunk_idx, chunk_data in all_results.items()
+    }
+
+    # Add metadata
+    json_output = {
+        "metadata": {
+            "video_path": VIDEO_PATH,
+            "text_prompt": TEXT_PROMPT,
+            "chunk_duration_seconds": CHUNK_DURATION_SECONDS,
+            "min_objects_for_tracking": MIN_OBJECTS_FOR_TRACKING,
+            "max_lookback_frames": MAX_LOOKBACK_FRAMES,
+            "total_chunks_processed": len(all_results),
+            "total_frames": len(video_frames),
+            "fps": fps,
+        },
+        "chunk_metadata": {
+            str(chunk_idx): meta for chunk_idx, meta in chunk_metadata.items()
+        },
+        "results": json_results,
+    }
+
+    # Save JSON
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(output_path, "w") as f:
+        json.dump(json_output, f, indent=2)
+    logger.info(f"Incremental results saved to {output_path}")
+
+    # Save visualizations for new frames
+    vis_output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Flatten results and save visualizations
+    for chunk_idx, chunk_data in all_results.items():
+        for frame_idx, frame_results in chunk_data.items():
+            if int(frame_idx) % vis_stride != 0:
+                continue
+
+            output_img_path = vis_output_dir / f"frame_{int(frame_idx):06d}.png"
+            if output_img_path.exists():
+                continue  # Skip already saved frames
+
+            # Decode RLE masks
+            masks_rle = frame_results.get("masks_rle", [])
+            if masks_rle:
+                masks = np.stack([mask_util.decode(rle) for rle in masks_rle])
+                frame = video_frames[int(frame_idx)]
+                vis_image = overlay_masks_on_frame(frame, masks)
+                vis_image.save(output_img_path)
+
+
 def main():
     """Main entry point for the chunking script."""
     # Setup logger with file output
@@ -681,6 +860,9 @@ def main():
     logger.info("SAM3 HuggingFace Video Chunking Script")
     logger.info("=" * 60)
     logger.info(f"Log file: {log_file}")
+    logger.info(
+        f"Config: min_objects={MIN_OBJECTS_FOR_TRACKING}, max_lookback={MAX_LOOKBACK_FRAMES}"
+    )
 
     # Setup device
     device = autoselect_torch_device()
@@ -696,21 +878,25 @@ def main():
 
     # Process each chunk
     all_results: dict[int, dict] = {}  # chunk_idx -> {frame_idx -> results}
-    chunk_metadata: dict[int, dict] = {}  # chunk_idx -> metadata (prompt_points, etc.)
-    previous_mask = None
+    chunk_metadata: dict[int, dict] = {}  # chunk_idx -> metadata
+    previous_outputs: dict[int, dict] | None = (
+        None  # frame_idx -> results from previous chunk
+    )
 
     for chunk_idx, chunk_range in enumerate(chunks):
         logger.info(f"\n{'=' * 60}")
         logger.info(f"CHUNK {chunk_idx + 1}/{len(chunks)}")
         logger.info(f"{'=' * 60}")
 
-        outputs_per_frame, last_mask, last_bbox, prompt_points = process_chunk(
+        outputs_per_frame, chunk_info = process_chunk(
             chunk_idx=chunk_idx,
             video_frames=video_frames,
             chunk_range=chunk_range,
             device=device,
             text_prompt=TEXT_PROMPT,
-            previous_mask=previous_mask,
+            previous_outputs=previous_outputs,
+            min_objects_for_tracking=MIN_OBJECTS_FOR_TRACKING,
+            max_lookback_frames=MAX_LOOKBACK_FRAMES,
         )
 
         # Convert and store results
@@ -720,73 +906,26 @@ def main():
 
         all_results[chunk_idx] = chunk_results
 
-        # Store chunk metadata including prompt points
+        # Store chunk metadata
         chunk_metadata[chunk_idx] = {
             "frame_range": list(chunk_range),
-            "prompt_points": prompt_points,  # None for first chunk, list of [x, y] for subsequent
-            "model_type": "Sam3VideoModel"
-            if chunk_idx == 0 or previous_mask is None
-            else "Sam3TrackerVideoModel",
+            **chunk_info,  # Include model_type, prompt_points, num_objects_tracked, etc.
         }
 
-        # Pass mask to next chunk for point extraction
-        previous_mask = last_mask
+        # Pass ALL outputs to next chunk for multi-object tracking
+        previous_outputs = outputs_per_frame
 
-    # Save results to JSON
-    OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    logger.info(f"Saving results to {OUTPUT_PATH}...")
-
-    # Convert keys to strings for JSON serialization
-    json_results = {
-        str(chunk_idx): {
-            str(frame_idx): frame_results
-            for frame_idx, frame_results in chunk_data.items()
-        }
-        for chunk_idx, chunk_data in all_results.items()
-    }
-
-    # Add metadata including per-chunk prompt points
-    json_output = {
-        "metadata": {
-            "video_path": VIDEO_PATH,
-            "text_prompt": TEXT_PROMPT,
-            "chunk_duration_seconds": CHUNK_DURATION_SECONDS,
-            "total_chunks": len(chunks),
-            "total_frames": len(video_frames),
-            "fps": fps,
-        },
-        "chunk_metadata": {
-            str(chunk_idx): meta for chunk_idx, meta in chunk_metadata.items()
-        },
-        "results": json_results,
-    }
-
-    with open(OUTPUT_PATH, "w") as f:
-        json.dump(json_output, f, indent=2)
-
-    logger.info(f"Results saved to {OUTPUT_PATH}")
-
-    # Save visualizations (optional)
-    logger.info("\nGenerating visualizations...")
-
-    # Flatten all results for visualization
-    flat_results = {}
-    for chunk_idx, chunk_data in all_results.items():
-        for frame_idx, frame_results in chunk_data.items():
-            # Need to decode RLE back to masks for visualization
-            masks_rle = frame_results.get("masks_rle", [])
-            if masks_rle:
-                masks = np.stack([mask_util.decode(rle) for rle in masks_rle])
-                flat_results[frame_idx] = {"masks": masks}
-            else:
-                flat_results[frame_idx] = {"masks": None}
-
-    save_visualizations(
-        all_results=flat_results,
-        video_frames=video_frames,
-        output_dir=VIS_OUTPUT_DIR,
-        stride=VIS_FRAME_STRIDE,
-    )
+        # INCREMENTAL SAVE: Save results after each chunk
+        logger.info("Saving incremental results...")
+        save_incremental_results(
+            all_results=all_results,
+            chunk_metadata=chunk_metadata,
+            video_frames=video_frames,
+            fps=fps,
+            output_path=OUTPUT_PATH,
+            vis_output_dir=VIS_OUTPUT_DIR,
+            vis_stride=VIS_FRAME_STRIDE,
+        )
 
     logger.info("\n" + "=" * 60)
     logger.info("PROCESSING COMPLETE")
