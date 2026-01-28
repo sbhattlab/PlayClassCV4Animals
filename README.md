@@ -28,7 +28,13 @@ pixi shell -e sam3-hf
 - Segmenter
     - OpenCV + SciPy (i.e. "pure" computer vision, virtually no pre-trained model-based prediction)
     - Grounded-SAM-2  
-    - SAM3 
+    - SAM3 (huggingface (hf) and native implementations)
+
+# Overview of currently implemented test scripts
+```sh
+# SAM3-hf
+pixi run test-sam3-hf
+```
 
 # Future methods to test
 - DINOv2/v3-derived features
