@@ -31,7 +31,7 @@ pixi shell -e sam3-hf
     - SAM3 (huggingface (hf) and native implementations)
 
 # Overview of currently implemented test scripts
-> [Important!] 
+> [!IMPORTANT]
 > Set `CUDA_VISIBLE_DEVICES` explicitly before running the commands below, e.g.:
 ```sh
 CUDA_VISIBLE_DEVICES=1 pixi run test-sam3-hf-image
@@ -39,11 +39,11 @@ CUDA_VISIBLE_DEVICES=1 pixi run test-sam3-hf-image
 
 ```sh
 # SAM3-hf
-CUDA_VISIBLE_DEVICES=1 pixi run test-sam3-hf-image # Only test currently available on macOS
-CUDA_VISIBLE_DEVICES=1 pixi run test-sam3-hf-video
+pixi run test-sam3-hf-image # Only test currently available on macOS
+pixi run test-sam3-hf-video
 
 # SAM3-native 
-CUDA_VISIBLE_DEVICES=1 pixi run test-sam3-native-video  
+pixi run test-sam3-native-video  
 ```
 
 # Future methods to implemented
