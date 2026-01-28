@@ -1,8 +1,12 @@
 import logging
+import sys
+from pathlib import Path
+
+# Add workspace root to Python path
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import torch
 from PIL import Image
-
 from transformers import Sam3Model, Sam3Processor
 
 # Configure logging

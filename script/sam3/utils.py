@@ -9,6 +9,25 @@ import pycocotools.mask as mask_util
 import torch
 
 
+def autoselect_torch_device():
+    """
+    Automatically selects the best available PyTorch device:
+    - Prioritizes CUDA if available.
+    - Fallback to MPS if CUDA is not available.
+    - Default to CPU if neither CUDA nor MPS are available.
+
+           torch.device: The selected device.
+    """
+    if torch.cuda.is_available():
+        device = torch.device("cuda")
+    elif torch.backends.mps.is_available():
+        device = torch.device("mps")
+    else:
+        device = torch.device("cpu")
+
+    return device
+
+
 def plot_frame_from_df(
     df: pd.DataFrame,
     decoder,  # torchcodec.decoders.VideoDecoder
