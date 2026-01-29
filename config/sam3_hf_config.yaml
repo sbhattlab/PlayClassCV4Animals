@@ -15,7 +15,7 @@ PYTORCH_ALLOC_CONF: "expandable_segments:True,garbage_collection_threshold:0.6" 
 # =============================================================================
 # Video/IO Configuration
 # =============================================================================
-video_path: "data/video/test_1_min.mp4"
+video_path: "ext-data/test/video_1_5_min.mp4"
 text_prompt: "bird"
 
 # Output directory - results will be saved to a timestamped subdirectory
@@ -25,14 +25,14 @@ output_dir: "ext-data/output/results/sam3-hf"
 # =============================================================================
 # Chunking Configuration
 # =============================================================================
-chunk_duration_seconds: 15 # 
-vis_frame_stride: 5 # Visualize every Nth frame
+chunk_duration_seconds: 60 # 
+vis_frame_stride: 30 # Visualize every Nth frame
 
 # =============================================================================
 # Multi-object Tracking Heuristics
 # =============================================================================
 min_objects_for_tracking: 3 # Minimum objects to look for in previous chunk
-max_lookback_frames: 5 # Max frames to look back 
+max_lookback_frames: 10 # Max frames to look back 
 
 # =============================================================================
 # Sam3VideoConfig Tracking Parameters

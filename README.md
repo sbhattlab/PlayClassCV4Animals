@@ -7,29 +7,30 @@ ln -s  "$HOME/Library/CloudStorage/OneDrive-UniversityofCopenhagen/IFSV/proj/chi
 # ku-01
 ln -s "/mnt/birds/rebecca2025/raw" video-data
 ln -s "/mnt/birds/rebecca2025/" ext-data
-
 ```
+
 ## Overview of test data
 - Small (<=1 min) in `data/img` and `data/video`
     - 10 sec, 15 sec, 30 sec, 1 min clips
 - Medium (>=5 min) at `/mnt/birds/rebecca2025/`
     - 5 min
+
 # Environment
 ```sh
 # Install main (default) environment
 pixi install
 
-# All environments
+# Install all environments
 pixi install --all
+
 # Launch shell in specific environment
 pixi shell -e sam3-hf
 ```
 
 # How to run scripts
 ```sh
-CUDA_VISIBLE_DEVICES="1" PYTORCH_ALLOC_CONF="expandable_segments:True,garbage_collection_threshold:0.6" python -m script.sam3.sam3-hf-chunking --config config/my_custom_config.yaml
+python -m script.sam3.sam3-hf-chunking --config config/my_custom_config.yaml
 ```
-
 
 # Overview of currently implemented test scripts
 > [!IMPORTANT]
@@ -46,7 +47,6 @@ pixi run -e sam3-native python -c "import torch; print(f'PyTorch is installed: {
 # SAM3-hf
 pixi run test-sam3-hf-image
 pixi run test-sam3-hf-video
-pixi run test-sam3-hf-chunking
 
 # SAM3-native 
 pixi run test-sam3-native-video  

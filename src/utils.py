@@ -18,6 +18,7 @@ import torch
 from loguru import logger
 from omegaconf import DictConfig, OmegaConf
 from PIL import Image
+from tqdm import tqdm
 from transformers.video_utils import load_video
 
 # Try to import supervision, fall back gracefully if not available
@@ -664,8 +665,10 @@ def render_annotated_video(
         cap.release()
         raise RuntimeError(f"Could not create video writer: {output_path}")
 
-    print(f"Rendering annotated video: {total_frames} frames at {output_fps:.2f} FPS")
-    print(f"Output: {output_path}")
+    logger.info(
+        f"Rendering annotated video: {total_frames} frames at {output_fps:.2f} FPS"
+    )
+    logger.info(f"Output: {output_path}")
 
     # Color generator for consistent object colors
     def get_color_for_id(obj_id: int) -> tuple[int, int, int]:
@@ -691,6 +694,7 @@ def render_annotated_video(
             color_lookup=sv.ColorLookup.TRACK,
         )
 
+    pbar = tqdm(total=total_frames, desc="Rendering video", unit="frame")
     frame_idx = 0
     while True:
         ret, frame = cap.read()
@@ -765,15 +769,13 @@ def render_annotated_video(
                 )
 
         writer.write(frame)
+        pbar.update(1)
         frame_idx += 1
 
-        # Progress indicator
-        if frame_idx % 100 == 0:
-            print(f"  Processed {frame_idx}/{total_frames} frames...")
-
+    pbar.close()
     cap.release()
     writer.release()
-    print(f"Done! Output saved to: {output_path}")
+    logger.info(f"Done! Output saved to: {output_path}")
 
 
 def _annotate_frame_opencv(
