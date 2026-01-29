@@ -18,6 +18,13 @@ from pathlib import Path
 from loguru import logger
 
 from src.sam3_hf import chunk_video_frames, process_chunk
+from src.tracking_metrics import (
+    ChunkMetrics,
+    save_chunk_summary_to_csv,
+    save_chunk_summary_to_parquet,
+    save_frame_metrics_to_csv,
+    save_frame_metrics_to_parquet,
+)
 from src.utils import (
     autoselect_torch_device,
     convert_results_for_json,
@@ -116,14 +123,31 @@ def main():
     # Process each chunk
     all_results: dict[int, dict] = {}  # chunk_idx -> {frame_idx -> results}
     chunk_metadata: dict[int, dict] = {}  # chunk_idx -> metadata
+    all_chunk_metrics: list[ChunkMetrics] = []  # Collect all chunk metrics
+    all_frame_metrics: list = []  # Collect all frame metrics across chunks
     previous_outputs: dict[int, dict] | None = None
+
+    # Extract metrics config with defaults
+    metrics_enabled = cfg.get("metrics", {}).get("enabled", False)
+    metrics_log_per_frame = cfg.get("metrics", {}).get("log_per_frame", False)
+    metrics_occlusion_threshold = cfg.get("metrics", {}).get(
+        "occlusion_iou_threshold", 0.15
+    )
+    metrics_clustering_threshold = cfg.get("metrics", {}).get(
+        "clustering_distance_threshold", 50.0
+    )
+    metrics_save_csv = cfg.get("metrics", {}).get("save_csv", True)
+    metrics_save_parquet = cfg.get("metrics", {}).get("save_parquet", True)
+
+    if metrics_enabled:
+        logger.info("Tracking metrics computation ENABLED")
 
     for chunk_idx, chunk_range in enumerate(chunks):
         logger.info(f"\n{'=' * 60}")
         logger.info(f"CHUNK {chunk_idx + 1}/{len(chunks)}")
         logger.info(f"{'=' * 60}")
 
-        outputs_per_frame, chunk_info = process_chunk(
+        outputs_per_frame, chunk_info, chunk_metrics = process_chunk(
             chunk_idx=chunk_idx,
             video_frames=video_frames,
             chunk_range=chunk_range,
@@ -140,7 +164,19 @@ def main():
             hotstart_dup_thresh=cfg.tracking.hotstart_dup_thresh,
             suppress_overlapping_based_on_recent_occlusion_threshold=cfg.tracking.suppress_overlap_thresh,
             recondition_every_nth_frame=cfg.tracking.recondition_every_nth_frame,
+            # Metrics parameters
+            compute_metrics=metrics_enabled,
+            log_metrics_per_frame=metrics_log_per_frame,
+            occlusion_iou_threshold=metrics_occlusion_threshold,
+            clustering_distance_threshold=metrics_clustering_threshold,
         )
+
+        # Collect metrics if enabled
+        if chunk_metrics is not None:
+            all_chunk_metrics.append(chunk_metrics)
+            # Collect frame metrics from the chunk_metrics object
+            if hasattr(chunk_metrics, "frame_metrics_list"):
+                all_frame_metrics.extend(chunk_metrics.frame_metrics_list)
 
         # Convert and store results
         chunk_results = {}
@@ -222,6 +258,35 @@ def main():
         output_path=annotated_video_path,
     )
 
+    # Save metrics if enabled
+    metrics_dir = None
+    if metrics_enabled and all_chunk_metrics:
+        metrics_dir = run_dir / "metrics"
+        metrics_dir.mkdir(parents=True, exist_ok=True)
+
+        logger.info("Saving tracking metrics...")
+
+        # Save frame-level metrics
+        if all_frame_metrics:
+            if metrics_save_csv:
+                save_frame_metrics_to_csv(
+                    all_frame_metrics, metrics_dir / "frame_metrics.csv"
+                )
+            if metrics_save_parquet:
+                save_frame_metrics_to_parquet(
+                    all_frame_metrics, metrics_dir / "frame_metrics.parquet"
+                )
+
+        # Save chunk-level summary
+        if metrics_save_csv:
+            save_chunk_summary_to_csv(
+                all_chunk_metrics, metrics_dir / "chunk_summary.csv"
+            )
+        if metrics_save_parquet:
+            save_chunk_summary_to_parquet(
+                all_chunk_metrics, metrics_dir / "chunk_summary.parquet"
+            )
+
     logger.info("\n" + "=" * 60)
     logger.info("PROCESSING COMPLETE")
     logger.info("=" * 60)
@@ -229,6 +294,8 @@ def main():
     logger.info(f"Final results: {output_path}")
     logger.info(f"Annotated video: {annotated_video_path}")
     logger.info(f"Visualizations: {vis_output_dir}")
+    if metrics_dir:
+        logger.info(f"Metrics: {metrics_dir}")
     logger.info(f"Log file: {log_file}")
 
 

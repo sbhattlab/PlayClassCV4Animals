@@ -33,6 +33,13 @@ from transformers import (
     Sam3VideoProcessor,
 )
 
+from src.tracking_metrics import (
+    ChunkMetrics,
+    compute_chunk_metrics,
+    compute_frame_metrics,
+    log_chunk_metrics,
+    log_frame_metrics,
+)
 from src.utils import free_gpu_memory, get_all_objects_from_results
 
 __all__ = [
@@ -190,7 +197,12 @@ def process_chunk(
     hotstart_dup_thresh: int | None = None,
     suppress_overlapping_based_on_recent_occlusion_threshold: float | None = None,
     recondition_every_nth_frame: int | None = None,
-) -> tuple[dict[int, dict], dict]:
+    # Metrics parameters
+    compute_metrics: bool = False,
+    log_metrics_per_frame: bool = False,
+    occlusion_iou_threshold: float = 0.15,
+    clustering_distance_threshold: float = 50.0,
+) -> tuple[dict[int, dict], dict, ChunkMetrics | None]:
     """
     Process a single video chunk with SAM3.
 
@@ -221,12 +233,19 @@ def process_chunk(
         recondition_every_nth_frame: Frequency of mask reconditioning (default: 16)
             Lower = more frequent reconditioning, prevents drift
 
+        # Metrics parameters:
+        compute_metrics: Whether to compute tracking metrics for this chunk
+        log_metrics_per_frame: Whether to log metrics for each frame (verbose)
+        occlusion_iou_threshold: IoU threshold for occlusion detection
+        clustering_distance_threshold: Distance threshold for clustering detection (pixels)
+
     Returns:
-        Tuple of (outputs_per_frame, chunk_info_dict)
+        Tuple of (outputs_per_frame, chunk_info_dict, chunk_metrics)
         - outputs_per_frame: dict mapping global frame_idx to results with
           'masks', 'boxes', 'object_ids', 'scores' (numpy arrays)
         - chunk_info_dict: metadata about the chunk processing including
           model_type, prompt_points, num_objects_tracked, etc.
+        - chunk_metrics: ChunkMetrics object or None if compute_metrics=False
     """
     start_idx, end_idx = chunk_range
     chunk_frames = video_frames[start_idx:end_idx]
@@ -543,4 +562,59 @@ def process_chunk(
     # Force garbage collection and clear cache
     free_gpu_memory(log_stats=True)
 
-    return outputs_per_frame, chunk_info
+    # =========================================================================
+    # Compute metrics if enabled
+    # =========================================================================
+    chunk_metrics = None
+    if compute_metrics:
+        logger.info("Computing tracking metrics...")
+        frame_metrics_list = []
+        prev_num_objects = None
+
+        for frame_idx in sorted(outputs_per_frame.keys()):
+            results = outputs_per_frame[frame_idx]
+            masks = results.get("masks", np.array([]))
+            object_ids = results.get("object_ids", np.array([]))
+
+            if len(masks) > 0:
+                fm = compute_frame_metrics(
+                    frame_idx=frame_idx,
+                    masks=masks,
+                    object_ids=object_ids,
+                    prev_num_objects=prev_num_objects,
+                    occlusion_iou_threshold=occlusion_iou_threshold,
+                    clustering_distance_threshold=clustering_distance_threshold,
+                )
+                frame_metrics_list.append(fm)
+
+                if log_metrics_per_frame:
+                    log_frame_metrics(fm)
+
+                prev_num_objects = fm.num_objects
+
+        # Compute chunk-level metrics
+        chunk_metrics = compute_chunk_metrics(
+            chunk_idx=chunk_idx,
+            start_frame=start_idx,
+            end_frame=end_idx,
+            frame_metrics_list=frame_metrics_list,
+        )
+
+        # Always log chunk-level summary
+        log_chunk_metrics(chunk_metrics)
+
+        # Add metrics summary to chunk_info for JSON export
+        chunk_info["metrics"] = {
+            "objects_lost": chunk_metrics.objects_lost,
+            "objects_gained": chunk_metrics.objects_gained,
+            "identity_switches": chunk_metrics.identity_switches,
+            "total_occlusion_events": chunk_metrics.total_occlusion_events,
+            "high_occlusion_frame_count": len(chunk_metrics.high_occlusion_frames),
+            "mean_objects_per_frame": chunk_metrics.mean_objects_per_frame,
+            "max_continuous_tracking": chunk_metrics.max_continuous_tracking,
+        }
+
+        # Attach frame_metrics_list to chunk_metrics for later saving
+        chunk_metrics.frame_metrics_list = frame_metrics_list  # type: ignore
+
+    return outputs_per_frame, chunk_info, chunk_metrics

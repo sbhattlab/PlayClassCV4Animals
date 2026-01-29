@@ -46,3 +46,14 @@ tracking:
   hotstart_dup_thresh: 12 # Stricter duplicate detection (default: 8)
   suppress_overlap_thresh: 0.8 # Stricter overlap suppression (default: 0.7)
   recondition_every_nth_frame: 8 # More frequent reconditioning (default: 16)
+
+# =============================================================================
+# Metrics Configuration
+# =============================================================================
+metrics:
+  enabled: true # Enable tracking metrics computation
+  log_per_frame: false # Set to true for verbose per-frame logging
+  occlusion_iou_threshold: 0.15 # IoU above this = objects overlapping
+  clustering_distance_threshold: 50.0 # pixels - objects closer than this are "clustered"
+  save_csv: true # Save metrics to CSV files (human-readable)
+  save_parquet: true # Save metrics to Parquet files (efficient for analysis)
