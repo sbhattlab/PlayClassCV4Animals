@@ -11,6 +11,7 @@ python -m script.sam3.run_sam3_hf_chunking --config config/sam3_hf_config.yaml
 
 import argparse
 import os
+import shutil
 from datetime import datetime
 from pathlib import Path
 
@@ -82,6 +83,12 @@ def main():
 
     # Setup logger with file output in the run directory
     log_file = setup_logger(run_dir, debug=False)
+
+    # Copy config file to run directory for reproducibility
+    config_path = Path(args.config)
+    config_copy = run_dir / config_path.name
+    shutil.copy(config_path, config_copy)
+    logger.info(f"Config copied to {config_copy}")
 
     logger.info("=" * 60)
     logger.info("SAM3 HuggingFace Video Chunking Script")
