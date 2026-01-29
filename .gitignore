@@ -1,6 +1,4 @@
-data/results/*
 video-data
-YOLO/
 *.pt
 .DS_Store
 sandbox/
