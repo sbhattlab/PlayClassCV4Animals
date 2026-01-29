@@ -104,3 +104,8 @@ test-sam3-hf-image = "python -m test.sam3_hf_basic_image"
 test-sam3-hf-video = "python -m test.sam3_hf_basic_video"
 test-sam3-native-video = "python -m test.sam3_native_video"
 test-sam3-hf-chunking = "python -m test.test-sam3-hf-chunking"
+
+[tool.pixi.feature.sam3-native-tasks]
+platforms = ["linux-64", "osx-arm64"]
+[tool.pixi.feature.sam3-native-tasks.tasks]
+test-sam3-native-video = "python -m test.sam3_native_video"
