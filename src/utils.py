@@ -54,6 +54,15 @@ def load_config(config_path: str | Path) -> DictConfig:
     return cfg
 
 
+def set_env_vars(cfg: OmegaConf, logger=logger):
+    if cfg.CUDA_VISIBLE_DEVICES:
+        os.environ["CUDA_VISIBLE_DEVICES"] = str(cfg.CUDA_VISIBLE_DEVICES)
+        logger.info(f"Set CUDA_VISIBLE_DEVICES to {os.environ['CUDA_VISIBLE_DEVICES']}")
+    if cfg.PYTORCH_ALLOC_CONF:
+        os.environ["PYTORCH_ALLOC_CONF"] = str(cfg.PYTORCH_ALLOC_CONF)
+        logger.info(f"Set PYTORCH_ALLOC_CONF to {os.environ['PYTORCH_ALLOC_CONF']}")
+
+
 # =============================================================================
 # Device Selection
 # =============================================================================
@@ -970,12 +979,3 @@ def from_segmentation_output_create_annotated_video(
 
     out.release()
     print(f"Saved annotated video to {output_path}")
-
-
-def set_env_vars(cfg: OmegaConf, logger=logger):
-    if cfg.CUDA_VISIBLE_DEVICES:
-        os.environ["CUDA_VISIBLE_DEVICES"] = str(cfg.CUDA_VISIBLE_DEVICES)
-        logger.info(f"Set CUDA_VISIBLE_DEVICES to {os.environ['CUDA_VISIBLE_DEVICES']}")
-    if cfg.PYTORCH_ALLOC_CONF:
-        os.environ["PYTORCH_ALLOC_CONF"] = str(cfg.PYTORCH_ALLOC_CONF)
-        logger.info(f"Set PYTORCH_ALLOC_CONF to {os.environ['PYTORCH_ALLOC_CONF']}")
