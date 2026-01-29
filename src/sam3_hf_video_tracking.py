@@ -206,7 +206,15 @@ def overlay_masks_on_frame(
     image = Image.fromarray(frame).convert("RGBA")
 
     if isinstance(masks, torch.Tensor):
+        # Convert BFloat16 to float32 before numpy conversion
+        if masks.dtype == torch.bfloat16:
+            masks = masks.float()
         masks = masks.cpu().numpy()
+
+    # Ensure masks are in the correct shape (N, H, W) by squeezing extra dimensions
+    masks = np.squeeze(masks)
+    if masks.ndim == 2:
+        masks = masks[np.newaxis, ...]  # Single mask case: (H, W) -> (1, H, W)
 
     masks = 255 * masks.astype(np.uint8)
 

@@ -616,3 +616,93 @@ def _annotate_frame_opencv(
     frame = cv2.addWeighted(frame, 1 - mask_opacity, overlay, mask_opacity, 0)
 
     return overlay
+
+
+def from_segmentation_output_create_annotated_video(
+    video_frames, video_segments, processor, output_path, fps=25
+):
+    """
+    From output dict, where keys are frame idxs and values are per-frame Sam3TrackerVideoSegmentationOutput objects, create annotated video with object IDs, masks, and bboxes.
+
+    Args:
+        video_frames: List of frames (H, W, 3) numpy arrays
+        video_segments: Dict[frame_idx -> Sam3TrackerVideoSegmentationOutput]
+        processor: Sam3TrackerVideoProcessor
+        output_path: Path to save annotated video
+        fps: Frames per second for output video
+    """
+    # Get video dimensions from first frame
+    h, w = video_frames[0].shape[:2]
+
+    # Initialize video writer
+    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+    out = cv2.VideoWriter(output_path, fourcc, fps, (w, h))
+
+    # Color palette for objects (BGR format for OpenCV)
+    colors = [
+        (255, 0, 0),  # Blue
+        (0, 255, 0),  # Green
+        (0, 0, 255),  # Red
+        (255, 255, 0),  # Cyan
+        (255, 0, 255),  # Magenta
+        (0, 255, 255),  # Yellow
+    ]
+
+    for frame_idx, frame in enumerate(video_frames):
+        # Convert RGB to BGR for OpenCV
+        annotated = cv2.cvtColor(frame.copy(), cv2.COLOR_RGB2BGR)
+
+        if frame_idx in video_segments:
+            seg_output = video_segments[frame_idx]
+
+            # Post-process masks
+            masks = processor.post_process_masks(
+                [seg_output.pred_masks],
+                original_sizes=[[h, w]],
+                binarize=True,
+            )[0]
+
+            # Convert to numpy
+            if masks.dtype == torch.bfloat16:
+                masks = masks.float()
+            masks = masks.cpu().numpy().squeeze()
+
+            # Handle single mask case
+            if masks.ndim == 2:
+                masks = masks[np.newaxis, ...]
+
+            # Draw each object
+            for i, obj_id in enumerate(seg_output.object_ids):
+                mask = masks[i].astype(np.uint8)
+                color = colors[i % len(colors)]
+
+                # Create colored overlay
+                overlay = annotated.copy()
+                overlay[mask > 0] = color
+                annotated = cv2.addWeighted(annotated, 0.7, overlay, 0.3, 0)
+
+                # Get bounding box from mask
+                contours, _ = cv2.findContours(
+                    mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+                )
+                if contours:
+                    x, y, bbox_w, bbox_h = cv2.boundingRect(contours[0])
+
+                    # Draw bbox
+                    cv2.rectangle(annotated, (x, y), (x + bbox_w, y + bbox_h), color, 2)
+
+                    # Draw object ID
+                    cv2.putText(
+                        annotated,
+                        f"ID: {obj_id}",
+                        (x, y - 10),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.6,
+                        color,
+                        2,
+                    )
+
+        out.write(annotated)
+
+    out.release()
+    print(f"Saved annotated video to {output_path}")
