@@ -1,35 +1,29 @@
 """
 SAM3 HuggingFace Video Tracking - Core Module
 
-This module provides shared functionality for SAM3-based video segmentation
-and tracking with chunked processing for long videos.
+This module provides core processing functionality for SAM3-based video
+segmentation and tracking with chunked processing for long videos.
 
 Features:
 - Text-based segmentation (Sam3VideoModel) for initial detection
 - Point-based tracking (Sam3TrackerVideoModel) for object continuity
 - Multi-object tracking across video chunks
-- RLE mask encoding for efficient storage
-- GPU memory management
 
 Usage:
-    from src.sam3_hf_video_tracking import (
-        process_chunk,
+    from src.sam3_hf import process_chunk, chunk_video_frames
+    from src.utils import (
+        load_config,
+        autoselect_torch_device,
         convert_results_for_json,
         load_video_frames,
-        chunk_video_frames,
+        overlay_masks_on_frame,
         # ... etc
     )
 """
 
-import gc
-from pathlib import Path
-
 import numpy as np
-import pycocotools.mask as mask_util
 import torch
 from loguru import logger
-from omegaconf import DictConfig, OmegaConf
-from PIL import Image
 from tqdm import tqdm
 from transformers import (
     Sam3TrackerVideoModel,
@@ -38,247 +32,48 @@ from transformers import (
     Sam3VideoModel,
     Sam3VideoProcessor,
 )
-from transformers.video_utils import load_video
+
+from src.utils import free_gpu_memory, get_all_objects_from_results
 
 __all__ = [
-    # Config loading
-    "load_config",
-    # Device selection
-    "autoselect_torch_device",
-    # Mask utilities
-    "single_mask_to_rle",
-    "convert_results_for_json",
-    "overlay_masks_on_frame",
-    # Object extraction
-    "get_all_objects_from_results",
-    "find_frame_with_enough_objects",
-    "extract_equidistant_points_from_mask",
-    # Memory management
-    "free_gpu_memory",
-    # Video loading/chunking
-    "load_video_frames",
     "chunk_video_frames",
-    # Core processing
     "process_chunk",
 ]
 
 
 # =============================================================================
-# Config Loading
+# Core Processing
 # =============================================================================
 
 
-def load_config(config_path: str | Path) -> DictConfig:
+def chunk_video_frames(
+    video_frames: list, fps: float, chunk_duration_seconds: int
+) -> list[tuple[int, int]]:
     """
-    Load configuration from a YAML file using OmegaConf.
+    Calculate frame ranges for each chunk.
 
     Args:
-        config_path: Path to the YAML configuration file
+        video_frames: List of video frames
+        fps: Frames per second
+        chunk_duration_seconds: Duration of each chunk in seconds
 
     Returns:
-        DictConfig object with configuration values
+        List of (start_idx, end_idx) tuples for each chunk
     """
-    config_path = Path(config_path)
-    if not config_path.exists():
-        raise FileNotFoundError(f"Config file not found: {config_path}")
+    frames_per_chunk = int(fps * chunk_duration_seconds)
+    total_frames = len(video_frames)
 
-    cfg = OmegaConf.load(config_path)
-    logger.info(f"Loaded config from {config_path}")
-    return cfg
+    chunks = []
+    start_idx = 0
+    while start_idx < total_frames:
+        end_idx = min(start_idx + frames_per_chunk, total_frames)
+        chunks.append((start_idx, end_idx))
+        start_idx = end_idx
 
-
-# =============================================================================
-# Device Selection
-# =============================================================================
-
-
-def autoselect_torch_device() -> torch.device:
-    """
-    Automatically select the best available PyTorch device.
-
-    Priority: CUDA > MPS > CPU
-
-    Returns:
-        torch.device: The selected device.
-    """
-    if torch.cuda.is_available():
-        return torch.device("cuda")
-    elif torch.backends.mps.is_available():
-        return torch.device("mps")
-    return torch.device("cpu")
-
-
-# =============================================================================
-# Mask Utilities
-# =============================================================================
-
-
-def single_mask_to_rle(mask: np.ndarray) -> dict:
-    """
-    Convert a single binary mask to COCO RLE format.
-
-    Args:
-        mask: HxW binary mask (uint8 or bool)
-
-    Returns:
-        dict with 'counts' (str) and 'size' ([H, W])
-    """
-    rle = mask_util.encode(np.array(mask[:, :, None], order="F", dtype="uint8"))[0]
-    rle["counts"] = rle["counts"].decode("utf-8")
-    if "size" in rle and isinstance(rle["size"], (list, tuple)):
-        rle["size"] = [int(rle["size"][0]), int(rle["size"][1])]
-    return rle
-
-
-def convert_results_for_json(results: dict) -> dict:
-    """
-    Convert model outputs to JSON-serializable format.
-
-    Args:
-        results: dict with 'masks', 'boxes', 'object_ids', 'scores'
-
-    Returns:
-        dict with RLE-encoded masks and Python native types:
-        - masks_rle: List of RLE-encoded masks
-        - boxes: List of [x1, y1, x2, y2] bounding boxes
-        - object_ids: List of object IDs
-        - scores: List of confidence scores
-    """
-    # Convert masks to RLE
-    masks = results.get("masks")
-    if masks is not None:
-        if isinstance(masks, torch.Tensor):
-            masks = masks.cpu().numpy()
-        masks_rle = [single_mask_to_rle(m) for m in masks]
-    else:
-        masks_rle = []
-
-    # Convert boxes to list of floats
-    boxes = results.get("boxes")
-    if boxes is not None:
-        if isinstance(boxes, torch.Tensor):
-            boxes = boxes.cpu().numpy()
-        boxes_list = [[float(c) for c in box] for box in boxes]
-    else:
-        boxes_list = []
-
-    # Convert object_ids to list of integers
-    object_ids = results.get("object_ids")
-    if object_ids is not None:
-        if isinstance(object_ids, torch.Tensor):
-            object_ids = object_ids.cpu().numpy()
-        object_ids_list = [int(oid) for oid in object_ids]
-    else:
-        object_ids_list = []
-
-    # Convert scores to list of floats
-    scores = results.get("scores")
-    if scores is not None:
-        if isinstance(scores, torch.Tensor):
-            scores = scores.cpu().numpy()
-        scores_list = [float(s) for s in scores]
-    else:
-        scores_list = []
-
-    return {
-        "masks_rle": masks_rle,
-        "boxes": boxes_list,
-        "object_ids": object_ids_list,
-        "scores": scores_list,
-    }
-
-
-def overlay_masks_on_frame(
-    frame: np.ndarray, masks: np.ndarray | torch.Tensor
-) -> Image.Image:
-    """
-    Overlay segmentation masks on a video frame.
-
-    Args:
-        frame: RGB numpy array (H, W, 3)
-        masks: Binary masks (N, H, W)
-
-    Returns:
-        PIL Image with masks overlaid using rainbow colormap
-    """
-    import matplotlib
-
-    image = Image.fromarray(frame).convert("RGBA")
-
-    if isinstance(masks, torch.Tensor):
-        # Convert BFloat16 to float32 before numpy conversion
-        if masks.dtype == torch.bfloat16:
-            masks = masks.float()
-        masks = masks.cpu().numpy()
-
-    # Ensure masks are in the correct shape (N, H, W) by squeezing extra dimensions
-    masks = np.squeeze(masks)
-    if masks.ndim == 2:
-        masks = masks[np.newaxis, ...]  # Single mask case: (H, W) -> (1, H, W)
-
-    masks = 255 * masks.astype(np.uint8)
-
-    n_masks = masks.shape[0]
-    if n_masks == 0:
-        return image.convert("RGB")
-
-    cmap = matplotlib.colormaps.get_cmap("rainbow").resampled(n_masks)
-    colors = [tuple(int(c * 255) for c in cmap(i)[:3]) for i in range(n_masks)]
-
-    for mask, color in zip(masks, colors):
-        mask_img = Image.fromarray(mask)
-        # Resize mask to match image dimensions if needed
-        if mask_img.size != image.size:
-            mask_img = mask_img.resize(image.size, Image.Resampling.NEAREST)
-        overlay = Image.new("RGBA", image.size, color + (0,))
-        alpha = mask_img.point(lambda v: int(v * 0.5))
-        overlay.putalpha(alpha)
-        image = Image.alpha_composite(image, overlay)
-
-    return image.convert("RGB")
-
-
-# =============================================================================
-# Object Extraction
-# =============================================================================
-
-
-def get_all_objects_from_results(
-    results: dict,
-) -> tuple[list[np.ndarray], list[list[float]], list[int]]:
-    """
-    Extract ALL objects' masks, bboxes, and object IDs from results.
-
-    Args:
-        results: dict with 'masks', 'boxes', 'object_ids', 'scores'
-
-    Returns:
-        Tuple of (masks_list, boxes_list, object_ids_list)
-        Each list has one entry per object.
-    """
-    masks = results.get("masks")
-    boxes = results.get("boxes")
-    object_ids = results.get("object_ids")
-
-    if masks is None or len(masks) == 0:
-        return [], [], []
-
-    if isinstance(masks, torch.Tensor):
-        masks = masks.cpu().numpy()
-    if isinstance(boxes, torch.Tensor):
-        boxes = boxes.cpu().numpy()
-    if isinstance(object_ids, torch.Tensor):
-        object_ids = object_ids.cpu().numpy()
-
-    masks_list = [masks[i] for i in range(len(masks))]
-    boxes_list = [[float(c) for c in boxes[i]] for i in range(len(boxes))]
-    object_ids_list = (
-        [int(object_ids[i]) for i in range(len(object_ids))]
-        if object_ids is not None
-        else list(range(1, len(masks) + 1))
+    logger.info(
+        f"Video split into {len(chunks)} chunks of ~{chunk_duration_seconds}s each"
     )
-
-    return masks_list, boxes_list, object_ids_list
+    return chunks
 
 
 def find_frame_with_enough_objects(
@@ -376,95 +171,6 @@ def extract_equidistant_points_from_mask(
 
     logger.debug(f"Extracted {num_points} equidistant points from mask: {points}")
     return points
-
-
-# =============================================================================
-# Memory Management
-# =============================================================================
-
-
-def free_gpu_memory(log_stats: bool = False):
-    """
-    Force garbage collection and clear GPU memory cache.
-    Call this AFTER deleting heavy objects in the calling scope.
-
-    Args:
-        log_stats: If True, log memory statistics after cleanup
-    """
-    # Multiple rounds of garbage collection
-    for _ in range(3):
-        gc.collect()
-
-    if torch.cuda.is_available():
-        torch.cuda.synchronize()
-        torch.cuda.empty_cache()
-        torch.cuda.ipc_collect()
-        torch.cuda.synchronize()
-        torch.cuda.reset_peak_memory_stats()
-
-        if log_stats:
-            allocated = torch.cuda.memory_allocated() / 1024**3
-            reserved = torch.cuda.memory_reserved() / 1024**3
-            logger.info(
-                f"GPU memory after cleanup - Allocated: {allocated:.2f} GiB, Reserved: {reserved:.2f} GiB"
-            )
-
-
-# =============================================================================
-# Video Loading and Chunking
-# =============================================================================
-
-
-def load_video_frames(video_path: str | Path) -> tuple[list, float]:
-    """
-    Load all video frames and determine FPS.
-
-    Args:
-        video_path: Path to video file
-
-    Returns:
-        Tuple of (frames list, fps)
-    """
-    logger.info(f"Loading video from {video_path}...")
-    video_frames, metadata = load_video(str(video_path))
-    fps = metadata.get("fps", 25.0) if metadata else 25.0
-    logger.info(f"Loaded {len(video_frames)} frames at {fps} FPS")
-    return video_frames, fps
-
-
-def chunk_video_frames(
-    video_frames: list, fps: float, chunk_duration_seconds: int
-) -> list[tuple[int, int]]:
-    """
-    Calculate frame ranges for each chunk.
-
-    Args:
-        video_frames: List of video frames
-        fps: Frames per second
-        chunk_duration_seconds: Duration of each chunk in seconds
-
-    Returns:
-        List of (start_idx, end_idx) tuples for each chunk
-    """
-    frames_per_chunk = int(fps * chunk_duration_seconds)
-    total_frames = len(video_frames)
-
-    chunks = []
-    start_idx = 0
-    while start_idx < total_frames:
-        end_idx = min(start_idx + frames_per_chunk, total_frames)
-        chunks.append((start_idx, end_idx))
-        start_idx = end_idx
-
-    logger.info(
-        f"Video split into {len(chunks)} chunks of ~{chunk_duration_seconds}s each"
-    )
-    return chunks
-
-
-# =============================================================================
-# Core Processing
-# =============================================================================
 
 
 def process_chunk(

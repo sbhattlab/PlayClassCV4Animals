@@ -6,6 +6,8 @@
 ln -s  "$HOME/Library/CloudStorage/OneDrive-UniversityofCopenhagen/IFSV/proj/chicken-behaviour-classifier-data/video-raw-data" video-data
 # ku-01
 ln -s "/mnt/birds/rebecca2025/raw" video-data
+ln -s "/mnt/birds/rebecca2025/" ext-data
+
 ```
 ## Overview of test data
 - Small (<=1 min) in `data/img` and `data/video`

@@ -6,29 +6,51 @@ running segmentation on each chunk, and passing the last mask/bbox to the
 next chunk as a prompt for tracking continuity.
 
 Usage:
-    CUDA_VISIBLE_DEVICES=1 python -m script.sam3.sam3-hf-chunking
-    CUDA_VISIBLE_DEVICES=1 python -m script.sam3.sam3-hf-chunking --config config/my_custom_config.yaml
+python -m script.sam3.run_sam3_hf_chunking --config config/sam3_hf_config.yaml
 """
 
 import argparse
 import os
+from datetime import datetime
 from pathlib import Path
 
 from loguru import logger
 
-from src.sam3_hf_video_tracking import (
+from src.sam3_hf import chunk_video_frames, process_chunk
+from src.utils import (
     autoselect_torch_device,
-    chunk_video_frames,
     convert_results_for_json,
     load_config,
     load_video_frames,
     overlay_masks_on_frame,
-    process_chunk,
+    render_annotated_video,
+    save_results_json,
+    set_env_vars,
+    setup_logger,
 )
-from src.utils import save_results_json, setup_logger
 
 # Default config path
 DEFAULT_CONFIG = "config/sam3_hf_config.yaml"
+
+# Base name for segmentation output files
+SEGMENTATION_OUTPUT_BASENAME = "video_segmentation_output"
+
+
+def create_run_directory(base_output_dir: Path, job_type: str) -> Path:
+    """
+    Create a timestamped run directory for this job.
+
+    Args:
+        base_output_dir: Base output directory from config
+        job_type: Job type string from config (e.g., "sam3_hf_chunking")
+
+    Returns:
+        Path to the created run directory
+    """
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    run_dir = base_output_dir / f"{timestamp}_{job_type}"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    return run_dir
 
 
 def main():
@@ -46,14 +68,26 @@ def main():
     # Load configuration
     cfg = load_config(args.config)
 
-    # Setup logger with file output
-    log_output_dir = Path(cfg.log_output_dir)
-    log_file = setup_logger(log_output_dir, debug=False)
+    # Set environment variables
+    set_env_vars(cfg)
+
+    # Create timestamped run directory
+    base_output_dir = Path(cfg.output_dir)
+    run_dir = create_run_directory(base_output_dir, cfg.job_type)
+
+    # Define output paths within the run directory
+    output_path = run_dir / f"{SEGMENTATION_OUTPUT_BASENAME}.json"
+    vis_output_dir = run_dir / "visualizations"
+    vis_output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Setup logger with file output in the run directory
+    log_file = setup_logger(run_dir, debug=False)
 
     logger.info("=" * 60)
     logger.info("SAM3 HuggingFace Video Chunking Script")
     logger.info("=" * 60)
     logger.info(f"Config file: {args.config}")
+    logger.info(f"Run directory: {run_dir}")
     logger.info(f"Log file: {log_file}")
     logger.info(
         f"Tracking config: min_objects={cfg.min_objects_for_tracking}, "
@@ -71,10 +105,6 @@ def main():
 
     # Calculate chunks
     chunks = chunk_video_frames(video_frames, fps, cfg.chunk_duration_seconds)
-
-    # Resolve output paths
-    output_path = Path(cfg.output_path)
-    vis_output_dir = Path(cfg.vis_output_dir)
 
     # Process each chunk
     all_results: dict[int, dict] = {}  # chunk_idx -> {frame_idx -> results}
@@ -132,11 +162,12 @@ def main():
             "total_chunks_processed": len(all_results),
             "total_frames": len(video_frames),
             "fps": fps,
+            "run_directory": str(run_dir),
         }
 
         # INCREMENTAL SAVE: Save results after each chunk with chunk suffix
         logger.info("Saving incremental results...")
-        incremental_path = output_path.with_stem(f"{output_path.stem}_{chunk_idx}")
+        incremental_path = run_dir / f"{SEGMENTATION_OUTPUT_BASENAME}_{chunk_idx}.json"
         save_results_json(
             all_results=all_results,
             metadata=metadata,
@@ -159,6 +190,7 @@ def main():
         "total_chunks_processed": len(all_results),
         "total_frames": len(video_frames),
         "fps": fps,
+        "run_directory": str(run_dir),
     }
 
     # FINAL SAVE: Save consolidated results with all chunks
@@ -174,10 +206,21 @@ def main():
         vis_stride=cfg.vis_frame_stride,
     )
 
+    # Render annotated video with segmentation results
+    logger.info("Rendering annotated video...")
+    annotated_video_path = run_dir / "annotated_video.mp4"
+    render_annotated_video(
+        json_path=output_path,
+        video_path=cfg.video_path,
+        output_path=annotated_video_path,
+    )
+
     logger.info("\n" + "=" * 60)
     logger.info("PROCESSING COMPLETE")
     logger.info("=" * 60)
+    logger.info(f"Run directory: {run_dir}")
     logger.info(f"Final results: {output_path}")
+    logger.info(f"Annotated video: {annotated_video_path}")
     logger.info(f"Visualizations: {vis_output_dir}")
     logger.info(f"Log file: {log_file}")
 
