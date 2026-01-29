@@ -604,14 +604,17 @@ def process_chunk(
         log_chunk_metrics(chunk_metrics)
 
         # Add metrics summary to chunk_info for JSON export
+        # Convert numpy types to native Python types for JSON serialization
         chunk_info["metrics"] = {
-            "objects_lost": chunk_metrics.objects_lost,
-            "objects_gained": chunk_metrics.objects_gained,
-            "identity_switches": chunk_metrics.identity_switches,
-            "total_occlusion_events": chunk_metrics.total_occlusion_events,
+            "objects_lost": [int(x) for x in chunk_metrics.objects_lost],
+            "objects_gained": [int(x) for x in chunk_metrics.objects_gained],
+            "identity_switches": int(chunk_metrics.identity_switches),
+            "total_occlusion_events": int(chunk_metrics.total_occlusion_events),
             "high_occlusion_frame_count": len(chunk_metrics.high_occlusion_frames),
-            "mean_objects_per_frame": chunk_metrics.mean_objects_per_frame,
-            "max_continuous_tracking": chunk_metrics.max_continuous_tracking,
+            "mean_objects_per_frame": float(chunk_metrics.mean_objects_per_frame),
+            "max_continuous_tracking": {
+                int(k): int(v) for k, v in chunk_metrics.max_continuous_tracking.items()
+            },
         }
 
         # Attach frame_metrics_list to chunk_metrics for later saving

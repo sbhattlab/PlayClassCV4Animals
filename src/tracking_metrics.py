@@ -23,11 +23,19 @@ Usage:
 
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
+import torch
 from loguru import logger
+
+
+def _ensure_numpy(arr: Union[np.ndarray, torch.Tensor]) -> np.ndarray:
+    """Convert tensor to numpy array if needed, handling CUDA tensors."""
+    if isinstance(arr, torch.Tensor):
+        return arr.detach().cpu().numpy()
+    return arr
 
 
 @dataclass
@@ -92,16 +100,17 @@ class ChunkMetrics:
     object_count_changes: int = 0  # Number of frames where count changed
 
 
-def compute_pairwise_iou(masks: np.ndarray) -> np.ndarray:
+def compute_pairwise_iou(masks: Union[np.ndarray, torch.Tensor]) -> np.ndarray:
     """
     Compute pairwise IoU matrix for all masks.
 
     Args:
-        masks: Array of shape (N, H, W) with N binary masks
+        masks: Array of shape (N, H, W) with N binary masks (numpy or torch tensor)
 
     Returns:
         NxN matrix of IoU values
     """
+    masks = _ensure_numpy(masks)
     n = len(masks)
     if n == 0:
         return np.array([])
@@ -119,16 +128,17 @@ def compute_pairwise_iou(masks: np.ndarray) -> np.ndarray:
     return iou_matrix
 
 
-def compute_centroids(masks: np.ndarray) -> np.ndarray:
+def compute_centroids(masks: Union[np.ndarray, torch.Tensor]) -> np.ndarray:
     """
     Compute centroids for all masks.
 
     Args:
-        masks: Array of shape (N, H, W) with N binary masks
+        masks: Array of shape (N, H, W) with N binary masks (numpy or torch tensor)
 
     Returns:
         Array of shape (N, 2) with [x, y] centroids
     """
+    masks = _ensure_numpy(masks)
     centroids = []
     for mask in masks:
         y_coords, x_coords = np.where(mask > 0)
@@ -165,8 +175,8 @@ def compute_pairwise_centroid_distances(centroids: np.ndarray) -> np.ndarray:
 
 def compute_frame_metrics(
     frame_idx: int,
-    masks: np.ndarray,
-    object_ids: np.ndarray,
+    masks: Union[np.ndarray, torch.Tensor],
+    object_ids: Union[np.ndarray, torch.Tensor],
     prev_num_objects: Optional[int] = None,
     occlusion_iou_threshold: float = 0.15,
     clustering_distance_threshold: float = 50.0,  # pixels
@@ -176,8 +186,8 @@ def compute_frame_metrics(
 
     Args:
         frame_idx: Frame index
-        masks: Array of shape (N, H, W) with N binary masks
-        object_ids: Array of object IDs corresponding to masks
+        masks: Array of shape (N, H, W) with N binary masks (numpy or torch tensor)
+        object_ids: Array of object IDs corresponding to masks (numpy or torch tensor)
         prev_num_objects: Number of objects in previous frame (for change detection)
         occlusion_iou_threshold: IoU threshold to consider objects as overlapping
         clustering_distance_threshold: Distance threshold for clustering detection
@@ -185,6 +195,10 @@ def compute_frame_metrics(
     Returns:
         FrameMetrics dataclass with computed values
     """
+    # Ensure numpy arrays (handles CUDA tensors)
+    masks = _ensure_numpy(masks)
+    object_ids = _ensure_numpy(object_ids)
+
     n = len(masks)
 
     if n == 0:
