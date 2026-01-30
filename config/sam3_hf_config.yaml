@@ -25,7 +25,7 @@ output_dir: "ext-data/output/results/sam3-hf"
 # =============================================================================
 # Chunking Configuration
 # =============================================================================
-chunk_duration_seconds: 60 # 
+chunk_duration_seconds: 45 # 
 vis_frame_stride: 30 # Visualize every Nth frame
 
 # =============================================================================

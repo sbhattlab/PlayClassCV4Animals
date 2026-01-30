@@ -17,6 +17,31 @@ from pathlib import Path
 
 from loguru import logger
 
+
+# Load config and set environment variables BEFORE importing torch or transformers
+def _early_init():
+    """Initialize environment variables before torch import."""
+    parser = argparse.ArgumentParser(description="SAM3 HuggingFace Video Chunking")
+    parser.add_argument(
+        "--config",
+        type=str,
+        default="config/sam3_hf_config.yaml",
+        help="Path to config file (default: config/sam3_hf_config.yaml)",
+    )
+    args, _ = parser.parse_known_args()
+
+    from src.utils import load_config, set_env_vars
+
+    cfg = load_config(args.config)
+    set_env_vars(cfg)
+
+    return args, cfg
+
+
+# Call early init BEFORE importing torch/transformers
+_args, _cfg = _early_init()
+
+
 from src.sam3_hf import chunk_video_frames, process_chunk
 from src.tracking_metrics import (
     ChunkMetrics,
@@ -33,7 +58,7 @@ from src.utils import (
     overlay_masks_on_frame,
     render_annotated_video,
     save_results_json,
-    set_env_vars,
+    # set_env_vars,
     setup_logger,
 )
 
@@ -77,7 +102,7 @@ def main():
     cfg = load_config(args.config)
 
     # Set environment variables
-    set_env_vars(cfg)
+    # set_env_vars(cfg)
 
     # Create timestamped run directory
     base_output_dir = Path(cfg.output_dir)
