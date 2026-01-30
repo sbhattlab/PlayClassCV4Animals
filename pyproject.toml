@@ -5,15 +5,46 @@ requires-python = ">=3.11,<3.12"
 
 [tool.pixi.workspace]
 channels = ["conda-forge"]
-platforms = ["linux-64"]
+platforms = ["linux-64", "osx-arm64"]
 
 [tool.pixi.dependencies]
 python = ">=3.11,<3.12"
 ffmpeg = "==8.0.1"
 pkg-config = "*"
 
-[tool.pixi.feature.sam3-hf]
+[tool.pixi.feature.cuda]
 platforms = ["linux-64"]
+
+[tool.pixi.feature.macos]
+platforms = ["osx-arm64"]
+
+[tool.pixi.feature.sam3-hf]
+platforms = ["linux-64", "osx-arm64"]
+
+[tool.pixi.feature.sam3-native]
+platforms = ["linux-64"]
+
+[tool.pixi.feature.sam3-native-linux]
+platforms = ["linux-64"]
+
+[tool.pixi.feature.cuda.pypi-options]
+extra-index-urls = ["https://download.pytorch.org/whl/cu126"]
+index-strategy = "unsafe-best-match"
+
+[tool.pixi.feature.cuda.pypi-dependencies]
+torch = "==2.9.1+cu126"
+torchvision = "==0.24.1+cu126"
+torchcodec = "==0.9"
+
+[tool.pixi.feature.macos.pypi-dependencies]
+torch = "==2.9.1"
+torchvision = "==0.24.1"
+torchcodec = "==0.9"
+
+[tool.pixi.feature.sam3-native-linux.pypi-dependencies]
+decord = "*"
+scikit-image = "*"
+scikit-learn = "*"
 
 [tool.pixi.feature.sam3-hf.pypi-dependencies]
 transformers = { git = "https://github.com/huggingface/transformers", rev = "v5.0.0rc2" }
@@ -37,9 +68,6 @@ ipykernel = ">=7.1.0"
 ipython = "*"
 jupyter = ">=1.1.1"
 
-[tool.pixi.feature.sam3-native]
-platforms = ["linux-64"]
-
 [tool.pixi.feature.sam3-native.pypi-dependencies]
 sam3 = { git = "https://github.com/facebookresearch/sam3", rev = "11dec2936de97f2857c1f76b66d982d5a001155d" }
 transformers = { git = "https://github.com/huggingface/transformers", rev = "v5.0.0rc2" }
@@ -61,36 +89,11 @@ ipywidgets = ">=8.1.8"
 ipykernel = ">=7.1.0"
 jupyter = ">=1.1.1"
 
-[tool.pixi.feature.cuda]
-platforms = ["linux-64"]
-
-[tool.pixi.feature.cuda.pypi-options]
-extra-index-urls = ["https://download.pytorch.org/whl/cu126"]
-index-strategy = "unsafe-best-match"
-
-[tool.pixi.feature.cuda.pypi-dependencies]
-torch = "==2.9.1+cu126"
-torchvision = "==0.24.1+cu126"
-torchcodec = "==0.9"
-
-[tool.pixi.feature.macos]
-platforms = ["osx-arm64"]
-
-[tool.pixi.feature.macos.pypi-dependencies]
-torch = "==2.9.1"
-torchvision = "==0.24.1"
-torchcodec = "==0.9"
-
-[tool.pixi.feature.sam3-native-linux]
-platforms = ["linux-64"]
-
-[tool.pixi.feature.sam3-native-linux.pypi-dependencies]
-decord = "*"
-scikit-image = "*"
-scikit-learn = "*"
 
 [tool.pixi.environments]
 sam3-hf = { features = ["sam3-hf", "cuda", "sam3-hf-tasks"] }
+sam3-hf-macos = { features = ["sam3-hf", "macos", "sam3-hf-tasks"] }
+
 sam3-native = { features = [
     "sam3-native",
     "cuda",
