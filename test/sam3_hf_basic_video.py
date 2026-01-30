@@ -51,6 +51,7 @@ logger.info(f"Using GPU ID: {CUDA_GPU_ID}")
 # Load video frames
 logger.info("Loading test video...")
 video_frames, _ = load_video("data/video/test_10_sec_560x560.mp4")
+# video_frames, _ = load_video("data/video/test_1_min_560x560.mp4")
 if video_frames is None or len(video_frames) == 0:
     raise ValueError("No frames in video.")
 logger.info(f"Loaded video with {len(video_frames)} frames")
