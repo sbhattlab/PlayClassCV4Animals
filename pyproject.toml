@@ -1,8 +1,14 @@
+# =============================================================================
+# Project Metadata
+# =============================================================================
 [project]
 name = "chicken-behav-classifier"
 version = "0.1.0"
 requires-python = ">=3.11,<3.12"
 
+# =============================================================================
+# Pixi Workspace Configuration
+# =============================================================================
 [tool.pixi.workspace]
 channels = ["conda-forge"]
 platforms = ["linux-64", "osx-arm64"]
@@ -12,12 +18,20 @@ python = ">=3.11,<3.12"
 ffmpeg = "==8.0.1"
 pkg-config = "*"
 
+# =============================================================================
+# Platform Features
+# Platform-specific feature definitions for different operating systems
+# =============================================================================
 [tool.pixi.feature.cuda]
 platforms = ["linux-64"]
 
 [tool.pixi.feature.macos]
 platforms = ["osx-arm64"]
 
+# =============================================================================
+# SAM3 Features
+# Feature definitions for SAM3 (Segment Anything Model 3) variants
+# =============================================================================
 [tool.pixi.feature.sam3-hf]
 platforms = ["linux-64", "osx-arm64"]
 
@@ -27,6 +41,17 @@ platforms = ["linux-64"]
 [tool.pixi.feature.sam3-native-linux]
 platforms = ["linux-64"]
 
+# =============================================================================
+# Grounded-SAM-2 Feature
+# Feature definition for Grounded-SAM-2 setup
+# =============================================================================
+[tool.pixi.feature.gs2]
+platforms = ["linux-64", "osx-arm64"]
+
+# =============================================================================
+# PyPI Dependencies - CUDA (Linux)
+# PyTorch with CUDA support for Linux systems
+# =============================================================================
 [tool.pixi.feature.cuda.pypi-options]
 extra-index-urls = ["https://download.pytorch.org/whl/cu126"]
 index-strategy = "unsafe-best-match"
@@ -36,16 +61,19 @@ torch = "==2.9.1+cu126"
 torchvision = "==0.24.1+cu126"
 torchcodec = "==0.9"
 
+# =============================================================================
+# PyPI Dependencies - macOS
+# PyTorch for Apple Silicon (ARM64) systems
+# =============================================================================
 [tool.pixi.feature.macos.pypi-dependencies]
 torch = "==2.9.1"
 torchvision = "==0.24.1"
 torchcodec = "==0.9"
 
-[tool.pixi.feature.sam3-native-linux.pypi-dependencies]
-decord = "*"
-scikit-image = "*"
-scikit-learn = "*"
-
+# =============================================================================
+# PyPI Dependencies - SAM3 HuggingFace
+# Dependencies for SAM3 using HuggingFace transformers
+# =============================================================================
 [tool.pixi.feature.sam3-hf.pypi-dependencies]
 transformers = { git = "https://github.com/huggingface/transformers", rev = "v5.0.0rc2" }
 accelerate = ">=1.12.0"
@@ -68,6 +96,10 @@ ipykernel = ">=7.1.0"
 ipython = "*"
 jupyter = ">=1.1.1"
 
+# =============================================================================
+# PyPI Dependencies - SAM3 Native
+# Dependencies for SAM3 native implementation from Facebook Research
+# =============================================================================
 [tool.pixi.feature.sam3-native.pypi-dependencies]
 sam3 = { git = "https://github.com/facebookresearch/sam3", rev = "11dec2936de97f2857c1f76b66d982d5a001155d" }
 transformers = { git = "https://github.com/huggingface/transformers", rev = "v5.0.0rc2" }
@@ -89,7 +121,26 @@ ipywidgets = ">=8.1.8"
 ipykernel = ">=7.1.0"
 jupyter = ">=1.1.1"
 
+# =============================================================================
+# PyPI Dependencies - SAM3 Native Linux
+# Additional Linux-specific dependencies for SAM3 native
+# =============================================================================
+[tool.pixi.feature.sam3-native-linux.pypi-dependencies]
+decord = "*"
+scikit-image = "*"
+scikit-learn = "*"
 
+# =============================================================================
+# PyPI Dependencies - Grounded-SAM-2
+# Dependencies for Grounded-SAM-2 setup
+# =============================================================================
+[tool.pixi.feature.gs2.pypi-dependencies]
+setuptools = "*"
+transformers = { git = "https://github.com/huggingface/transformers", rev = "v5.0.0rc2" }
+# =============================================================================
+# Pixi Environments
+# Define environment combinations using features
+# =============================================================================
 [tool.pixi.environments]
 sam3-hf = { features = ["sam3-hf", "cuda", "sam3-hf-tasks"] }
 sam3-hf-macos = { features = ["sam3-hf", "macos", "sam3-hf-tasks"] }
@@ -101,15 +152,72 @@ sam3-native = { features = [
     "sam3-native-tasks",
 ] }
 
+gs2 = { features = ["cuda", "gs2"] }
+gs2-macos = { features = ["macos", "gs2"] }
+
+[dependency-groups]
+gs2 = [
+    "opencv-python>=4.13.0.90,<5",
+    "pycocotools>=2.0.11,<3",
+    "pillow>=12.1.0,<13",
+    "numpy>=2.4.1,<3",
+    "pandas>=3.0.0,<4",
+    "supervision>=0.27.0,<0.28",
+    "tqdm>=4.67.1,<5",
+    "pyarrow>=23.0.0,<24",
+]
+
+# =============================================================================
+# Tasks - SAM3 HuggingFace
+# Test tasks for SAM3 HuggingFace implementation
+# =============================================================================
 [tool.pixi.feature.sam3-hf-tasks]
 platforms = ["linux-64", "osx-arm64"]
+
 [tool.pixi.feature.sam3-hf-tasks.tasks]
 test-sam3-hf-image = "python -m test.sam3_hf_basic_image"
 test-sam3-hf-video = "python -m test.sam3_hf_basic_video"
 test-sam3-native-video = "python -m test.sam3_native_video"
-run-sam3-hf-chunking = "python -m script.sam3.sam3_hf_chunking"
 
+# =============================================================================
+# Tasks - SAM3 Native
+# Test tasks for SAM3 native implementation
+# =============================================================================
 [tool.pixi.feature.sam3-native-tasks]
 platforms = ["linux-64", "osx-arm64"]
+
 [tool.pixi.feature.sam3-native-tasks.tasks]
 test-sam3-native-video = "python -m test.sam3_native_video"
+
+# =============================================================================
+# Tasks - Grounded-SAM-2
+# Setup tasks for Grounded-SAM-2 installation and checkpoint downloads
+# =============================================================================
+[tool.pixi.feature.gs2.tasks]
+# Download SAM2 checkpoints
+download-sam2-checkpoints = { cmd = """
+bash -c 'if ls checkpoints/*.pth 1> /dev/null 2>&1; then echo "SAM2 checkpoints already exist, skipping download..."; else cd checkpoints && bash download_ckpts.sh; fi'
+""", cwd = "Grounded-SAM-2-fork" }
+
+# Download Grounding DINO checkpoints
+download-gdino-checkpoints = { cmd = """
+bash -c 'if ls gdino_checkpoints/*.pth 1> /dev/null 2>&1; then echo "Grounding DINO checkpoints already exist, skipping download..."; else cd gdino_checkpoints && bash download_ckpts.sh; fi'
+""", cwd = "Grounded-SAM-2-fork" }
+
+# Install PyTorch (if not already in pixi dependencies)
+install-pytorch = "uv pip install torch torchvision torchaudio"
+
+# Install Grounded-SAM-2 and Grounding DINO
+install-gs2-packages = { cmd = """
+export CUDA_HOME="/usr/lib/nvidia-cuda-toolkit/" && \
+uv pip install -e . && \
+uv pip install --no-build-isolation -e grounding_dino
+""", cwd = "Grounded-SAM-2-fork" }
+
+# Master task that runs everything in order
+setup-gs2 = { depends-on = [
+    "download-sam2-checkpoints",
+    "download-gdino-checkpoints",
+    "install-pytorch",
+    "install-gs2-packages",
+] }
