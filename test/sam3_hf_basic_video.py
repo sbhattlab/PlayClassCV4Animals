@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from PIL import Image
-from transformers import Sam3VideoModel, Sam3VideoProcessor
+from transformers import Sam3VideoConfig, Sam3VideoModel, Sam3VideoProcessor
 from transformers.video_utils import load_video
 
 from src.utils import autoselect_torch_device
@@ -48,15 +48,32 @@ CUDA_GPU_ID = os.environ.get("CUDA_VISIBLE_DEVICES")
 logger.info(f"CUDA_VISIBLE_DEVICES: {CUDA_GPU_ID}")
 logger.info(f"Using GPU ID: {CUDA_GPU_ID}")
 
-logger.info("Loading SAM3-HF Video and Processor Model...")
-model = Sam3VideoModel.from_pretrained("facebook/sam3").to(device, dtype=torch.bfloat16)
-processor = Sam3VideoProcessor.from_pretrained("facebook/sam3")
-
 # Load video frames
 logger.info("Loading test video...")
-# video_frames, _ = load_video("data/test_15_sec.mp4")
-video_frames, _ = load_video("/mnt/birds/rebecca2025/test/video_1_1min.mp4")
+video_frames, _ = load_video("data/video/test_10_sec_560x560.mp4")
+if video_frames is None or len(video_frames) == 0:
+    raise ValueError("No frames in video.")
 logger.info(f"Loaded video with {len(video_frames)} frames")
+
+frame_height, frame_width = np.asarray(video_frames[0]).shape[:2]
+image_size = max(frame_height, frame_width)
+logger.info(
+    "Detected frame dimensions %sx%s; configuring model with image_size=%s",
+    frame_height,
+    frame_width,
+    image_size,
+)
+
+logger.info("Loading SAM3-HF Video and Processor Model...")
+config = Sam3VideoConfig.from_pretrained("facebook/sam3", image_size=image_size)
+model = Sam3VideoModel.from_pretrained("facebook/sam3", config=config).to(
+    device, dtype=torch.bfloat16
+)
+processor = Sam3VideoProcessor.from_pretrained(
+    "facebook/sam3",
+    size={"height": frame_height, "width": frame_width},
+)
+
 
 # Initialize video inference session
 logger.info("Initializing video inference session...")

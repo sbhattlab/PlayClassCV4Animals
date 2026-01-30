@@ -53,7 +53,8 @@ model = Sam3Model.from_pretrained("facebook/sam3").to(device)
 processor = Sam3Processor.from_pretrained("facebook/sam3")
 
 logger.info("Loading test image...")
-image = Image.open("data/test-img/0120.jpg").convert("RGB")
+# image = Image.open("data/test-img/0120.jpg").convert("RGB")
+image = Image.open("data/img/test-img-15-sec/00120.jpg").convert("RGB")
 
 
 logger.info(f"Prompting model with text: {TEXT})")
