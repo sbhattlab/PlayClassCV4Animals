@@ -1,5 +1,6 @@
 # Installation instructions for grounded-sam-2
-Adapted from: https://github.com/IDEA-Research/Grounded-SAM-2?tab=readme-ov-file#installation
+- Adapted from: https://github.com/IDEA-Research/Grounded-SAM-2?tab=readme-ov-file#installation
+- Implemented as pixi task, run with `pixi run -e gs2 setup-gs2`
 ```sh
 # Enter Grounded-SAM-2-fork directory and download checkpoints
 cd Grounded-SAM-2-fork

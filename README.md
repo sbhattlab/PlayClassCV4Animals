@@ -15,21 +15,35 @@ ln -s "/mnt/birds/rebecca2025/" ext-data
 - Medium (>=5 min) at `/mnt/birds/rebecca2025/`
     - 5 min
 
+## Overview of `ext-data` directory
+```
+├── imgs    : video sequences converted to images (durations vary from 15 sec to 15 mins)
+├── output  : results from runs
+├── raw     : raw video files
+└── test    : *longer* video files (i.e. > 1 min)
+```
+
+
 # Environment
 ```sh
 # Install main (default) environment
 pixi install
 
-# Install all environments
-pixi install --all
+# Install SAM3 (sam3-hf) environment
+pixi install -e sam3-hf
+
+# install grounded-sam-2 (gs2) environment
+pixi run -e gs2 setup-gs2
 
 # Launch shell in specific environment
 pixi shell -e sam3-hf
 ```
 
 # How to run scripts
+> [!IMPORTANT] Please read base config file usually named (`config/<tool name>_config.yaml`), and modify appropriately (e.g. which CUDA device to run)
+- In general, run scripts as Python modules, e.g.:
 ```sh
-python -m script.sam3.sam3-hf-chunking --config config/my_custom_config.yaml
+python -m script.sam3.run_sam3_hf_chunking --config config/sam3_hf_config.yaml
 ```
 
 # Overview of currently implemented test scripts
@@ -50,6 +64,9 @@ pixi run test-sam3-hf-video
 
 # SAM3-native 
 pixi run test-sam3-native-video  
+
+# grounded-sam-2
+pixi run test-gs2
 ```
 
 # Methods tested
