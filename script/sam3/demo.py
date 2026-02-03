@@ -1,5 +1,8 @@
+import numpy as np
+import pandas as pd
 import torch
 from accelerate import Accelerator
+from pycocotools import mask as mask_util
 from transformers import Sam3VideoConfig, Sam3VideoModel, Sam3VideoProcessor
 from transformers.video_utils import load_video
 
@@ -79,5 +82,78 @@ for key in single_frame_outputs.keys():
 print("Per-frame (raw) model outputs contain:")
 for key, value in model_outputs.items():
     print(f"{key}, type: {type(value)}")
+
+# Save results persistently
+OUTPUT_PATH = "sandbox/sam3_video_demo_outputs.parquet"
+print(f"Saving all per-frame outputs to {OUTPUT_PATH}...")
+
+
+def to_numpy(x):
+    if hasattr(x, "cpu"):
+        x = x.cpu()
+    if hasattr(x, "numpy"):
+        x = x.numpy()
+    return np.array(x)
+
+
+index_tuples = []
+bboxes = []
+counts_list = []
+sizes = []
+scores_list = []
+
+for frame_idx, proc in outputs_per_frame.items():
+    object_ids = to_numpy(proc["object_ids"])
+    boxes = to_numpy(proc["boxes"])
+    masks = proc["masks"]  # keep lazy until conversion per-item
+    scores = to_numpy(proc.get("scores", np.zeros(len(object_ids))))
+
+    for i, oid in enumerate(object_ids):
+        # bbox -> list (x1,y1,x2,y2)
+        bbox = boxes[i].tolist()
+
+        # mask -> RLE
+        mask_item = masks[i]
+        # if mask already RLE-like (dict with 'counts'/'size'), use it
+        if (
+            isinstance(mask_item, dict)
+            and "counts" in mask_item
+            and "size" in mask_item
+        ):
+            rle = mask_item
+            counts = rle["counts"]
+            try:
+                counts = counts.decode("utf-8")
+            except Exception:
+                pass
+            size = rle["size"]
+        else:
+            m = to_numpy(mask_item).astype(np.uint8)
+            # squeeze singleton channel dimension if present
+            if m.ndim == 3 and m.shape[0] in (1,):
+                m = m.squeeze(0)
+            # ensure Fortran order required by pycocotools
+            rle = mask_util.encode(np.asfortranarray(m))
+            counts = rle["counts"]
+            try:
+                counts = counts.decode("ascii")
+            except Exception:
+                pass
+            size = rle["size"]
+
+        score = float(scores[i])
+        index_tuples.append((int(frame_idx), int(oid)))
+        bboxes.append(bbox)
+        counts_list.append(counts)
+        sizes.append(size)
+        scores_list.append(score)
+
+mi = pd.MultiIndex.from_tuples(index_tuples, names=["frame_idx", "object_id"])
+df_results = pd.DataFrame(
+    {"bbox": bboxes, "counts": counts_list, "size": sizes, "scores": scores_list},
+    index=mi,
+)
+df_results = df_results.sort_index()
+df_results.to_parquet(OUTPUT_PATH)
 
 print("Demo complete.")
