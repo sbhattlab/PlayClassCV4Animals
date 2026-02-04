@@ -1,10 +1,15 @@
-import numpy as np
-import pandas as pd
 import torch
 from accelerate import Accelerator
-from pycocotools import mask as mask_util
 from transformers import Sam3VideoConfig, Sam3VideoModel, Sam3VideoProcessor
 from transformers.video_utils import load_video
+
+from script.sam3.metrics import (
+    compute_per_run_metrics,
+    compute_summary_metrics,
+    per_run_metrics_to_multiindex_df,
+    summary_metrics_to_df,
+)
+from script.sam3.utils import annotate_video_with_sam3_outputs, process_tracking_outputs
 
 CUSTOM_RESOLUTION = 560
 FRAMES_TO_TRACK = 250
@@ -83,77 +88,42 @@ print("Per-frame (raw) model outputs contain:")
 for key, value in model_outputs.items():
     print(f"{key}, type: {type(value)}")
 
-# Save results persistently
-OUTPUT_PATH = "sandbox/sam3_video_demo_outputs.parquet"
-print(f"Saving all per-frame outputs to {OUTPUT_PATH}...")
-
-
-def to_numpy(x):
-    if hasattr(x, "cpu"):
-        x = x.cpu()
-    if hasattr(x, "numpy"):
-        x = x.numpy()
-    return np.array(x)
-
-
-index_tuples = []
-bboxes = []
-counts_list = []
-sizes = []
-scores_list = []
-
-for frame_idx, proc in outputs_per_frame.items():
-    object_ids = to_numpy(proc["object_ids"])
-    boxes = to_numpy(proc["boxes"])
-    masks = proc["masks"]  # keep lazy until conversion per-item
-    scores = to_numpy(proc.get("scores", np.zeros(len(object_ids))))
-
-    for i, oid in enumerate(object_ids):
-        # bbox -> list (x1,y1,x2,y2)
-        bbox = boxes[i].tolist()
-
-        # mask -> RLE
-        mask_item = masks[i]
-        # if mask already RLE-like (dict with 'counts'/'size'), use it
-        if (
-            isinstance(mask_item, dict)
-            and "counts" in mask_item
-            and "size" in mask_item
-        ):
-            rle = mask_item
-            counts = rle["counts"]
-            try:
-                counts = counts.decode("utf-8")
-            except Exception:
-                pass
-            size = rle["size"]
-        else:
-            m = to_numpy(mask_item).astype(np.uint8)
-            # squeeze singleton channel dimension if present
-            if m.ndim == 3 and m.shape[0] in (1,):
-                m = m.squeeze(0)
-            # ensure Fortran order required by pycocotools
-            rle = mask_util.encode(np.asfortranarray(m))
-            counts = rle["counts"]
-            try:
-                counts = counts.decode("ascii")
-            except Exception:
-                pass
-            size = rle["size"]
-
-        score = float(scores[i])
-        index_tuples.append((int(frame_idx), int(oid)))
-        bboxes.append(bbox)
-        counts_list.append(counts)
-        sizes.append(size)
-        scores_list.append(score)
-
-mi = pd.MultiIndex.from_tuples(index_tuples, names=["frame_idx", "object_id"])
-df_results = pd.DataFrame(
-    {"bbox": bboxes, "counts": counts_list, "size": sizes, "scores": scores_list},
-    index=mi,
+# Detections annotations to annotated video
+print("Creating annotated video...")
+annotated_video_path = "sandbox/sam3_demo_annotated_video.mp4"
+annotate_video_with_sam3_outputs(
+    source_path=video_path,
+    target_path=annotated_video_path,
+    outputs_per_frame=outputs_per_frame,
 )
+print(f"Annotated video saved to: {annotated_video_path}")
+
+# Save results persistently
+RESULTS_PATH = "sandbox/sam3_video_demo_outputs.parquet"
+print(f"Saving all per-frame outputs to {RESULTS_PATH}...")
+
+df_results = process_tracking_outputs(outputs_per_frame)
 df_results = df_results.sort_index()
-df_results.to_parquet(OUTPUT_PATH)
+df_results.to_parquet(RESULTS_PATH)
+
+# Compute and display tracking metrics
+print("Calculating tracking metrics...")
+summary_metrics = compute_summary_metrics(outputs_per_frame)
+summary_metrics_df = summary_metrics_to_df(summary_metrics)
+print("Summary metrics:\n", summary_metrics_df)
+
+per_run = compute_per_run_metrics(
+    outputs_per_frame, low_count_threshold=3, iou_thresh=0.5
+)
+per_run_df = per_run_metrics_to_multiindex_df(per_run)
+print("Per-run metrics (MultiIndex):\n", per_run_df)
+
+# optionally persist
+SUMMARY_PATH = "sandbox/sam3_summary_metrics.parquet"
+PER_RUN_PATH = "sandbox/sam3_per_id_metrics.parquet"
+print(f"Saving summary metrics to {SUMMARY_PATH}...")
+print(f"Saving per-run metrics to {PER_RUN_PATH}...")
+summary_metrics_df.to_parquet(SUMMARY_PATH)
+per_run_df.to_parquet(PER_RUN_PATH)
 
 print("Demo complete.")
