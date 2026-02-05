@@ -2,8 +2,6 @@
 - Small and tabular data in `data` directory
 - Larger video data in symlinked to `video-data-dir`
 ```sh
-# e.g. macOS
-ln -s  "$HOME/Library/CloudStorage/OneDrive-UniversityofCopenhagen/IFSV/proj/chicken-behaviour-classifier-data/video-raw-data" video-data
 # ku-01
 ln -s "/mnt/birds/rebecca2025/raw" video-data
 ln -s "/mnt/birds/rebecca2025/" ext-data
@@ -23,8 +21,13 @@ ln -s "/mnt/birds/rebecca2025/" ext-data
 └── test    : *longer* video files (i.e. > 1 min)
 ```
 
-
 # Environment
+- Fetch git submodules:
+```sh
+git submodule update --init --recursivegit
+```
+
+- Install environments (currently supported: `sam3-hf` and `gs2`)
 ```sh
 # Install main (default) environment
 pixi install
@@ -38,6 +41,13 @@ pixi run -e gs2 setup-gs2
 # Launch shell in specific environment
 pixi shell -e sam3-hf
 ```
+
+## Supported platforms
+In general, environments assume Linux. 
+
+Currently the following environments are supported in addition to Linux, on macOS:
+- SAM3
+    - huggingface
 
 # How to run scripts
 > [!IMPORTANT] Please read base config file usually named (`config/<tool name>_config.yaml`), and modify appropriately (e.g. which CUDA device to run)
