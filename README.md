@@ -37,6 +37,8 @@ pixi install -e sam3-hf
 
 # install grounded-sam-2 (gs2) environment
 pixi run -e gs2 setup-gs2
+# Add location of gs2 fork to shell profile
+export PYTHONPATH="/path/to/submodule/chicken-behaviour-classifier/Grounded-SAM-2-fork":$PYTHONPATH
 
 # Launch shell in specific environment
 pixi shell -e sam3-hf
