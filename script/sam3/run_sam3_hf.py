@@ -6,7 +6,7 @@ Processes video in chunks:
 - Chunks 1+: Sam3TrackerVideoModel with point prompts (longer, e.g. 45s)
 
 Usage:
-    python -m script.sam3.demo --config config/sam3_hf_config.yaml
+    python -m script.sam3.run_sam3_hf --config config/sam3_hf_config.yaml
 """
 
 import argparse
@@ -31,7 +31,7 @@ def _early_init():
     )
     args, _ = parser.parse_known_args()
 
-    from script.sam3.utils import load_config, set_env_vars
+    from src.utils import load_config, set_env_vars
 
     cfg = load_config(args.config)
     set_env_vars(cfg)
@@ -53,7 +53,7 @@ from transformers import (  # noqa: E402
 )
 from transformers.video_utils import load_video  # noqa: E402
 
-from script.sam3.metrics import (  # noqa: E402
+from src.metrics import (  # noqa: E402
     compute_per_frame_metrics,
     compute_per_run_metrics,
     compute_summary_metrics,
@@ -61,7 +61,7 @@ from script.sam3.metrics import (  # noqa: E402
     per_run_metrics_to_multiindex_df,
     summary_metrics_to_df,
 )
-from script.sam3.utils import (  # noqa: E402
+from src.utils import (  # noqa: E402
     annotate_video_with_sam3_outputs,
     chunk_video_frames_dual,
     create_run_directory,
@@ -71,7 +71,7 @@ from script.sam3.utils import (  # noqa: E402
     sample_points_from_masks,
     setup_logger,
 )
-from script.sam3.viz import generate_all_visualizations  # noqa: E402
+from src.viz import generate_all_visualizations  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Per-chunk processing helpers

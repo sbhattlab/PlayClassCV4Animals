@@ -53,9 +53,13 @@ Currently the following environments are supported in addition to Linux, on macO
 
 # How to run scripts
 > [!IMPORTANT] Please read base config file usually named (`config/<tool name>_config.yaml`), and modify appropriately (e.g. which CUDA device to run)
-- In general, run scripts as Python modules, e.g.:
+
+Scripts are organized as: executable scripts in `script/`, reusable library modules in `src/`.
+
+Run scripts as Python modules:
 ```sh
-python -m script.sam3.run_sam3_hf_chunking --config config/sam3_hf_config.yaml
+# SAM3 HuggingFace tracking pipeline
+python -m script.sam3.run_sam3_hf --config config/sam3_hf_config.yaml
 ```
 
 # Overview of currently implemented test scripts

@@ -6,11 +6,10 @@ import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
+from accelerate import Accelerator
 from PIL import Image
 from transformers import Sam3VideoConfig, Sam3VideoModel, Sam3VideoProcessor
 from transformers.video_utils import load_video
-
-from src.utils import autoselect_torch_device
 
 TEXT = "bird"
 
@@ -41,7 +40,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-device = autoselect_torch_device()
+device = Accelerator().device
 logger.info(f"Using device: {device}")
 
 CUDA_GPU_ID = os.environ.get("CUDA_VISIBLE_DEVICES")

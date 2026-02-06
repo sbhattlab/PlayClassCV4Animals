@@ -5,10 +5,9 @@ from pathlib import Path
 import matplotlib
 import numpy as np
 import torch
+from accelerate import Accelerator
 from PIL import Image
 from transformers import Sam3Model, Sam3Processor
-
-from src.utils import autoselect_torch_device
 
 # Configure logging
 logging.basicConfig(
@@ -40,7 +39,7 @@ def overlay_masks(image, masks):
 TEXT = "bird"
 
 
-device = autoselect_torch_device()
+device = Accelerator().device
 logger.info(f"Using device: {device}")
 
 CUDA_GPU_ID = os.environ.get("CUDA_VISIBLE_DEVICES")

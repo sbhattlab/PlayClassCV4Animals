@@ -1,343 +1,62 @@
+"""
+Utility functions for processing SAM3 tracking outputs.
+"""
+
 import gc
-import json
-import math
 import os
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Tuple
 
-import cv2
-import matplotlib
-import matplotlib.patches as patches
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import pycocotools.mask as mask_util
+import supervision as sv
 import torch
 from loguru import logger
 from omegaconf import DictConfig, OmegaConf
-from PIL import Image
-from tqdm import tqdm
-from transformers.video_utils import load_video
-
-# Try to import supervision, fall back gracefully if not available
-try:
-    import supervision as sv
-
-    SUPERVISION_AVAILABLE = True
-except ImportError:
-    SUPERVISION_AVAILABLE = False
 
 
-# =============================================================================
-# Config Loading
-# =============================================================================
+# ---------------------------------------------------------------------------
+# Config, environment, logging, and output directory utilities
+# ---------------------------------------------------------------------------
 
 
 def load_config(config_path: str | Path) -> DictConfig:
-    """
-    Load configuration from a YAML file using OmegaConf.
-
-    Args:
-        config_path: Path to the YAML configuration file
-
-    Returns:
-        DictConfig object with configuration values
-    """
+    """Load configuration from a YAML file using OmegaConf."""
     config_path = Path(config_path)
     if not config_path.exists():
         raise FileNotFoundError(f"Config file not found: {config_path}")
-
     cfg = OmegaConf.load(config_path)
-    logger.info(f"Loaded config from {config_path}")
     return cfg
 
 
-def set_env_vars(cfg: OmegaConf, logger=logger):
-    if cfg.CUDA_VISIBLE_DEVICES:
+def set_env_vars(cfg):
+    """Set environment variables from config (must run before torch import)."""
+    if cfg.get("CUDA_VISIBLE_DEVICES"):
         os.environ["CUDA_VISIBLE_DEVICES"] = str(cfg.CUDA_VISIBLE_DEVICES)
-        logger.info(f"Set CUDA_VISIBLE_DEVICES to {os.environ['CUDA_VISIBLE_DEVICES']}")
-    if cfg.PYTORCH_ALLOC_CONF:
+    if cfg.get("PYTORCH_ALLOC_CONF"):
         os.environ["PYTORCH_ALLOC_CONF"] = str(cfg.PYTORCH_ALLOC_CONF)
-        logger.info(f"Set PYTORCH_ALLOC_CONF to {os.environ['PYTORCH_ALLOC_CONF']}")
 
 
-# =============================================================================
-# Device Selection
-# =============================================================================
-
-
-def autoselect_torch_device() -> torch.device:
-    """
-    Automatically select the best available PyTorch device.
-
-    Priority: CUDA > MPS > CPU
-
-    Returns:
-        torch.device: The selected device.
-    """
-    if torch.cuda.is_available():
-        return torch.device("cuda")
-    elif torch.backends.mps.is_available():
-        return torch.device("mps")
-    return torch.device("cpu")
-
-
-# =============================================================================
-# Mask Utilities
-# =============================================================================
-
-
-def single_mask_to_rle(mask: np.ndarray) -> dict:
-    """
-    Convert a single binary mask to COCO RLE format.
-
-    Args:
-        mask: HxW binary mask (uint8 or bool)
-
-    Returns:
-        dict with 'counts' (str) and 'size' ([H, W])
-    """
-    rle = mask_util.encode(np.array(mask[:, :, None], order="F", dtype="uint8"))[0]
-    rle["counts"] = rle["counts"].decode("utf-8")
-    if "size" in rle and isinstance(rle["size"], (list, tuple)):
-        rle["size"] = [int(rle["size"][0]), int(rle["size"][1])]
-    return rle
-
-
-def convert_results_for_json(results: dict) -> dict:
-    """
-    Convert model outputs to JSON-serializable format.
-
-    Args:
-        results: dict with 'masks', 'boxes', 'object_ids', 'scores'
-
-    Returns:
-        dict with RLE-encoded masks and Python native types:
-        - masks_rle: List of RLE-encoded masks
-        - boxes: List of [x1, y1, x2, y2] bounding boxes
-        - object_ids: List of object IDs
-        - scores: List of confidence scores
-    """
-    # Convert masks to RLE
-    masks = results.get("masks")
-    if masks is not None:
-        if isinstance(masks, torch.Tensor):
-            masks = masks.cpu().numpy()
-        masks_rle = [single_mask_to_rle(m) for m in masks]
-    else:
-        masks_rle = []
-
-    # Convert boxes to list of floats
-    boxes = results.get("boxes")
-    if boxes is not None:
-        if isinstance(boxes, torch.Tensor):
-            boxes = boxes.cpu().numpy()
-        boxes_list = [[float(c) for c in box] for box in boxes]
-    else:
-        boxes_list = []
-
-    # Convert object_ids to list of integers
-    object_ids = results.get("object_ids")
-    if object_ids is not None:
-        if isinstance(object_ids, torch.Tensor):
-            object_ids = object_ids.cpu().numpy()
-        object_ids_list = [int(oid) for oid in object_ids]
-    else:
-        object_ids_list = []
-
-    # Convert scores to list of floats
-    scores = results.get("scores")
-    if scores is not None:
-        if isinstance(scores, torch.Tensor):
-            scores = scores.cpu().numpy()
-        scores_list = [float(s) for s in scores]
-    else:
-        scores_list = []
-
-    return {
-        "masks_rle": masks_rle,
-        "boxes": boxes_list,
-        "object_ids": object_ids_list,
-        "scores": scores_list,
-    }
-
-
-def overlay_masks_on_frame(
-    frame: np.ndarray, masks: np.ndarray | torch.Tensor
-) -> Image.Image:
-    """
-    Overlay segmentation masks on a video frame.
-
-    Args:
-        frame: RGB numpy array (H, W, 3)
-        masks: Binary masks (N, H, W)
-
-    Returns:
-        PIL Image with masks overlaid using rainbow colormap
-    """
-    image = Image.fromarray(frame).convert("RGBA")
-
-    if isinstance(masks, torch.Tensor):
-        # Convert BFloat16 to float32 before numpy conversion
-        if masks.dtype == torch.bfloat16:
-            masks = masks.float()
-        masks = masks.cpu().numpy()
-
-    # Ensure masks are in the correct shape (N, H, W) by squeezing extra dimensions
-    masks = np.squeeze(masks)
-    if masks.ndim == 2:
-        masks = masks[np.newaxis, ...]  # Single mask case: (H, W) -> (1, H, W)
-
-    masks = 255 * masks.astype(np.uint8)
-
-    n_masks = masks.shape[0]
-    if n_masks == 0:
-        return image.convert("RGB")
-
-    cmap = matplotlib.colormaps.get_cmap("rainbow").resampled(n_masks)
-    colors = [tuple(int(c * 255) for c in cmap(i)[:3]) for i in range(n_masks)]
-
-    for mask, color in zip(masks, colors):
-        mask_img = Image.fromarray(mask)
-        # Resize mask to match image dimensions if needed
-        if mask_img.size != image.size:
-            mask_img = mask_img.resize(image.size, Image.Resampling.NEAREST)
-        overlay = Image.new("RGBA", image.size, color + (0,))
-        alpha = mask_img.point(lambda v: int(v * 0.5))
-        overlay.putalpha(alpha)
-        image = Image.alpha_composite(image, overlay)
-
-    return image.convert("RGB")
-
-
-# =============================================================================
-# Object Extraction
-# =============================================================================
-
-
-def get_all_objects_from_results(
-    results: dict,
-) -> tuple[list[np.ndarray], list[list[float]], list[int]]:
-    """
-    Extract ALL objects' masks, bboxes, and object IDs from results.
-
-    Args:
-        results: dict with 'masks', 'boxes', 'object_ids', 'scores'
-
-    Returns:
-        Tuple of (masks_list, boxes_list, object_ids_list)
-        Each list has one entry per object.
-    """
-    masks = results.get("masks")
-    boxes = results.get("boxes")
-    object_ids = results.get("object_ids")
-
-    if masks is None or len(masks) == 0:
-        return [], [], []
-
-    if isinstance(masks, torch.Tensor):
-        masks = masks.cpu().numpy()
-    if isinstance(boxes, torch.Tensor):
-        boxes = boxes.cpu().numpy()
-    if isinstance(object_ids, torch.Tensor):
-        object_ids = object_ids.cpu().numpy()
-
-    masks_list = [masks[i] for i in range(len(masks))]
-    boxes_list = [[float(c) for c in boxes[i]] for i in range(len(boxes))]
-    object_ids_list = (
-        [int(object_ids[i]) for i in range(len(object_ids))]
-        if object_ids is not None
-        else list(range(1, len(masks) + 1))
-    )
-
-    return masks_list, boxes_list, object_ids_list
-
-
-# =============================================================================
-# Memory Management
-# =============================================================================
-
-
-def free_gpu_memory(log_stats: bool = False):
-    """
-    Force garbage collection and clear GPU memory cache.
-    Call this AFTER deleting heavy objects in the calling scope.
-
-    Args:
-        log_stats: If True, log memory statistics after cleanup
-    """
-    # Multiple rounds of garbage collection
-    for _ in range(3):
-        gc.collect()
-
-    if torch.cuda.is_available():
-        torch.cuda.synchronize()
-        torch.cuda.empty_cache()
-        torch.cuda.ipc_collect()
-        torch.cuda.synchronize()
-        torch.cuda.reset_peak_memory_stats()
-
-        if log_stats:
-            allocated = torch.cuda.memory_allocated() / 1024**3
-            reserved = torch.cuda.memory_reserved() / 1024**3
-            logger.info(
-                f"GPU memory after cleanup - Allocated: {allocated:.2f} GiB, Reserved: {reserved:.2f} GiB"
-            )
-
-
-# =============================================================================
-# Video Loading
-# =============================================================================
-
-
-def load_video_frames(video_path: str | Path) -> tuple[list, float]:
-    """
-    Load all video frames and determine FPS.
-
-    Args:
-        video_path: Path to video file
-
-    Returns:
-        Tuple of (frames list, fps)
-    """
-    logger.info(f"Loading video from {video_path}...")
-    video_frames, metadata = load_video(str(video_path))
-    fps = metadata.get("fps", 25.0) if metadata else 25.0
-    logger.info(f"Loaded {len(video_frames)} frames at {fps} FPS")
-    return video_frames, fps
-
-
-# =============================================================================
-# Logger Setup
-# =============================================================================
-
-
-def setup_logger(log_dir: Path, debug: bool = False) -> Path:
+def setup_logger(
+    log_dir: Path, job_type: str = "sam3_demo", debug: bool = False
+) -> Path:
     """
     Configure loguru logger with both console and file output.
 
-    Args:
-        log_dir: Directory to store log files
-        debug: Enable debug level logging
-
     Returns:
-        Path to the log file
+        Path to the log file.
     """
     level = "DEBUG" if debug else "INFO"
-
-    # Create log directory
     log_dir.mkdir(parents=True, exist_ok=True)
 
-    # Generate unique log filename with datetime
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    log_filename = log_dir / f"sam3_hf_chunking_{timestamp}.log"
+    log_filename = log_dir / f"{job_type}_{timestamp}.log"
 
-    # Remove default logger
     logger.remove()
 
-    # Add console handler with colored output
+    # Console handler (colored)
     logger.add(
         sys.stderr,
         format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> "
@@ -345,7 +64,7 @@ def setup_logger(log_dir: Path, debug: bool = False) -> Path:
         level=level,
     )
 
-    # Add file handler
+    # File handler
     logger.add(
         str(log_filename),
         format="{time:YYYY-MM-DD HH:mm:ss} [{level}] {message}",
@@ -358,624 +77,371 @@ def setup_logger(log_dir: Path, debug: bool = False) -> Path:
     return log_filename
 
 
-def save_results_json(
-    all_results: dict[int, dict],
-    metadata: dict,
-    chunk_metadata: dict[int, dict],
-    video_frames: list,
-    output_path: Path,
-    vis_output_dir: Path,
-    overlay_func: callable,
-    vis_stride: int = 25,
-) -> None:
+def create_run_directory(base_output_dir: Path, job_type: str) -> Path:
+    """Create a timestamped run directory for this job."""
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    run_dir = base_output_dir / f"{timestamp}_{job_type}"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    return run_dir
+
+
+# ---------------------------------------------------------------------------
+# Chunking and model transition utilities
+# ---------------------------------------------------------------------------
+
+
+def chunk_video_frames_dual(
+    total_frames: int,
+    fps: float,
+    video_model_seconds: int,
+    tracker_seconds: int,
+) -> list[tuple[int, int, str]]:
     """
-    Save segmentation results to JSON and optionally generate frame visualizations.
+    Split video into chunks with different durations for each model type.
 
-    Args:
-        all_results: Results dictionary {chunk_idx -> {frame_idx -> results}}
-        metadata: Dictionary of metadata to include in the output
-        chunk_metadata: Metadata for each chunk {chunk_idx -> metadata_dict}
-        video_frames: List of video frames (PIL Images or numpy arrays)
-        output_path: Path to save JSON results
-        vis_output_dir: Directory to save visualizations
-        overlay_func: Function to overlay masks on frames (frame, masks) -> PIL Image
-        vis_stride: Save every Nth frame for visualization
+    The first chunk uses Sam3VideoModel (text-prompted, shorter duration) and
+    all subsequent chunks use Sam3TrackerVideoModel (point-prompted, longer).
+
+    Returns list of (start_idx, end_idx, model_type) tuples where
+    model_type is "video" (Sam3VideoModel) or "tracker" (Sam3TrackerVideoModel).
     """
-    # Convert keys to strings for JSON serialization
-    json_results = {
-        str(chunk_idx): {
-            str(frame_idx): frame_results
-            for frame_idx, frame_results in chunk_data.items()
-        }
-        for chunk_idx, chunk_data in all_results.items()
-    }
+    video_model_frames = int(fps * video_model_seconds)
+    tracker_frames = int(fps * tracker_seconds)
 
-    # Build output structure
-    json_output = {
-        "metadata": metadata,
-        "chunk_metadata": {
-            str(chunk_idx): meta for chunk_idx, meta in chunk_metadata.items()
-        },
-        "results": json_results,
-    }
+    chunks = []
+    # Chunk 0: video model (short)
+    end = min(video_model_frames, total_frames)
+    chunks.append((0, end, "video"))
 
-    # Save JSON
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(output_path, "w") as f:
-        json.dump(json_output, f, indent=2)
-    logger.info(f"Results saved to {output_path}")
+    # Remaining chunks: tracker (longer)
+    # Absorb small trailing remainders (< 10% of chunk size) into the last chunk
+    start = end
+    while start < total_frames:
+        end = min(start + tracker_frames, total_frames)
+        remaining_after = total_frames - end
+        if 0 < remaining_after < tracker_frames * 0.1:
+            end = total_frames  # absorb small tail
+        chunks.append((start, end, "tracker"))
+        start = end
 
-    # Save visualizations for frames
-    vis_output_dir.mkdir(parents=True, exist_ok=True)
-
-    for _chunk_idx, chunk_data in all_results.items():
-        for frame_idx, frame_results in chunk_data.items():
-            if int(frame_idx) % vis_stride != 0:
-                continue
-
-            output_img_path = vis_output_dir / f"frame_{int(frame_idx):06d}.png"
-            if output_img_path.exists():
-                continue  # Skip already saved frames
-
-            # Decode RLE masks
-            masks_rle = frame_results.get("masks_rle", [])
-            if masks_rle:
-                masks = np.stack([mask_util.decode(rle) for rle in masks_rle])
-                frame = video_frames[int(frame_idx)]
-                vis_image = overlay_func(frame, masks)
-                vis_image.save(output_img_path)
+    return chunks
 
 
-def plot_frame_from_df(
-    df: pd.DataFrame,
-    decoder,  # torchcodec.decoders.VideoDecoder
-    frame_idx: int,
-    *,
-    ax: Optional[plt.Axes] = None,
-    alpha: float = 0.40,  # mask opacity
-    box_color: Tuple[float, float, float] = (1.0, 1.0, 1.0),  # white (RGB 0..1)
-    box_linewidth: float = 2.0,
-    draw_labels: bool = True,
-    fontsize: int = 9,
-):
+def get_all_objects_from_results(results: dict) -> tuple[list, list, list]:
     """
-    Matplotlib visualization for one frame using detections/segments from a MultiIndex DataFrame.
+    Extract masks, boxes, and object_ids from a single frame's output dict.
 
-    DataFrame expectations:
-      - Index: MultiIndex with level names ['frame', 'object_id']
-      - Columns: ['size', 'counts', 'bbox', 'class', 'score']
-          * 'bbox' is [x1, y1, x2, y2] in pixels or normalized (<= 2.0)
-          * 'size' is [H, W] and 'counts' is a COCO RLE string (optional)
-          * 'class' string or NaN; 'score' float or None
-
-    Parameters
-    ----------
-    df : pd.DataFrame
-        Per-object results. One row per object per frame.
-    decoder : torchcodec.decoders.VideoDecoder
-        Opened decoder; we read `frame_idx` from it.
-    frame_idx : int
-        Global frame index to draw.
-    ax : Optional[plt.Axes]
-        Provide an axes to draw into; if None, a new fig/axes is created.
-    alpha : float
-        Mask overlay transparency (0..1).
-    box_color : (r,g,b) in 0..1
-        Default edge color for boxes.
-    box_linewidth : float
-        Rectangle edge thickness.
-    draw_labels : bool
-        Show label with class • id • score near the box.
-    fontsize : int
-        Label font size.
-
-    Returns
-    -------
-    fig, ax : (matplotlib.figure.Figure, matplotlib.axes.Axes)
-        The figure and axes containing the rendered plot.
-    """
-
-    # ---- 1) Load the frame (RGB HWC) ----
-    frame_chw = decoder[frame_idx]  # uint8 [C,H,W], device CPU/CUDA
-    if isinstance(frame_chw, torch.Tensor):
-        frame_rgb = frame_chw.permute(1, 2, 0).contiguous().cpu().numpy()
-    else:
-        # If NumPy is returned, ensure HWC:
-        arr = np.asarray(frame_chw)
-        frame_rgb = (
-            arr if arr.ndim == 3 and arr.shape[2] == 3 else np.transpose(arr, (1, 2, 0))
-        )
-
-    H, W = frame_rgb.shape[:2]
-
-    # ---- 2) Prepare axes ----
-    created_fig = False
-    if ax is None:
-        fig, ax = plt.subplots(figsize=(min(12, W / 80), min(8, H / 80)))
-        created_fig = True
-    else:
-        fig = ax.figure
-
-    ax.imshow(frame_rgb)
-    ax.set_title(f"Frame {frame_idx}", fontsize=fontsize + 1)
-    ax.axis("off")
-
-    # If no 'frame' level, bail early
-    if "frame" not in df.index.names:
-        raise ValueError("DataFrame must have a MultiIndex with level 'frame'.")
-
-    # ---- 3) Fetch rows for this frame (if any) ----
-    try:
-        rows = df.loc[frame_idx]
-        if isinstance(rows, pd.Series):
-            rows = rows.to_frame().T
-    except KeyError:
-        # no detections for this frame
-        return fig, ax
-
-    # Helpers
-    def color_for_id(obj_id: int) -> Tuple[float, float, float]:
-        # Stable pseudo-random color seeded by id (return RGB in 0..1)
-        rng = np.random.default_rng(obj_id * 9767 + 1337)
-        c = rng.integers(0, 255, size=3).astype(np.float32) / 255.0
-        return float(c[0]), float(c[1]), float(c[2])
-
-    def to_pixel_xyxy(xyxy: np.ndarray) -> np.ndarray:
-        out = xyxy.astype(float).copy()
-        if np.nanmax(out) <= 2.0:  # looks normalized -> scale
-            out[[0, 2]] *= W
-            out[[1, 3]] *= H
-        # clip
-        out[0::2] = np.clip(out[0::2], 0, W - 1)
-        out[1::2] = np.clip(out[1::2], 0, H - 1)
-        return out
-
-    # ---- 4) Draw masks and boxes ----
-    for obj_id, row in rows.iterrows():
-        # (a) Mask via RGBA overlay
-        rle_counts = row.get("counts", None)
-        rle_size = row.get("size", None)
-        if isinstance(rle_counts, str) and rle_counts:
-            try:
-                rle = {"size": rle_size, "counts": rle_counts}
-                m = mask_util.decode(rle)
-                if m.ndim == 3:  # (H,W,1)
-                    m = m[..., 0]
-                m = m.astype(bool)
-                if m.any():
-                    r, g, b = color_for_id(int(obj_id))
-                    # Build per-object RGBA overlay and alpha where mask is True
-                    overlay = np.zeros((H, W, 4), dtype=np.float32)
-                    overlay[..., 0] = r
-                    overlay[..., 1] = g
-                    overlay[..., 2] = b
-                    overlay[..., 3] = alpha * m.astype(np.float32)
-                    ax.imshow(overlay, interpolation="nearest")
-            except Exception:
-                # If decoding fails, just skip mask
-                pass
-
-        # (b) Box + label
-        bbox = row.get("bbox", None)
-        if isinstance(bbox, (list, tuple)) and len(bbox) == 4:
-            xyxy = to_pixel_xyxy(np.array(bbox, dtype=float))
-            x1, y1, x2, y2 = xyxy
-            w_box = max(0.0, x2 - x1)
-            h_box = max(0.0, y2 - y1)
-            rect = patches.Rectangle(
-                (x1, y1),
-                w_box,
-                h_box,
-                linewidth=box_linewidth,
-                edgecolor=box_color,
-                facecolor="none",
-            )
-            ax.add_patch(rect)
-
-            if draw_labels:
-                cls_name = row.get("class", None)
-                if isinstance(cls_name, float) and math.isnan(cls_name):
-                    cls_name = None
-                score = row.get("score", None)
-                label_bits = []
-                if cls_name:
-                    label_bits.append(str(cls_name))
-                label_bits.append(f"id={int(obj_id)}")
-                if score is not None:
-                    try:
-                        label_bits.append(f"{float(score):.2f}")
-                    except Exception:
-                        pass
-                txt = " • ".join(label_bits)
-                ax.text(
-                    x1,
-                    max(0, y1 - 4),
-                    txt,
-                    fontsize=fontsize,
-                    color="w",
-                    va="bottom",
-                    ha="left",
-                    bbox=dict(
-                        boxstyle="round,pad=0.2", fc="black", ec="none", alpha=0.6
-                    ),
-                )
-
-    if created_fig:
-        fig.tight_layout()
-    return fig, ax
-
-
-def render_annotated_video(
-    json_path: str | Path,
-    video_path: str | Path,
-    output_path: str | Path,
-    *,
-    mask_opacity: float = 0.4,
-    box_thickness: int = 2,
-    label_font_scale: float = 0.5,
-    label_thickness: int = 1,
-    fps: Optional[float] = None,
-) -> None:
-    """
-    Render an annotated video with bounding boxes, object IDs, and masks.
-
-    Uses the Supervision library if available, otherwise falls back to pure OpenCV.
-
-    Args:
-        json_path: Path to the JSON results file from sam3-hf-chunking-test.py
-        video_path: Path to the original input video
-        output_path: Path to save the output annotated .mp4 file
-        mask_opacity: Opacity of mask overlays (0.0-1.0)
-        box_thickness: Thickness of bounding box lines
-        label_font_scale: Font scale for labels
-        label_thickness: Thickness of label text
-        fps: Output video FPS. If None, uses the source video FPS.
+    Handles both torch tensors and numpy arrays.
 
     Returns:
-        None. Writes the annotated video to output_path.
+        (masks_list, boxes_list, object_ids_list) where each is a list of
+        per-object arrays.
     """
-    json_path = Path(json_path)
-    video_path = Path(video_path)
-    output_path = Path(output_path)
+    masks = results.get("masks")
+    boxes = results.get("boxes")
+    object_ids = results.get("object_ids")
 
-    # Create output directory if needed
-    output_path.parent.mkdir(parents=True, exist_ok=True)
+    if masks is None or object_ids is None:
+        return [], [], []
 
-    # Load JSON results
-    with open(json_path, "r") as f:
-        data = json.load(f)
+    masks_np = to_numpy(masks)
+    boxes_np = to_numpy(boxes) if boxes is not None else None
+    ids_np = to_numpy(object_ids)
 
-    results = data.get("results", {})
-
-    # Flatten results: chunk_idx -> frame_idx -> results
-    # into: frame_idx -> results
-    flat_results: dict[int, dict] = {}
-    for chunk_idx, chunk_data in results.items():
-        for frame_idx, frame_results in chunk_data.items():
-            flat_results[int(frame_idx)] = frame_results
-
-    # Open video
-    cap = cv2.VideoCapture(str(video_path))
-    if not cap.isOpened():
-        raise RuntimeError(f"Could not open video: {video_path}")
-
-    # Get video properties
-    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    source_fps = cap.get(cv2.CAP_PROP_FPS)
-    output_fps = fps if fps is not None else source_fps
-
-    # Setup video writer
-    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-    writer = cv2.VideoWriter(str(output_path), fourcc, output_fps, (width, height))
-
-    if not writer.isOpened():
-        cap.release()
-        raise RuntimeError(f"Could not create video writer: {output_path}")
-
-    logger.info(
-        f"Rendering annotated video: {total_frames} frames at {output_fps:.2f} FPS"
+    masks_list = [masks_np[i] for i in range(len(ids_np))]
+    boxes_list = (
+        [boxes_np[i] for i in range(len(ids_np))] if boxes_np is not None else []
     )
-    logger.info(f"Output: {output_path}")
+    object_ids_list = ids_np.tolist()
 
-    # Color generator for consistent object colors
-    def get_color_for_id(obj_id: int) -> tuple[int, int, int]:
-        """Generate consistent BGR color for an object ID."""
-        rng = np.random.default_rng(obj_id * 9767 + 1337)
-        return tuple(int(c) for c in rng.integers(50, 255, size=3))
-
-    if SUPERVISION_AVAILABLE:
-        # Use Supervision for annotation
-        # Use TRACK color lookup since we have tracker_id, not class_id
-        box_annotator = sv.BoxAnnotator(
-            thickness=box_thickness,
-            color_lookup=sv.ColorLookup.TRACK,
-        )
-        label_annotator = sv.LabelAnnotator(
-            text_scale=label_font_scale,
-            text_thickness=label_thickness,
-            text_position=sv.Position.TOP_LEFT,
-            color_lookup=sv.ColorLookup.TRACK,
-        )
-        mask_annotator = sv.MaskAnnotator(
-            opacity=mask_opacity,
-            color_lookup=sv.ColorLookup.TRACK,
-        )
-
-    pbar = tqdm(total=total_frames, desc="Rendering video", unit="frame")
-    frame_idx = 0
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
-
-        # Get results for this frame
-        frame_results = flat_results.get(frame_idx)
-
-        if frame_results is not None:
-            masks_rle = frame_results.get("masks_rle", [])
-            boxes = frame_results.get("boxes", [])
-            object_ids = frame_results.get("object_ids", [])
-            scores = frame_results.get("scores", [])
-
-            if SUPERVISION_AVAILABLE and len(boxes) > 0:
-                # Decode masks from RLE
-                masks = []
-                for rle in masks_rle:
-                    if rle and "counts" in rle and "size" in rle:
-                        try:
-                            mask = mask_util.decode(rle)
-                            if mask.ndim == 3:
-                                mask = mask[..., 0]
-                            masks.append(mask.astype(bool))
-                        except Exception:
-                            masks.append(np.zeros((height, width), dtype=bool))
-                    else:
-                        masks.append(np.zeros((height, width), dtype=bool))
-
-                # Convert to numpy arrays
-                xyxy = np.array(boxes, dtype=np.float32)
-                masks_np = np.array(masks, dtype=bool) if masks else None
-                tracker_ids = np.array(object_ids, dtype=int)
-
-                # Create Supervision Detections
-                detections = sv.Detections(
-                    xyxy=xyxy,
-                    mask=masks_np,
-                    tracker_id=tracker_ids,
-                    confidence=np.array(scores, dtype=np.float32) if scores else None,
-                )
-
-                # Create labels
-                labels = [
-                    f"id:{oid} ({score:.2f})" if score else f"id:{oid}"
-                    for oid, score in zip(
-                        object_ids, scores or [None] * len(object_ids)
-                    )
-                ]
-
-                # Annotate frame
-                frame = mask_annotator.annotate(scene=frame, detections=detections)
-                frame = box_annotator.annotate(scene=frame, detections=detections)
-                frame = label_annotator.annotate(
-                    scene=frame, detections=detections, labels=labels
-                )
-
-            elif len(boxes) > 0:
-                # Fallback to pure OpenCV
-                frame = _annotate_frame_opencv(
-                    frame=frame,
-                    masks_rle=masks_rle,
-                    boxes=boxes,
-                    object_ids=object_ids,
-                    scores=scores,
-                    mask_opacity=mask_opacity,
-                    box_thickness=box_thickness,
-                    label_font_scale=label_font_scale,
-                    label_thickness=label_thickness,
-                    get_color_for_id=get_color_for_id,
-                )
-
-        writer.write(frame)
-        pbar.update(1)
-        frame_idx += 1
-
-    pbar.close()
-    cap.release()
-    writer.release()
-    logger.info(f"Done! Output saved to: {output_path}")
+    return masks_list, boxes_list, object_ids_list
 
 
-def _annotate_frame_opencv(
-    frame: np.ndarray,
-    masks_rle: list[dict],
-    boxes: list[list[float]],
-    object_ids: list[int],
-    scores: list[float],
-    mask_opacity: float,
-    box_thickness: int,
-    label_font_scale: float,
-    label_thickness: int,
-    get_color_for_id: callable,
-) -> np.ndarray:
+def find_frame_with_enough_objects(
+    outputs_per_frame: dict,
+    min_objects: int = 3,
+    max_lookback: int = 10,
+) -> tuple[int | None, list, list, list]:
     """
-    Annotate a frame using pure OpenCV (fallback when Supervision is not available).
+    Search backwards through frame outputs to find a frame with enough objects.
 
     Args:
-        frame: BGR image (H, W, 3)
-        masks_rle: List of RLE-encoded masks
-        boxes: List of [x1, y1, x2, y2] bounding boxes
-        object_ids: List of object IDs
-        scores: List of confidence scores
-        mask_opacity: Opacity for mask overlay
-        box_thickness: Line thickness for boxes
-        label_font_scale: Font scale for labels
-        label_thickness: Text thickness for labels
-        get_color_for_id: Function to get consistent color for object ID
+        outputs_per_frame: Dict mapping frame_idx -> processed output dict.
+        min_objects: Minimum number of objects required.
+        max_lookback: Maximum number of frames to search backwards from the end.
 
     Returns:
-        Annotated frame
+        (frame_idx, masks_list, boxes_list, object_ids_list) or
+        (None, [], [], []) if no suitable frame found.
     """
-    height, width = frame.shape[:2]
-    overlay = frame.copy()
+    sorted_frames = sorted(outputs_per_frame.keys(), reverse=True)
 
-    for i, (rle, box, obj_id) in enumerate(zip(masks_rle, boxes, object_ids)):
-        color = get_color_for_id(obj_id)
-        score = scores[i] if i < len(scores) else None
-
-        # Draw mask
-        if rle and "counts" in rle and "size" in rle:
-            try:
-                mask = mask_util.decode(rle)
-                if mask.ndim == 3:
-                    mask = mask[..., 0]
-                mask = mask.astype(bool)
-
-                # Create colored overlay where mask is True
-                overlay[mask] = [
-                    int(overlay[mask, c] * (1 - mask_opacity) + color[c] * mask_opacity)
-                    for c in range(3)
-                ]
-                # Simpler approach: blend colors
-                colored = np.zeros_like(frame)
-                colored[mask] = color
-                overlay = cv2.addWeighted(
-                    overlay,
-                    1 - mask_opacity * mask.any(),
-                    colored,
-                    mask_opacity,
-                    0,
-                )
-            except Exception:
-                pass
-
-        # Draw bounding box
-        x1, y1, x2, y2 = [int(c) for c in box]
-        cv2.rectangle(overlay, (x1, y1), (x2, y2), color, box_thickness)
-
-        # Draw label
-        label = f"id:{obj_id}"
-        if score is not None:
-            label += f" ({score:.2f})"
-
-        # Get text size for background
-        (text_w, text_h), baseline = cv2.getTextSize(
-            label, cv2.FONT_HERSHEY_SIMPLEX, label_font_scale, label_thickness
+    for frame_idx in sorted_frames[:max_lookback]:
+        masks_list, boxes_list, object_ids_list = get_all_objects_from_results(
+            outputs_per_frame[frame_idx]
         )
+        if len(object_ids_list) >= min_objects:
+            logger.debug(
+                f"Found {len(object_ids_list)} objects at frame {frame_idx}"
+            )
+            return frame_idx, masks_list, boxes_list, object_ids_list
 
-        # Draw label background
-        cv2.rectangle(
-            overlay,
-            (x1, y1 - text_h - baseline - 4),
-            (x1 + text_w + 4, y1),
-            color,
-            -1,
-        )
-
-        # Draw label text
-        cv2.putText(
-            overlay,
-            label,
-            (x1 + 2, y1 - baseline - 2),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            label_font_scale,
-            (255, 255, 255),
-            label_thickness,
-            cv2.LINE_AA,
-        )
-
-    # Blend overlay with original for mask effect
-    frame = cv2.addWeighted(frame, 1 - mask_opacity, overlay, mask_opacity, 0)
-
-    return overlay
+    logger.warning(
+        f"No frame with >= {min_objects} objects found in last {max_lookback} frames"
+    )
+    return None, [], [], []
 
 
-def from_segmentation_output_create_annotated_video(
-    video_frames, video_segments, processor, output_path, fps=25
-):
+def sample_points_from_masks(masks: np.ndarray, num_points: int = 3) -> np.ndarray:
     """
-    From output dict, where keys are frame idxs and values are per-frame Sam3TrackerVideoSegmentationOutput objects, create annotated video with object IDs, masks, and bboxes.
+    Sample random points from mask-positive pixels and return absolute coordinates.
+
+    Adapted from: IDEA-Research/Grounded-SAM-2
+    Source: https://github.com/IDEA-Research/Grounded-SAM-2/blob/main/utils/track_utils.py
+    Also available locally: Grounded-SAM-2-fork/utils/track_utils.py
 
     Args:
-        video_frames: List of frames (H, W, 3) numpy arrays
-        video_segments: Dict[frame_idx -> Sam3TrackerVideoSegmentationOutput]
-        processor: Sam3TrackerVideoProcessor
-        output_path: Path to save annotated video
-        fps: Frames per second for output video
+        masks: np.array with shape (N, H, W), binary masks.
+        num_points: Number of points to sample per mask.
+
+    Returns:
+        points: np.array with shape (N, num_points, 2) in (x, y) format.
     """
-    # Get video dimensions from first frame
-    h, w = video_frames[0].shape[:2]
+    n, h, w = masks.shape
+    points = []
+    for i in range(n):
+        indices = np.argwhere(masks[i] == 1)
+        indices = indices[:, ::-1]  # (y, x) to (x, y)
+        if len(indices) == 0:
+            points.append(np.zeros((num_points, 2)))
+            continue
+        if len(indices) < num_points:
+            sampled_indices = np.random.choice(len(indices), num_points, replace=True)
+        else:
+            sampled_indices = np.random.choice(
+                len(indices), num_points, replace=False
+            )
+        sampled_points = indices[sampled_indices]
+        points.append(sampled_points)
+    points = np.array(points, dtype=np.float32)
+    return points
 
-    # Initialize video writer
-    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-    out = cv2.VideoWriter(output_path, fourcc, fps, (w, h))
 
-    # Color palette for objects (BGR format for OpenCV)
-    colors = [
-        (255, 0, 0),  # Blue
-        (0, 255, 0),  # Green
-        (0, 0, 255),  # Red
-        (255, 255, 0),  # Cyan
-        (255, 0, 255),  # Magenta
-        (0, 255, 255),  # Yellow
-    ]
+def free_gpu_memory(log_stats: bool = False):
+    """Free GPU memory between chunks via garbage collection and cache clearing."""
+    if log_stats and torch.cuda.is_available():
+        before = torch.cuda.memory_allocated() / 1024**2
+        logger.debug(f"GPU memory before cleanup: {before:.1f} MB")
 
-    for frame_idx, frame in enumerate(video_frames):
-        # Convert RGB to BGR for OpenCV
-        annotated = cv2.cvtColor(frame.copy(), cv2.COLOR_RGB2BGR)
+    gc.collect()
+    gc.collect()
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        torch.cuda.ipc_collect()
 
-        if frame_idx in video_segments:
-            seg_output = video_segments[frame_idx]
+    if log_stats and torch.cuda.is_available():
+        after = torch.cuda.memory_allocated() / 1024**2
+        logger.debug(f"GPU memory after cleanup: {after:.1f} MB")
 
-            # Post-process masks
-            masks = processor.post_process_masks(
-                [seg_output.pred_masks],
-                original_sizes=[[h, w]],
-                binarize=True,
-            )[0]
 
-            # Convert to numpy
-            if masks.dtype == torch.bfloat16:
-                masks = masks.float()
-            masks = masks.cpu().numpy().squeeze()
+# ---------------------------------------------------------------------------
+# Data processing and annotation utilities
+# ---------------------------------------------------------------------------
 
-            # Handle single mask case
-            if masks.ndim == 2:
-                masks = masks[np.newaxis, ...]
 
-            # Draw each object
-            for i, obj_id in enumerate(seg_output.object_ids):
-                mask = masks[i].astype(np.uint8)
-                color = colors[i % len(colors)]
+def to_numpy(x):
+    if hasattr(x, "cpu"):
+        x = x.cpu()
+    if hasattr(x, "numpy"):
+        x = x.numpy()
+    return np.array(x)
 
-                # Create colored overlay
-                overlay = annotated.copy()
-                overlay[mask > 0] = color
-                annotated = cv2.addWeighted(annotated, 0.7, overlay, 0.3, 0)
 
-                # Get bounding box from mask
-                contours, _ = cv2.findContours(
-                    mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
-                )
-                if contours:
-                    x, y, bbox_w, bbox_h = cv2.boundingRect(contours[0])
+def process_tracking_outputs(outputs_per_frame):
+    index_tuples = []
+    bboxes = []
+    counts_list = []
+    sizes = []
+    scores_list = []
+    tracker_scores_list = []
+    chunk_idx_list = []
+    model_type_list = []
+    is_chunk_start_list = []
 
-                    # Draw bbox
-                    cv2.rectangle(annotated, (x, y), (x + bbox_w, y + bbox_h), color, 2)
+    for frame_idx, proc in outputs_per_frame.items():
+        object_ids = to_numpy(proc["object_ids"])
+        boxes = to_numpy(proc["boxes"])
+        masks = proc["masks"]  # keep lazy until conversion per-item
+        scores = to_numpy(proc.get("scores", np.zeros(len(object_ids))))
+        tracker_scores_dict = proc.get("obj_id_to_tracker_score") or {}
 
-                    # Draw object ID
-                    cv2.putText(
-                        annotated,
-                        f"ID: {obj_id}",
-                        (x, y - 10),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        0.6,
-                        color,
-                        2,
-                    )
+        # Chunk metadata (stamped by chunked pipeline, None for single-pass)
+        chunk_idx = proc.get("_chunk_idx")
+        model_type = proc.get("_model_type")
+        is_chunk_start = proc.get("_is_chunk_start")
 
-        out.write(annotated)
+        for i, oid in enumerate(object_ids):
+            # bbox -> list (x1,y1,x2,y2)
+            bbox = boxes[i].tolist()
 
-    out.release()
-    print(f"Saved annotated video to {output_path}")
+            # mask -> RLE
+            mask_item = masks[i]
+            # if mask already RLE-like (dict with 'counts'/'size'), use it
+            if (
+                isinstance(mask_item, dict)
+                and "counts" in mask_item
+                and "size" in mask_item
+            ):
+                rle = mask_item
+                counts = rle["counts"]
+                try:
+                    counts = counts.decode("utf-8")
+                except Exception:
+                    pass
+                size = rle["size"]
+            else:
+                m = to_numpy(mask_item).astype(np.uint8)
+                # squeeze singleton channel dimension if present
+                if m.ndim == 3 and m.shape[0] in (1,):
+                    m = m.squeeze(0)
+                # ensure Fortran order required by pycocotools
+                rle = mask_util.encode(np.asfortranarray(m))
+                counts = rle["counts"]
+                try:
+                    counts = counts.decode("ascii")
+                except Exception:
+                    pass
+                size = rle["size"]
+
+            score = float(scores[i])
+            tracker_score = (
+                float(tracker_scores_dict[int(oid)])
+                if tracker_scores_dict and int(oid) in tracker_scores_dict
+                else None
+            )
+            index_tuples.append((int(frame_idx), int(oid)))
+            bboxes.append(bbox)
+            counts_list.append(counts)
+            sizes.append(size)
+            scores_list.append(score)
+            tracker_scores_list.append(tracker_score)
+            chunk_idx_list.append(chunk_idx)
+            model_type_list.append(model_type)
+            is_chunk_start_list.append(is_chunk_start)
+
+    mi = pd.MultiIndex.from_tuples(index_tuples, names=["frame_idx", "object_id"])
+    df_results = pd.DataFrame(
+        {
+            "bbox": bboxes,
+            "counts": counts_list,
+            "size": sizes,
+            "scores": scores_list,
+            "tracker_score": tracker_scores_list,
+            "chunk_idx": chunk_idx_list,
+            "model_type": model_type_list,
+            "is_chunk_start": is_chunk_start_list,
+        },
+        index=mi,
+    )
+    return df_results
+
+
+def create_annotation_callback(outputs_per_frame: dict):
+    """
+    Creates a callback function for sv.process_video that annotates frames
+    using pre-computed SAM3 tracking outputs.
+    """
+    mask_annotator = sv.MaskAnnotator()
+    box_annotator = sv.BoxAnnotator(thickness=2)
+    label_annotator = sv.LabelAnnotator()
+
+    def callback(frame: np.ndarray, frame_idx: int) -> np.ndarray:
+        # Get outputs for this frame (may be missing for some frames)
+        if frame_idx not in outputs_per_frame:
+            return frame  # return original frame if no detections
+
+        frame_out = outputs_per_frame[frame_idx]
+
+        # Convert to tensors (handles both torch tensor and numpy array inputs)
+        masks_raw = frame_out["masks"]
+        boxes_raw = frame_out["boxes"]
+        ids_raw = frame_out["object_ids"]
+        scores_raw = frame_out["scores"]
+
+        if isinstance(masks_raw, np.ndarray):
+            masks_t = torch.from_numpy(masks_raw)
+        else:
+            masks_t = masks_raw.detach().cpu()
+
+        if isinstance(boxes_raw, np.ndarray):
+            boxes_t = torch.from_numpy(boxes_raw)
+        else:
+            boxes_t = boxes_raw.detach().cpu()
+
+        if isinstance(ids_raw, np.ndarray):
+            ids_t = torch.from_numpy(ids_raw)
+        else:
+            ids_t = ids_raw.detach().cpu()
+
+        if isinstance(scores_raw, np.ndarray):
+            scores_t = torch.from_numpy(scores_raw)
+        else:
+            scores_t = scores_raw.detach().cpu()
+
+        # Prepare masks: ensure shape (N, 1, H, W)
+        if masks_t.ndim == 3:  # (N, H, W)
+            masks_t = masks_t.unsqueeze(1)  # -> (N, 1, H, W)
+        masks_t = masks_t.to(torch.uint8)
+
+        # Build transformers-style results
+        transformers_res = {
+            "boxes": boxes_t,
+            "masks": masks_t,
+            "labels": ids_t,
+            "scores": scores_t,
+        }
+
+        # Create id2label mapping
+        id2label = {
+            int(i): f"id:{int(i)}" for i in to_numpy(ids_t)
+        }
+
+        # Build detections
+        detections = sv.Detections.from_transformers(
+            transformers_results=transformers_res, id2label=id2label
+        )
+
+        # Create labels with ID and confidence
+        labels = [
+            f"#{int(obj_id)} {confidence:.2f}"
+            for obj_id, confidence in zip(
+                to_numpy(ids_t), detections.confidence
+            )
+        ]
+
+        # Apply annotations
+        annotated = mask_annotator.annotate(scene=frame.copy(), detections=detections)
+        annotated = box_annotator.annotate(scene=annotated, detections=detections)
+        annotated = label_annotator.annotate(
+            scene=annotated, detections=detections, labels=labels
+        )
+
+        return annotated
+
+    return callback
+
+
+def annotate_video_with_sam3_outputs(
+    source_path: str, target_path: str, outputs_per_frame: dict
+):
+    """
+    Process entire video with SAM3 tracking outputs and save annotated version.
+    """
+    callback = create_annotation_callback(outputs_per_frame)
+    sv.process_video(
+        source_path=source_path,
+        target_path=target_path,
+        callback=callback,
+        show_progress=True,
+    )
