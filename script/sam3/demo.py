@@ -52,6 +52,7 @@ from script.sam3.utils import (  # noqa: E402
     process_tracking_outputs,
     setup_logger,
 )
+from script.sam3.viz import generate_all_visualizations  # noqa: E402
 
 
 def main():
@@ -103,7 +104,7 @@ def main():
 
     # Load video frames
     logger.info(f"Loading video: {video_path}")
-    video_frames, _ = load_video(video_path)
+    video_frames, fps = load_video(video_path)
 
     # Initialize video inference session
     logger.info("Initializing video inference session...")
@@ -192,6 +193,17 @@ def main():
     per_run_df.to_parquet(per_run_path)
     logger.info(f"Per-run metrics saved to: {per_run_path}")
     logger.info(f"Per-run metrics:\n{per_run_df}")
+
+    # Generate visualizations
+    logger.info("Generating visualizations...")
+    vis_dir = run_dir / "visualizations"
+    generate_all_visualizations(
+        tracking_df=df_results,
+        per_frame_df=per_frame_df,
+        output_dir=vis_dir,
+        fps=fps,
+    )
+    logger.info(f"Visualizations saved to: {vis_dir}")
 
     logger.info("Run complete.")
 
