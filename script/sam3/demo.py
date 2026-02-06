@@ -1,135 +1,200 @@
-import torch
-from accelerate import Accelerator
-from transformers import Sam3VideoConfig, Sam3VideoModel, Sam3VideoProcessor
-from transformers.video_utils import load_video
+"""
+SAM3 HuggingFace Video Tracking Script
 
-from script.sam3.metrics import (
+Usage:
+    python -m script.sam3.demo --config config/sam3_hf_config.yaml
+"""
+
+import argparse
+import shutil
+from pathlib import Path
+
+from loguru import logger
+
+
+def _early_init():
+    """Parse config and set env vars BEFORE torch import."""
+    parser = argparse.ArgumentParser(description="SAM3 HuggingFace Video Tracking")
+    parser.add_argument(
+        "--config",
+        type=str,
+        default="config/sam3_hf_config.yaml",
+        help="Path to config file (default: config/sam3_hf_config.yaml)",
+    )
+    args, _ = parser.parse_known_args()
+
+    from script.sam3.utils import load_config, set_env_vars
+
+    cfg = load_config(args.config)
+    set_env_vars(cfg)
+    return args, cfg
+
+
+# Call early init BEFORE importing torch/transformers
+_args, _cfg = _early_init()
+
+import torch  # noqa: E402
+from accelerate import Accelerator  # noqa: E402
+from transformers import Sam3VideoConfig, Sam3VideoModel, Sam3VideoProcessor  # noqa: E402
+from transformers.video_utils import load_video  # noqa: E402
+
+from script.sam3.metrics import (  # noqa: E402
+    compute_per_frame_metrics,
     compute_per_run_metrics,
     compute_summary_metrics,
+    per_frame_metrics_to_df,
     per_run_metrics_to_multiindex_df,
     summary_metrics_to_df,
 )
-from script.sam3.utils import annotate_video_with_sam3_outputs, process_tracking_outputs
-
-CUSTOM_RESOLUTION = 560
-FRAMES_TO_TRACK = 250
-
-# Load model and processor
-device = Accelerator().device
-print(f"Using device: {device}")
-
-print(
-    f"Loading model and processor (custom resolution: {CUSTOM_RESOLUTION}x{CUSTOM_RESOLUTION})..."
-)
-config = Sam3VideoConfig.from_pretrained("facebook/sam3")
-config.image_size = CUSTOM_RESOLUTION
-model = Sam3VideoModel.from_pretrained("facebook/sam3", config=config).to(
-    device, dtype=torch.bfloat16
-)
-processor = Sam3VideoProcessor.from_pretrained(
-    "facebook/sam3", size={"height": CUSTOM_RESOLUTION, "width": CUSTOM_RESOLUTION}
+from script.sam3.utils import (  # noqa: E402
+    annotate_video_with_sam3_outputs,
+    create_run_directory,
+    process_tracking_outputs,
+    setup_logger,
 )
 
-# Load video frames
-print("Loading video...")
-video_path = "data/video/test_1_min_560x560.mp4"
-video_frames, _ = load_video(video_path)
 
-# Initialize video inference session
-print("Initializing video inference session...")
-inference_session = processor.init_video_session(
-    video=video_frames,
-    inference_device=device,
-    processing_device="cpu",
-    video_storage_device="cpu",
-    dtype=torch.bfloat16,
-)
+def main():
+    args = _args
+    cfg = _cfg
 
-# Add text prompt to detect and track objects
-text = "bird"
-print("Adding text prompt to inference session:", text)
-inference_session = processor.add_text_prompt(
-    inference_session=inference_session,
-    text=text,
-)
+    # Create timestamped run directory
+    run_dir = create_run_directory(Path(cfg.output_dir), cfg.job_type)
+    metrics_dir = run_dir / "metrics"
+    metrics_dir.mkdir(parents=True, exist_ok=True)
 
-# Process all frames in the video
-outputs_per_frame = {}
+    # Setup logger (console + file in run dir)
+    log_file = setup_logger(run_dir, job_type=cfg.job_type)
 
-print(f"Run propogation on {FRAMES_TO_TRACK} frames...")
+    # Copy config for reproducibility
+    config_path = Path(args.config)
+    shutil.copy(config_path, run_dir / config_path.name)
+    logger.info(f"Config copied to {run_dir / config_path.name}")
 
-# Pass show_progress_bar=True to display a tqdm progress bar.
-for model_outputs in model.propagate_in_video_iterator(
-    inference_session=inference_session, max_frame_num_to_track=FRAMES_TO_TRACK
-):
-    processed_outputs = processor.postprocess_outputs(inference_session, model_outputs)
-    # Preserve raw tracking fields
-    processed_outputs["obj_id_to_tracker_score"] = dict(
-        model_outputs.obj_id_to_tracker_score
+    logger.info("=" * 60)
+    logger.info("SAM3 HuggingFace Video Tracking")
+    logger.info("=" * 60)
+    logger.info(f"Config file: {args.config}")
+    logger.info(f"Run directory: {run_dir}")
+    logger.info(f"Log file: {log_file}")
+
+    # Read config values
+    custom_resolution = cfg.custom_resolution
+    max_frames_to_track = cfg.max_frames_to_track
+    video_path = cfg.video_path
+    text_prompt = cfg.text_prompt
+
+    # Load model and processor
+    device = Accelerator().device
+    logger.info(f"Using device: {device}")
+
+    logger.info(
+        f"Loading model and processor (custom resolution: {custom_resolution}x{custom_resolution})..."
     )
-    processed_outputs["removed_obj_ids"] = set(model_outputs.removed_obj_ids)
-    processed_outputs["suppressed_obj_ids"] = set(model_outputs.suppressed_obj_ids)
-    outputs_per_frame[model_outputs.frame_idx] = processed_outputs
+    config = Sam3VideoConfig.from_pretrained("facebook/sam3")
+    config.image_size = custom_resolution
+    model = Sam3VideoModel.from_pretrained("facebook/sam3", config=config).to(
+        device, dtype=torch.bfloat16
+    )
+    processor = Sam3VideoProcessor.from_pretrained(
+        "facebook/sam3",
+        size={"height": custom_resolution, "width": custom_resolution},
+    )
 
-print(f"Processed {len(outputs_per_frame)} frames")
+    # Load video frames
+    logger.info(f"Loading video: {video_path}")
+    video_frames, _ = load_video(video_path)
 
-print("Resetting inference session...")
-inference_session.reset_inference_session()
+    # Initialize video inference session
+    logger.info("Initializing video inference session...")
+    inference_session = processor.init_video_session(
+        video=video_frames,
+        inference_device=device,
+        processing_device="cpu",
+        video_storage_device="cpu",
+        dtype=torch.bfloat16,
+    )
 
-# Access results for a specific frame
-FRAME_IDX = 110
-single_frame_outputs = outputs_per_frame[FRAME_IDX]
-print(f"Detected {len(single_frame_outputs['object_ids'])} objects")
-print(f"Object IDs: {single_frame_outputs['object_ids'].tolist()}")
-print(f"Scores: {single_frame_outputs['scores'].tolist()}")
-print(
-    f"Boxes shape (XYXY format, absolute coordinates): {single_frame_outputs['boxes'].shape}"
-)
-print(f"Masks shape: {single_frame_outputs['masks'].shape}")
+    # Add text prompt to detect and track objects
+    logger.info(f"Adding text prompt to inference session: {text_prompt}")
+    inference_session = processor.add_text_prompt(
+        inference_session=inference_session,
+        text=text_prompt,
+    )
 
-print("Per-frame post-processed outputs contain:")
-for key in single_frame_outputs.keys():
-    print(f"{key}, type: {type(single_frame_outputs.get(key))}")
-print("Per-frame (raw) model outputs contain:")
-for key, value in model_outputs.items():
-    print(f"{key}, type: {type(value)}")
+    # Process all frames in the video
+    outputs_per_frame = {}
+    logger.info(f"Running propagation on {max_frames_to_track} frames...")
 
-# Detections annotations to annotated video
-print("Creating annotated video...")
-annotated_video_path = "sandbox/sam3_demo_annotated_video.mp4"
-annotate_video_with_sam3_outputs(
-    source_path=video_path,
-    target_path=annotated_video_path,
-    outputs_per_frame=outputs_per_frame,
-)
-print(f"Annotated video saved to: {annotated_video_path}")
+    for model_outputs in model.propagate_in_video_iterator(
+        inference_session=inference_session,
+        max_frame_num_to_track=max_frames_to_track,
+    ):
+        processed_outputs = processor.postprocess_outputs(
+            inference_session, model_outputs
+        )
+        # Preserve raw tracking fields
+        processed_outputs["obj_id_to_tracker_score"] = dict(
+            model_outputs.obj_id_to_tracker_score
+        )
+        processed_outputs["removed_obj_ids"] = set(model_outputs.removed_obj_ids)
+        processed_outputs["suppressed_obj_ids"] = set(model_outputs.suppressed_obj_ids)
+        outputs_per_frame[model_outputs.frame_idx] = processed_outputs
 
-# Save results persistently
-RESULTS_PATH = "sandbox/sam3_video_demo_outputs.parquet"
-print(f"Saving all per-frame outputs to {RESULTS_PATH}...")
+    logger.info(f"Processed {len(outputs_per_frame)} frames")
 
-df_results = process_tracking_outputs(outputs_per_frame)
-df_results = df_results.sort_index()
-df_results.to_parquet(RESULTS_PATH)
+    logger.info("Resetting inference session...")
+    inference_session.reset_inference_session()
 
-# Compute and display tracking metrics
-print("Calculating tracking metrics...")
-summary_metrics = compute_summary_metrics(outputs_per_frame)
-summary_metrics_df = summary_metrics_to_df(summary_metrics)
-print("Summary metrics:\n", summary_metrics_df)
+    # Create annotated video
+    logger.info("Creating annotated video...")
+    annotated_video_path = run_dir / "annotated_video.mp4"
+    annotate_video_with_sam3_outputs(
+        source_path=video_path,
+        target_path=str(annotated_video_path),
+        outputs_per_frame=outputs_per_frame,
+    )
+    logger.info(f"Annotated video saved to: {annotated_video_path}")
 
-per_run = compute_per_run_metrics(
-    outputs_per_frame, low_count_threshold=3, iou_thresh=0.5
-)
-per_run_df = per_run_metrics_to_multiindex_df(per_run)
-print("Per-run metrics (MultiIndex):\n", per_run_df)
+    # Save raw tracking results
+    results_path = run_dir / "tracking_outputs.parquet"
+    logger.info(f"Saving all per-frame outputs to {results_path}...")
+    df_results = process_tracking_outputs(outputs_per_frame)
+    df_results = df_results.sort_index()
+    df_results.to_parquet(results_path)
 
-# optionally persist
-SUMMARY_PATH = "sandbox/sam3_summary_metrics.parquet"
-PER_RUN_PATH = "sandbox/sam3_per_id_metrics.parquet"
-print(f"Saving summary metrics to {SUMMARY_PATH}...")
-print(f"Saving per-run metrics to {PER_RUN_PATH}...")
-summary_metrics_df.to_parquet(SUMMARY_PATH)
-per_run_df.to_parquet(PER_RUN_PATH)
+    # Compute per-frame metrics (mask-based spatial/overlap/quality)
+    logger.info("Computing per-frame metrics...")
+    per_frame = compute_per_frame_metrics(outputs_per_frame)
+    per_frame_df = per_frame_metrics_to_df(per_frame)
+    per_frame_path = metrics_dir / "per_frame_metrics.parquet"
+    per_frame_df.to_parquet(per_frame_path)
+    logger.info(f"Per-frame metrics saved to: {per_frame_path}")
 
-print("Demo complete.")
+    # Compute summary metrics (with occlusion-aware ID switch detection)
+    logger.info("Computing summary metrics...")
+    summary_metrics = compute_summary_metrics(
+        outputs_per_frame, per_frame_metrics=per_frame
+    )
+    summary_metrics_df = summary_metrics_to_df(summary_metrics)
+    summary_path = metrics_dir / "summary_metrics.parquet"
+    summary_metrics_df.to_parquet(summary_path)
+    logger.info(f"Summary metrics saved to: {summary_path}")
+    logger.info(f"Summary metrics:\n{summary_metrics_df}")
+
+    # Compute per-run (per-ID lifecycle) metrics
+    logger.info("Computing per-run metrics...")
+    per_run = compute_per_run_metrics(
+        outputs_per_frame, low_count_threshold=3, iou_thresh=0.5
+    )
+    per_run_df = per_run_metrics_to_multiindex_df(per_run)
+    per_run_path = metrics_dir / "per_id_metrics.parquet"
+    per_run_df.to_parquet(per_run_path)
+    logger.info(f"Per-run metrics saved to: {per_run_path}")
+    logger.info(f"Per-run metrics:\n{per_run_df}")
+
+    logger.info("Run complete.")
+
+
+if __name__ == "__main__":
+    main()

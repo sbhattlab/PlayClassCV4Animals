@@ -4,7 +4,7 @@
 # =============================================================================
 # Job Configuration
 # =============================================================================
-job_type: "sam3_hf_chunking"  # Type of job to run
+job_type: "sam3_hf"  # Type of job to run
 
 # =============================================================================
 # Environmental variables
@@ -15,12 +15,19 @@ PYTORCH_ALLOC_CONF: "expandable_segments:True,garbage_collection_threshold:0.6" 
 # =============================================================================
 # Video/IO Configuration
 # =============================================================================
-video_path: "ext-data/test/video_1_5_min.mp4"
+# video_path: "ext-data/test/video_1_5_min.mp4"
+video_path: "data/video/test_1_min_560x560.mp4"
 text_prompt: "bird"
 
 # Output directory - results will be saved to a timestamped subdirectory
 # Format: {output_dir}/{YYYYMMDD_HHMMSS}_{job_type}/
-output_dir: "ext-data/output/results/sam3-hf"
+output_dir: "sandbox/output/results/sam3-hf"
+
+# =============================================================================
+# Model Configuration
+# =============================================================================
+custom_resolution: 560  # Image size for SAM3 model and processor
+max_frames_to_track: 3000  # Maximum number of frames to propagate (0 = all)
 
 # =============================================================================
 # Chunking Configuration
