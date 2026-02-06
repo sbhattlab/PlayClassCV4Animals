@@ -16,6 +16,7 @@ from pathlib import Path
 
 import numpy as np
 from loguru import logger
+from simpler_timer import SimplerTimer
 from tqdm import tqdm
 
 
@@ -323,6 +324,9 @@ def main():
     logger.info(f"Run directory: {run_dir}")
     logger.info(f"Log file: {log_file}")
 
+    # Start total pipeline timer
+    total_timer = SimplerTimer()
+
     # Read config values
     video_path = cfg.video_path
 
@@ -357,6 +361,11 @@ def main():
 
     for chunk_idx, (start_idx, end_idx, chunk_type) in enumerate(chunks):
         chunk_frames = video_frames[start_idx:end_idx]
+        num_frames = len(chunk_frames)
+
+        # Start timing this chunk
+        timer = SimplerTimer()
+
         logger.info(
             f"Processing chunk {chunk_idx}/{len(chunks) - 1}: "
             f"frames {start_idx}-{end_idx} ({chunk_type})"
@@ -427,6 +436,19 @@ def main():
                 chunk_frames, start_idx, cfg, device
             )
 
+        # Stop timer and calculate metrics
+        elapsed_seconds = timer.end()
+        avg_sec_per_frame = elapsed_seconds / max(1, num_frames)
+        fps_achieved = 1.0 / avg_sec_per_frame if avg_sec_per_frame > 0 else 0.0
+
+        # Add timing info to chunk metadata
+        chunk_info["timing"] = {
+            "elapsed_seconds": round(elapsed_seconds, 3),
+            "avg_seconds_per_frame": round(avg_sec_per_frame, 4),
+            "fps": round(fps_achieved, 2),
+            "num_frames": num_frames,
+        }
+
         # Stamp metadata on each frame
         for frame_idx in chunk_outputs:
             chunk_outputs[frame_idx]["_chunk_idx"] = chunk_idx
@@ -439,6 +461,14 @@ def main():
 
         # Free GPU memory between chunks
         free_gpu_memory(log_stats=True)
+
+        # Log timing metrics
+        logger.info(
+            f"Chunk {chunk_idx} timing: "
+            f"{elapsed_seconds:.2f}s total, "
+            f"{avg_sec_per_frame:.3f}s/frame, "
+            f"{fps_achieved:.2f} FPS"
+        )
         logger.info(
             f"Chunk {chunk_idx} complete: {len(chunk_outputs)} frames processed"
         )
@@ -513,6 +543,16 @@ def main():
     )
     logger.info(f"Visualizations saved to: {vis_dir}")
 
+    # Stop total timer and log overall statistics
+    total_elapsed = total_timer.end()
+    total_fps = total_frames / total_elapsed if total_elapsed > 0 else 0.0
+
+    logger.info("=" * 60)
+    logger.info(f"Pipeline complete in {total_elapsed:.2f}s ({total_timer.timestamp()})")
+    logger.info(
+        f"Overall throughput: {total_fps:.2f} FPS ({total_frames} frames)"
+    )
+    logger.info("=" * 60)
     logger.info("Run complete.")
 
 
