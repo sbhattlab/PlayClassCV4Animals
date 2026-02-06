@@ -32,7 +32,8 @@ max_frames_to_track: 3000  # Maximum number of frames to propagate (0 = all)
 # =============================================================================
 # Chunking Configuration
 # =============================================================================
-chunk_duration_seconds: 45 # 
+video_model_chunk_seconds: 15  # Duration of first chunk (Sam3VideoModel, text-prompted)
+tracker_chunk_seconds: 45      # Duration of subsequent chunks (Sam3TrackerVideoModel, point-prompted)
 vis_frame_stride: 30 # Visualize every Nth frame
 
 # =============================================================================

@@ -74,11 +74,13 @@ notebook/                     # Jupyter notebooks for EDA and demos
 
 ### Key patterns
 
-- **Config-driven**: `demo.py` reads YAML configs via OmegaConf (`config/sam3_hf_config.yaml`). The `_early_init()` pattern parses config and sets `CUDA_VISIBLE_DEVICES` before torch is imported.
+- **Config-driven**: `demo.py` reads YAML configs via OmegaConf (`config/sam3_hf_config.yaml`). The `_early_init()` pattern parses config and sets `CUDA_VISIBLE_DEVICES` and `PYTORCH_ALLOC_CONF` before torch is imported. A `tracking:` section overrides `Sam3VideoConfig` parameters (keep-alive, IoU thresholds, reconditioning interval, etc.). A `metrics:` section controls occlusion/clustering thresholds.
 - **Timestamped output**: Each run creates `{output_dir}/{YYYYMMDD_HHMMSS}_{job_type}/` with subdirectories for `metrics/` and `visualizations/`. Config is copied for reproducibility.
 - **Loguru logging**: Console (colored) + file handler in run directory. Replaces all `print()`.
-- **Two model phases**: `Sam3VideoModel` (text→segmentation) for initialization, `Sam3TrackerVideoModel` (point→tracking) for propagation across chunks.
-- **Device auto-detection**: `src/utils.py` automatically selects CUDA > MPS > CPU.
+- **Chunked processing**: Long videos are split into chunks via `chunk_video_frames_dual()`. Chunk 0 uses `Sam3VideoModel` (text-prompted, shorter: `video_model_chunk_seconds`). Subsequent chunks use `Sam3TrackerVideoModel` (point-prompted, longer: `tracker_chunk_seconds`). Small trailing remainders (<10% of chunk size) are absorbed into the last chunk. Point prompts are extracted from previous chunk's masks via `sample_points_from_masks()`. `find_frame_with_enough_objects()` searches backwards for a frame with enough detected objects. Object identities are preserved across chunks by passing the same object IDs.
+- **Two model phases**: `Sam3VideoModel` (text→segmentation) for initialization, `Sam3TrackerVideoModel` (point→tracking) for propagation. Each chunk loads its model fresh and cleans up GPU memory afterwards (`free_gpu_memory()` with triple `gc.collect` + CUDA cache clearing).
+- **Known issue — VideoModel→TrackerModel transition**: Tracking quality degrades across the chunk boundary when handing off from `Sam3VideoModel` to `Sam3TrackerVideoModel`. A suspected cause is the `custom_resolution` override (e.g. 560px) distorting the point prompts or mask quality for the tracker. Reverting to native resolution for the tracker chunks may help, but more testing is needed to verify.
+- **Device selection**: `Accelerator().device` from HuggingFace Accelerate (replaces manual CUDA > MPS > CPU logic in `src/utils.py`).
 
 ### Metrics module (`script/sam3/metrics.py`)
 
@@ -102,6 +104,46 @@ Auto-generated on each run, saved to `run_dir/visualizations/`:
 
 All plots use MM:SS x-axis when FPS is available.
 
+### Model output data structures
+
+**Raw model output (`Sam3VideoSegmentationOutput` from `model.propagate_in_video_iterator`):**
+- `object_ids`: `list[int]` — detected object IDs
+- `obj_id_to_mask`: `dict[int, tensor]` — per-object logit masks on GPU
+- `obj_id_to_score`: `dict[int, float]` — detection confidence
+- `obj_id_to_tracker_score`: `dict[int, float]` — tracking confidence
+- `removed_obj_ids`: `set` — IDs removed this frame
+- `suppressed_obj_ids`: `set` — IDs suppressed this frame
+- `frame_idx`: `int`
+
+**Processed output (from `processor.postprocess_outputs`):**
+- `object_ids`: `tensor (N,)` — detected object IDs
+- `scores`: `tensor (N,)` — detection confidence
+- `boxes`: `tensor (N, 4)` — XYXY absolute coordinates
+- `masks`: `tensor (N, H, W)` — boolean masks at original resolution
+- `prompt_to_obj_ids`: `dict` — e.g. `{"bird": [0, 1, 2]}`
+
+**Sam3TrackerVideoModel output (normalized in `_process_tracker_chunk`):**
+- Same keys as processed output, but: masks are `numpy (N, H, W)`, scores are `sigmoid(object_score_logits)` probabilities, boxes computed from masks. No `tracker_score`/`removed_obj_ids`/`suppressed_obj_ids`.
+
+### Run output directory structure
+
+```
+{timestamp}_{job_type}/
+├── sam3_hf_config.yaml           # Copy of config used
+├── sam3_hf_{timestamp}.log       # Loguru log file
+├── chunk_info.json               # Per-chunk metadata (model type, prompt points, source frame)
+├── annotated_video.mp4           # Video with mask/box/label overlays
+├── tracking_outputs.parquet      # Flat results: RLE masks (pycocotools), bbox, scores, chunk_idx, model_type, is_chunk_start
+├── metrics/
+│   ├── summary_metrics.parquet
+│   ├── per_id_metrics.parquet
+│   └── per_frame_metrics.parquet
+└── visualizations/
+    ├── id_timeline.png
+    ├── per_frame_dashboard.png
+    └── per_id_scores.png
+```
+
 ## Data Layout
 
 - `data/` — Small test data (images, short video clips, DLC annotations, ethogram parquets)
@@ -112,5 +154,6 @@ All plots use MM:SS x-axis when FPS is available.
 ## Key Dependencies
 
 - PyTorch 2.9.1 (CUDA 12.6 on Linux)
-- HuggingFace Transformers v5.0.0rc2 (installed from git)
+- HuggingFace Transformers v5.0.0rc2 (installed from git), Accelerate (device management)
 - supervision (annotation/visualization), loguru (logging), OmegaConf (config)
+- pycocotools (RLE mask encoding for parquet storage), matplotlib (visualizations)

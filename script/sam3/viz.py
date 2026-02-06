@@ -131,10 +131,12 @@ def plot_id_timeline(tracking_df, per_frame_df=None, fps=None, save_path=None):
             x_end = _frame_to_x(end, fps)
             width = x_end - x_start + (_frame_to_x(1, fps) if fps else 1)
 
-            # Color by mean tracker_score in this segment
+            # Color by mean score in this segment (prefer tracker_score, fall back to scores)
             if has_tracker_score:
                 seg_data = oid_data.loc[start:end, "tracker_score"]
                 mean_score = seg_data.mean()
+                if pd.isna(mean_score) and "scores" in oid_data.columns:
+                    mean_score = oid_data.loc[start:end, "scores"].mean()
                 if pd.isna(mean_score):
                     mean_score = 0.5
                 color = cmap(norm(mean_score))
@@ -162,7 +164,7 @@ def plot_id_timeline(tracking_df, per_frame_df=None, fps=None, save_path=None):
     sm = ScalarMappable(cmap=cmap, norm=norm)
     sm.set_array([])
     cbar = fig.colorbar(sm, ax=ax, pad=0.02, aspect=30)
-    cbar.set_label("Tracker Score")
+    cbar.set_label("Object Score")
 
     # Legend for trouble spots
     legend_handles = []
@@ -262,15 +264,25 @@ def plot_per_frame_dashboard(per_frame_df, fps=None, save_path=None):
 
 def plot_per_id_scores(tracking_df, fps=None, save_path=None):
     """
-    Line plot of tracker_score over time for each object ID.
+    Line plot of object scores over time for each object ID.
+
+    Uses the 'scores' column which is populated for both Sam3VideoModel
+    (detection confidence) and Sam3TrackerVideoModel (sigmoid of
+    object_score_logits). Falls back to 'tracker_score' if 'scores' has
+    no valid data.
 
     Args:
         tracking_df: MultiIndex DataFrame (frame_idx, object_id) with
-                     'tracker_score' column.
+                     'scores' and/or 'tracker_score' columns.
         fps: Video FPS for MM:SS x-axis. None = frame index.
         save_path: Path to save PNG. None = plt.show().
     """
     fig, ax = plt.subplots(figsize=(14, 4))
+
+    # Pick the best available score column
+    score_col = "scores"
+    if score_col not in tracking_df.columns or tracking_df[score_col].isna().all():
+        score_col = "tracker_score"
 
     object_ids = sorted(
         tracking_df.index.get_level_values("object_id").unique().tolist()
@@ -281,14 +293,14 @@ def plot_per_id_scores(tracking_df, fps=None, save_path=None):
         oid_data = tracking_df.xs(oid, level="object_id")
         frames = oid_data.index.values
         x = np.array([_frame_to_x(f, fps) for f in frames])
-        scores = oid_data["tracker_score"].values
+        scores = oid_data[score_col].values
         ax.plot(x, scores, color=color, linewidth=0.8, alpha=0.8, label=f"ID {oid}")
 
-    ax.set_ylabel("Tracker Score")
+    ax.set_ylabel("Object Score")
     ax.set_ylim(-0.05, 1.05)
     _setup_time_xaxis(ax, None, fps)
     ax.legend(fontsize=8, loc="lower right")
-    ax.set_title("Per-ID Tracker Score Over Time")
+    ax.set_title("Per-ID Object Score Over Time")
 
     fig.tight_layout()
     _save_or_show(fig, save_path)

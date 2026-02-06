@@ -2,6 +2,7 @@
 Utility functions for processing SAM3 tracking outputs.
 """
 
+import gc
 import os
 import sys
 from datetime import datetime
@@ -85,6 +86,166 @@ def create_run_directory(base_output_dir: Path, job_type: str) -> Path:
 
 
 # ---------------------------------------------------------------------------
+# Chunking and model transition utilities
+# ---------------------------------------------------------------------------
+
+
+def chunk_video_frames_dual(
+    total_frames: int,
+    fps: float,
+    video_model_seconds: int,
+    tracker_seconds: int,
+) -> list[tuple[int, int, str]]:
+    """
+    Split video into chunks with different durations for each model type.
+
+    The first chunk uses Sam3VideoModel (text-prompted, shorter duration) and
+    all subsequent chunks use Sam3TrackerVideoModel (point-prompted, longer).
+
+    Returns list of (start_idx, end_idx, model_type) tuples where
+    model_type is "video" (Sam3VideoModel) or "tracker" (Sam3TrackerVideoModel).
+    """
+    video_model_frames = int(fps * video_model_seconds)
+    tracker_frames = int(fps * tracker_seconds)
+
+    chunks = []
+    # Chunk 0: video model (short)
+    end = min(video_model_frames, total_frames)
+    chunks.append((0, end, "video"))
+
+    # Remaining chunks: tracker (longer)
+    # Absorb small trailing remainders (< 10% of chunk size) into the last chunk
+    start = end
+    while start < total_frames:
+        end = min(start + tracker_frames, total_frames)
+        remaining_after = total_frames - end
+        if 0 < remaining_after < tracker_frames * 0.1:
+            end = total_frames  # absorb small tail
+        chunks.append((start, end, "tracker"))
+        start = end
+
+    return chunks
+
+
+def get_all_objects_from_results(results: dict) -> tuple[list, list, list]:
+    """
+    Extract masks, boxes, and object_ids from a single frame's output dict.
+
+    Handles both torch tensors and numpy arrays.
+
+    Returns:
+        (masks_list, boxes_list, object_ids_list) where each is a list of
+        per-object arrays.
+    """
+    masks = results.get("masks")
+    boxes = results.get("boxes")
+    object_ids = results.get("object_ids")
+
+    if masks is None or object_ids is None:
+        return [], [], []
+
+    masks_np = to_numpy(masks)
+    boxes_np = to_numpy(boxes) if boxes is not None else None
+    ids_np = to_numpy(object_ids)
+
+    masks_list = [masks_np[i] for i in range(len(ids_np))]
+    boxes_list = (
+        [boxes_np[i] for i in range(len(ids_np))] if boxes_np is not None else []
+    )
+    object_ids_list = ids_np.tolist()
+
+    return masks_list, boxes_list, object_ids_list
+
+
+def find_frame_with_enough_objects(
+    outputs_per_frame: dict,
+    min_objects: int = 3,
+    max_lookback: int = 10,
+) -> tuple[int | None, list, list, list]:
+    """
+    Search backwards through frame outputs to find a frame with enough objects.
+
+    Args:
+        outputs_per_frame: Dict mapping frame_idx -> processed output dict.
+        min_objects: Minimum number of objects required.
+        max_lookback: Maximum number of frames to search backwards from the end.
+
+    Returns:
+        (frame_idx, masks_list, boxes_list, object_ids_list) or
+        (None, [], [], []) if no suitable frame found.
+    """
+    sorted_frames = sorted(outputs_per_frame.keys(), reverse=True)
+
+    for frame_idx in sorted_frames[:max_lookback]:
+        masks_list, boxes_list, object_ids_list = get_all_objects_from_results(
+            outputs_per_frame[frame_idx]
+        )
+        if len(object_ids_list) >= min_objects:
+            logger.debug(
+                f"Found {len(object_ids_list)} objects at frame {frame_idx}"
+            )
+            return frame_idx, masks_list, boxes_list, object_ids_list
+
+    logger.warning(
+        f"No frame with >= {min_objects} objects found in last {max_lookback} frames"
+    )
+    return None, [], [], []
+
+
+def sample_points_from_masks(masks: np.ndarray, num_points: int = 3) -> np.ndarray:
+    """
+    Sample random points from mask-positive pixels and return absolute coordinates.
+
+    Adapted from: IDEA-Research/Grounded-SAM-2
+    Source: https://github.com/IDEA-Research/Grounded-SAM-2/blob/main/utils/track_utils.py
+    Also available locally: Grounded-SAM-2-fork/utils/track_utils.py
+
+    Args:
+        masks: np.array with shape (N, H, W), binary masks.
+        num_points: Number of points to sample per mask.
+
+    Returns:
+        points: np.array with shape (N, num_points, 2) in (x, y) format.
+    """
+    n, h, w = masks.shape
+    points = []
+    for i in range(n):
+        indices = np.argwhere(masks[i] == 1)
+        indices = indices[:, ::-1]  # (y, x) to (x, y)
+        if len(indices) == 0:
+            points.append(np.zeros((num_points, 2)))
+            continue
+        if len(indices) < num_points:
+            sampled_indices = np.random.choice(len(indices), num_points, replace=True)
+        else:
+            sampled_indices = np.random.choice(
+                len(indices), num_points, replace=False
+            )
+        sampled_points = indices[sampled_indices]
+        points.append(sampled_points)
+    points = np.array(points, dtype=np.float32)
+    return points
+
+
+def free_gpu_memory(log_stats: bool = False):
+    """Free GPU memory between chunks via garbage collection and cache clearing."""
+    if log_stats and torch.cuda.is_available():
+        before = torch.cuda.memory_allocated() / 1024**2
+        logger.debug(f"GPU memory before cleanup: {before:.1f} MB")
+
+    gc.collect()
+    gc.collect()
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        torch.cuda.ipc_collect()
+
+    if log_stats and torch.cuda.is_available():
+        after = torch.cuda.memory_allocated() / 1024**2
+        logger.debug(f"GPU memory after cleanup: {after:.1f} MB")
+
+
+# ---------------------------------------------------------------------------
 # Data processing and annotation utilities
 # ---------------------------------------------------------------------------
 
@@ -104,6 +265,9 @@ def process_tracking_outputs(outputs_per_frame):
     sizes = []
     scores_list = []
     tracker_scores_list = []
+    chunk_idx_list = []
+    model_type_list = []
+    is_chunk_start_list = []
 
     for frame_idx, proc in outputs_per_frame.items():
         object_ids = to_numpy(proc["object_ids"])
@@ -111,6 +275,11 @@ def process_tracking_outputs(outputs_per_frame):
         masks = proc["masks"]  # keep lazy until conversion per-item
         scores = to_numpy(proc.get("scores", np.zeros(len(object_ids))))
         tracker_scores_dict = proc.get("obj_id_to_tracker_score") or {}
+
+        # Chunk metadata (stamped by chunked pipeline, None for single-pass)
+        chunk_idx = proc.get("_chunk_idx")
+        model_type = proc.get("_model_type")
+        is_chunk_start = proc.get("_is_chunk_start")
 
         for i, oid in enumerate(object_ids):
             # bbox -> list (x1,y1,x2,y2)
@@ -157,6 +326,9 @@ def process_tracking_outputs(outputs_per_frame):
             sizes.append(size)
             scores_list.append(score)
             tracker_scores_list.append(tracker_score)
+            chunk_idx_list.append(chunk_idx)
+            model_type_list.append(model_type)
+            is_chunk_start_list.append(is_chunk_start)
 
     mi = pd.MultiIndex.from_tuples(index_tuples, names=["frame_idx", "object_id"])
     df_results = pd.DataFrame(
@@ -166,6 +338,9 @@ def process_tracking_outputs(outputs_per_frame):
             "size": sizes,
             "scores": scores_list,
             "tracker_score": tracker_scores_list,
+            "chunk_idx": chunk_idx_list,
+            "model_type": model_type_list,
+            "is_chunk_start": is_chunk_start_list,
         },
         index=mi,
     )
@@ -188,23 +363,48 @@ def create_annotation_callback(outputs_per_frame: dict):
 
         frame_out = outputs_per_frame[frame_idx]
 
+        # Convert to tensors (handles both torch tensor and numpy array inputs)
+        masks_raw = frame_out["masks"]
+        boxes_raw = frame_out["boxes"]
+        ids_raw = frame_out["object_ids"]
+        scores_raw = frame_out["scores"]
+
+        if isinstance(masks_raw, np.ndarray):
+            masks_t = torch.from_numpy(masks_raw)
+        else:
+            masks_t = masks_raw.detach().cpu()
+
+        if isinstance(boxes_raw, np.ndarray):
+            boxes_t = torch.from_numpy(boxes_raw)
+        else:
+            boxes_t = boxes_raw.detach().cpu()
+
+        if isinstance(ids_raw, np.ndarray):
+            ids_t = torch.from_numpy(ids_raw)
+        else:
+            ids_t = ids_raw.detach().cpu()
+
+        if isinstance(scores_raw, np.ndarray):
+            scores_t = torch.from_numpy(scores_raw)
+        else:
+            scores_t = scores_raw.detach().cpu()
+
         # Prepare masks: ensure shape (N, 1, H, W)
-        masks_cpu = frame_out["masks"].detach().cpu()
-        if masks_cpu.ndim == 3:  # (N, H, W)
-            masks_cpu = masks_cpu.unsqueeze(1)  # -> (N, 1, H, W)
-        masks_cpu = masks_cpu.to(torch.uint8)
+        if masks_t.ndim == 3:  # (N, H, W)
+            masks_t = masks_t.unsqueeze(1)  # -> (N, 1, H, W)
+        masks_t = masks_t.to(torch.uint8)
 
         # Build transformers-style results
         transformers_res = {
-            "boxes": frame_out["boxes"].detach().cpu(),
-            "masks": masks_cpu,
-            "labels": frame_out["object_ids"].detach().cpu(),
-            "scores": frame_out["scores"].detach().cpu(),
+            "boxes": boxes_t,
+            "masks": masks_t,
+            "labels": ids_t,
+            "scores": scores_t,
         }
 
         # Create id2label mapping
         id2label = {
-            int(i): f"id:{int(i)}" for i in transformers_res["labels"].cpu().numpy()
+            int(i): f"id:{int(i)}" for i in to_numpy(ids_t)
         }
 
         # Build detections
@@ -216,7 +416,7 @@ def create_annotation_callback(outputs_per_frame: dict):
         labels = [
             f"#{int(obj_id)} {confidence:.2f}"
             for obj_id, confidence in zip(
-                frame_out["object_ids"].cpu().numpy(), detections.confidence
+                to_numpy(ids_t), detections.confidence
             )
         ]
 
@@ -240,5 +440,8 @@ def annotate_video_with_sam3_outputs(
     """
     callback = create_annotation_callback(outputs_per_frame)
     sv.process_video(
-        source_path=source_path, target_path=target_path, callback=callback
+        source_path=source_path,
+        target_path=target_path,
+        callback=callback,
+        show_progress=True,
     )
