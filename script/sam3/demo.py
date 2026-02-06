@@ -73,7 +73,6 @@ from script.sam3.utils import (  # noqa: E402
 )
 from script.sam3.viz import generate_all_visualizations  # noqa: E402
 
-
 # ---------------------------------------------------------------------------
 # Per-chunk processing helpers
 # ---------------------------------------------------------------------------
@@ -86,12 +85,29 @@ def _process_video_chunk(chunk_frames, start_idx, cfg, device):
     Loads model fresh, runs inference, cleans up. Returns dict mapping
     global frame indices to processed output dicts.
     """
-    custom_resolution = cfg.custom_resolution
     text_prompt = cfg.text_prompt
+    custom_resolution = cfg.custom_resolution
 
-    # Build config with tracking overrides
-    config = Sam3VideoConfig.from_pretrained("facebook/sam3")
-    config.image_size = custom_resolution
+    if custom_resolution:
+        # Build config with tracking overrides
+        config = Sam3VideoConfig.from_pretrained("facebook/sam3")
+        config.image_size = custom_resolution
+
+        model = Sam3VideoModel.from_pretrained("facebook/sam3", config=config).to(
+            device, dtype=torch.bfloat16
+        )
+        processor = Sam3VideoProcessor.from_pretrained(
+            "facebook/sam3",
+            size={"height": custom_resolution, "width": custom_resolution},
+        )
+        logger.info(
+            f"Custom resolution {custom_resolution}x{custom_resolution} applied to Sam3Video model and processor"
+        )
+    else:
+        model = Sam3VideoModel.from_pretrained("facebook/sam3").to(
+            device, dtype=torch.bfloat16
+        )
+        processor = Sam3VideoProcessor.from_pretrained("facebook/sam3")
 
     tracking_cfg = cfg.get("tracking", {})
     for key in [
@@ -106,14 +122,6 @@ def _process_video_chunk(chunk_frames, start_idx, cfg, device):
         val = tracking_cfg.get(key)
         if val is not None:
             setattr(config, key, val)
-
-    model = Sam3VideoModel.from_pretrained("facebook/sam3", config=config).to(
-        device, dtype=torch.bfloat16
-    )
-    processor = Sam3VideoProcessor.from_pretrained(
-        "facebook/sam3",
-        size={"height": custom_resolution, "width": custom_resolution},
-    )
 
     # Initialize video inference session
     inference_session = processor.init_video_session(
@@ -174,16 +182,25 @@ def _process_tracker_chunk(chunk_frames, start_idx, all_prompt_points, cfg, devi
     """
     custom_resolution = cfg.custom_resolution
 
-    config = Sam3TrackerVideoConfig.from_pretrained("facebook/sam3")
-    config.image_size = custom_resolution
+    if custom_resolution:
+        config = Sam3TrackerVideoConfig.from_pretrained("facebook/sam3")
+        config.image_size = custom_resolution
 
-    model = Sam3TrackerVideoModel.from_pretrained(
-        "facebook/sam3", config=config
-    ).to(device, dtype=torch.bfloat16)
-    processor = Sam3TrackerVideoProcessor.from_pretrained(
-        "facebook/sam3",
-        size={"height": custom_resolution, "width": custom_resolution},
-    )
+        model = Sam3TrackerVideoModel.from_pretrained(
+            "facebook/sam3", config=config
+        ).to(device, dtype=torch.bfloat16)
+        processor = Sam3TrackerVideoProcessor.from_pretrained(
+            "facebook/sam3",
+            size={"height": custom_resolution, "width": custom_resolution},
+        )
+        logger.info(
+            f"Custom resolution {custom_resolution}x{custom_resolution} applied to Sam3TrackerVideo model and processor"
+        )
+    else:
+        model = Sam3TrackerVideoModel.from_pretrained("facebook/sam3").to(
+            device, dtype=torch.bfloat16
+        )
+        processor = Sam3TrackerVideoProcessor.from_pretrained("facebook/sam3")
 
     # Initialize video inference session
     inference_session = processor.init_video_session(
@@ -251,8 +268,12 @@ def _process_tracker_chunk(chunk_frames, start_idx, all_prompt_points, cfg, devi
                 ys, xs = np.where(m > 0)
                 if len(ys) > 0:
                     boxes.append(
-                        [float(xs.min()), float(ys.min()),
-                         float(xs.max()), float(ys.max())]
+                        [
+                            float(xs.min()),
+                            float(ys.min()),
+                            float(xs.max()),
+                            float(ys.max()),
+                        ]
                     )
                 else:
                     boxes.append([0.0, 0.0, 0.0, 0.0])
@@ -279,12 +300,20 @@ def _process_tracker_chunk(chunk_frames, start_idx, all_prompt_points, cfg, devi
             else:
                 obj_scores = np.ones(len(masks_np))
 
+            # Build obj_id_to_tracker_score dict from sigmoid scores
+            active_ids = tracked_obj_ids[: len(masks_np)]
+            active_scores = obj_scores[: len(masks_np)]
+            obj_id_to_tracker_score = {
+                int(oid): float(active_scores[i]) for i, oid in enumerate(active_ids)
+            }
+
             global_frame_idx = start_idx + tracker_output.frame_idx
             outputs_per_frame[global_frame_idx] = {
                 "masks": masks_np,
                 "boxes": np.array(boxes),
-                "object_ids": np.array(tracked_obj_ids[: len(masks_np)]),
-                "scores": obj_scores[: len(masks_np)],
+                "object_ids": np.array(active_ids),
+                "scores": active_scores,
+                "obj_id_to_tracker_score": obj_id_to_tracker_score,
             }
 
     # Cleanup
@@ -346,9 +375,7 @@ def main():
         cfg.tracker_chunk_seconds,
     )
     logger.info(f"Video: {total_frames} frames at {fps:.1f} FPS")
-    logger.info(
-        f"Chunks: {len(chunks)} ({chunks[0][2]} + {len(chunks) - 1} tracker)"
-    )
+    logger.info(f"Chunks: {len(chunks)} ({chunks[0][2]} + {len(chunks) - 1} tracker)")
     for i, (s, e, mtype) in enumerate(chunks):
         logger.info(f"  Chunk {i}: frames {s}-{e} ({mtype}, {(e - s) / fps:.1f}s)")
 
@@ -432,9 +459,7 @@ def main():
                 chunk_frames, start_idx, all_prompt_points, cfg, device
             )
         else:
-            chunk_outputs = _process_video_chunk(
-                chunk_frames, start_idx, cfg, device
-            )
+            chunk_outputs = _process_video_chunk(chunk_frames, start_idx, cfg, device)
 
         # Stop timer and calculate metrics
         elapsed_seconds = timer.end()
@@ -519,7 +544,12 @@ def main():
     summary_path = metrics_dir / "summary_metrics.parquet"
     summary_metrics_df.to_parquet(summary_path)
     logger.info(f"Summary metrics saved to: {summary_path}")
-    logger.info(f"Summary metrics:\n{summary_metrics_df}")
+    # Log summary as key-value pairs (single-row DF is unreadable in logs)
+    max_key_len = max(len(k) for k in summary_metrics)
+    summary_lines = "\n".join(
+        f"  {k:<{max_key_len}}  {v}" for k, v in summary_metrics.items()
+    )
+    logger.info(f"Summary metrics:\n{summary_lines}")
 
     # Compute per-run (per-ID lifecycle) metrics
     logger.info("Computing per-run metrics...")
@@ -530,7 +560,11 @@ def main():
     per_run_path = metrics_dir / "per_id_metrics.parquet"
     per_run_df.to_parquet(per_run_path)
     logger.info(f"Per-run metrics saved to: {per_run_path}")
-    logger.info(f"Per-run metrics:\n{per_run_df}")
+    # Log without list columns (frames/low_count_frames) that blow up width
+    log_cols = [
+        c for c in per_run_df.columns if c not in ("frames", "low_count_frames")
+    ]
+    logger.info(f"Per-run metrics:\n{per_run_df[log_cols].to_string()}")
 
     # Generate visualizations
     logger.info("Generating visualizations...")
@@ -548,10 +582,10 @@ def main():
     total_fps = total_frames / total_elapsed if total_elapsed > 0 else 0.0
 
     logger.info("=" * 60)
-    logger.info(f"Pipeline complete in {total_elapsed:.2f}s ({total_timer.timestamp()})")
     logger.info(
-        f"Overall throughput: {total_fps:.2f} FPS ({total_frames} frames)"
+        f"Pipeline complete in {total_elapsed:.2f}s ({total_timer.timestamp()})"
     )
+    logger.info(f"Overall throughput: {total_fps:.2f} FPS ({total_frames} frames)")
     logger.info("=" * 60)
     logger.info("Run complete.")
 
