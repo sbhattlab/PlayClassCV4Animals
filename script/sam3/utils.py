@@ -23,12 +23,14 @@ def process_tracking_outputs(outputs_per_frame):
     counts_list = []
     sizes = []
     scores_list = []
+    tracker_scores_list = []
 
     for frame_idx, proc in outputs_per_frame.items():
         object_ids = to_numpy(proc["object_ids"])
         boxes = to_numpy(proc["boxes"])
         masks = proc["masks"]  # keep lazy until conversion per-item
         scores = to_numpy(proc.get("scores", np.zeros(len(object_ids))))
+        tracker_scores_dict = proc.get("obj_id_to_tracker_score") or {}
 
         for i, oid in enumerate(object_ids):
             # bbox -> list (x1,y1,x2,y2)
@@ -64,15 +66,27 @@ def process_tracking_outputs(outputs_per_frame):
                 size = rle["size"]
 
             score = float(scores[i])
+            tracker_score = (
+                float(tracker_scores_dict[int(oid)])
+                if tracker_scores_dict and int(oid) in tracker_scores_dict
+                else None
+            )
             index_tuples.append((int(frame_idx), int(oid)))
             bboxes.append(bbox)
             counts_list.append(counts)
             sizes.append(size)
             scores_list.append(score)
+            tracker_scores_list.append(tracker_score)
 
     mi = pd.MultiIndex.from_tuples(index_tuples, names=["frame_idx", "object_id"])
     df_results = pd.DataFrame(
-        {"bbox": bboxes, "counts": counts_list, "size": sizes, "scores": scores_list},
+        {
+            "bbox": bboxes,
+            "counts": counts_list,
+            "size": sizes,
+            "scores": scores_list,
+            "tracker_score": tracker_scores_list,
+        },
         index=mi,
     )
     return df_results

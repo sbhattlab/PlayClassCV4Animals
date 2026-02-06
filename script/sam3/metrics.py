@@ -3,7 +3,7 @@ Tracking metrics computation for SAM3 video outputs.
 """
 
 from collections import defaultdict
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -46,6 +46,7 @@ def _normalize_frame_dict(
                 obj_ids = _tensor_to_numpy(v["object_ids"])
                 boxes = _tensor_to_numpy(v["boxes"])
                 scores = _tensor_to_numpy(v.get("scores", np.zeros(len(obj_ids))))
+                tracker_scores_dict = v.get("obj_id_to_tracker_score") or {}
                 dets = []
                 for j in range(len(obj_ids)):
                     try:
@@ -58,7 +59,19 @@ def _normalize_frame_dict(
                         else list(np.asarray(boxes[j]))
                     )
                     score = float(scores[j]) if len(scores) > j else None
-                    dets.append({"id": oid, "bbox": bbox, "score": score})
+                    tracker_score = (
+                        float(tracker_scores_dict[oid])
+                        if tracker_scores_dict and oid in tracker_scores_dict
+                        else None
+                    )
+                    dets.append(
+                        {
+                            "id": oid,
+                            "bbox": bbox,
+                            "score": score,
+                            "tracker_score": tracker_score,
+                        }
+                    )
                 frames.append(dets)
                 continue
             if all(isinstance(k, (int, np.integer)) for k in v.keys()):
@@ -83,13 +96,332 @@ def _iou(boxA, boxB):
     return inter / union if union > 0 else 0.0
 
 
+# ---------------------------------------------------------------------------
+# Mask-based spatial primitives
+# ---------------------------------------------------------------------------
+
+
+def compute_pairwise_mask_iou(masks: np.ndarray) -> np.ndarray:
+    """
+    Compute pairwise pixel-level IoU for all masks.
+
+    Args:
+        masks: (N, H, W) bool or uint8 array.
+
+    Returns:
+        (N, N) symmetric IoU matrix with zeros on diagonal.
+    """
+    masks = _tensor_to_numpy(masks)
+    if masks.ndim == 2:
+        masks = masks[None, ...]
+    n = len(masks)
+    if n == 0:
+        return np.array([])
+    iou_matrix = np.zeros((n, n))
+    for i in range(n):
+        for j in range(i + 1, n):
+            intersection = np.logical_and(masks[i], masks[j]).sum()
+            union = np.logical_or(masks[i], masks[j]).sum()
+            iou = intersection / union if union > 0 else 0.0
+            iou_matrix[i, j] = iou
+            iou_matrix[j, i] = iou
+    return iou_matrix
+
+
+def compute_mask_centroids(masks: np.ndarray) -> np.ndarray:
+    """
+    Compute centroids from mask pixel coordinates.
+
+    Args:
+        masks: (N, H, W) bool array.
+
+    Returns:
+        (N, 2) array of [x, y] centroids.  NaN for empty masks.
+    """
+    masks = _tensor_to_numpy(masks)
+    if masks.ndim == 2:
+        masks = masks[None, ...]
+    centroids = []
+    for mask in masks:
+        y_coords, x_coords = np.where(mask > 0)
+        if len(y_coords) > 0:
+            centroids.append([float(np.mean(x_coords)), float(np.mean(y_coords))])
+        else:
+            centroids.append([np.nan, np.nan])
+    return np.array(centroids)
+
+
+def compute_pairwise_centroid_distances(centroids: np.ndarray) -> np.ndarray:
+    """
+    Compute pairwise Euclidean distances between centroids.
+
+    Args:
+        centroids: (N, 2) array of [x, y] centroids.
+
+    Returns:
+        (N, N) symmetric distance matrix.
+    """
+    n = len(centroids)
+    if n == 0:
+        return np.array([])
+    dist_matrix = np.zeros((n, n))
+    for i in range(n):
+        for j in range(i + 1, n):
+            dist = np.linalg.norm(centroids[i] - centroids[j])
+            dist_matrix[i, j] = dist
+            dist_matrix[j, i] = dist
+    return dist_matrix
+
+
+def compute_mask_area_stats(masks: np.ndarray) -> Dict[str, Any]:
+    """
+    Compute mask area statistics.
+
+    Args:
+        masks: (N, H, W) bool array.
+
+    Returns:
+        Dict with keys: areas (N,), mean, min, max, variance.
+    """
+    masks = _tensor_to_numpy(masks)
+    if masks.ndim == 2:
+        masks = masks[None, ...]
+    areas = np.array([m.sum() for m in masks], dtype=float)
+    if len(areas) == 0:
+        return {"areas": areas, "mean": 0.0, "min": 0.0, "max": 0.0, "variance": 0.0}
+    return {
+        "areas": areas,
+        "mean": float(np.mean(areas)),
+        "min": float(np.min(areas)),
+        "max": float(np.max(areas)),
+        "variance": float(np.var(areas)),
+    }
+
+
+def compute_clustering_coefficient(centroids: np.ndarray, threshold: float) -> float:
+    """
+    Fraction of centroid pairs within *threshold* distance.
+
+    Args:
+        centroids: (N, 2) array.
+        threshold: distance in pixels.
+
+    Returns:
+        Float in [0, 1].  0.0 when fewer than 2 objects.
+    """
+    n = len(centroids)
+    if n < 2:
+        return 0.0
+    dists = compute_pairwise_centroid_distances(centroids)
+    upper = dists[np.triu_indices(n, k=1)]
+    if len(upper) == 0:
+        return 0.0
+    return float(np.sum(upper < threshold) / len(upper))
+
+
+# ---------------------------------------------------------------------------
+# Per-frame timeseries metrics (operates directly on outputs_per_frame)
+# ---------------------------------------------------------------------------
+
+
+def compute_per_frame_metrics(
+    outputs_per_frame: Dict[int, Dict],
+    occlusion_iou_threshold: float = 0.15,
+    clustering_distance_threshold: float = 50.0,
+) -> List[Dict[str, Any]]:
+    """
+    Compute per-frame spatial, overlap, and mask quality metrics.
+
+    Works directly on ``outputs_per_frame`` (the SAM3 output dict) so that
+    it can access masks — which ``_normalize_frame_dict`` discards.
+
+    Args:
+        outputs_per_frame: {frame_idx: {"object_ids", "masks", "boxes", "scores", ...}}
+        occlusion_iou_threshold: mask IoU above which a pair is "overlapping".
+        clustering_distance_threshold: centroid distance (px) for clustering.
+
+    Returns:
+        List of dicts (sorted by frame_idx), one per frame.
+    """
+    sorted_idxs = sorted(int(k) for k in outputs_per_frame.keys())
+    results: List[Dict[str, Any]] = []
+    prev_num_objects: Optional[int] = None
+
+    for frame_idx in sorted_idxs:
+        v = outputs_per_frame[frame_idx]
+
+        # Extract arrays
+        obj_ids = _tensor_to_numpy(v.get("object_ids", []))
+        masks = _tensor_to_numpy(v.get("masks", np.empty((0, 0, 0))))
+        if masks.ndim == 2:
+            masks = masks[None, ...]
+
+        n = len(obj_ids)
+
+        if n == 0:
+            results.append(
+                {
+                    "frame_idx": int(frame_idx),
+                    "num_objects": 0,
+                    "objects_present": [],
+                    "min_centroid_distance": float("inf"),
+                    "mean_centroid_distance": float("inf"),
+                    "clustering_coefficient": 0.0,
+                    "max_pairwise_mask_iou": 0.0,
+                    "mean_pairwise_mask_iou": 0.0,
+                    "num_overlapping_pairs": 0,
+                    "mean_mask_area": 0.0,
+                    "min_mask_area": 0.0,
+                    "max_mask_area": 0.0,
+                    "mask_area_variance": 0.0,
+                    "is_high_occlusion": False,
+                    "is_object_count_change": prev_num_objects is not None
+                    and prev_num_objects != 0,
+                }
+            )
+            prev_num_objects = 0
+            continue
+
+        # Centroids & distances
+        centroids = compute_mask_centroids(masks)
+        dist_matrix = compute_pairwise_centroid_distances(centroids)
+
+        if n > 1:
+            upper_dists = dist_matrix[np.triu_indices(n, k=1)]
+            min_dist = float(np.nanmin(upper_dists)) if len(upper_dists) else float("inf")
+            mean_dist = (
+                float(np.nanmean(upper_dists)) if len(upper_dists) else float("inf")
+            )
+        else:
+            min_dist = float("inf")
+            mean_dist = float("inf")
+
+        clust_coef = compute_clustering_coefficient(centroids, clustering_distance_threshold)
+
+        # Mask IoU
+        iou_matrix = compute_pairwise_mask_iou(masks)
+        if n > 1:
+            upper_iou = iou_matrix[np.triu_indices(n, k=1)]
+            max_iou = float(np.max(upper_iou)) if len(upper_iou) else 0.0
+            mean_iou = float(np.mean(upper_iou)) if len(upper_iou) else 0.0
+            num_overlap = int(np.sum(upper_iou > occlusion_iou_threshold))
+        else:
+            max_iou = 0.0
+            mean_iou = 0.0
+            num_overlap = 0
+
+        # Mask areas
+        area_stats = compute_mask_area_stats(masks)
+
+        # Flags
+        is_high_occ = max_iou > occlusion_iou_threshold or clust_coef > 0.5
+        is_count_change = prev_num_objects is not None and prev_num_objects != n
+
+        results.append(
+            {
+                "frame_idx": int(frame_idx),
+                "num_objects": n,
+                "objects_present": [int(oid) for oid in obj_ids],
+                "min_centroid_distance": min_dist,
+                "mean_centroid_distance": mean_dist,
+                "clustering_coefficient": float(clust_coef),
+                "max_pairwise_mask_iou": max_iou,
+                "mean_pairwise_mask_iou": mean_iou,
+                "num_overlapping_pairs": num_overlap,
+                "mean_mask_area": area_stats["mean"],
+                "min_mask_area": area_stats["min"],
+                "max_mask_area": area_stats["max"],
+                "mask_area_variance": area_stats["variance"],
+                "is_high_occlusion": is_high_occ,
+                "is_object_count_change": is_count_change,
+            }
+        )
+        prev_num_objects = n
+
+    return results
+
+
+def per_frame_metrics_to_df(
+    per_frame_metrics: List[Dict[str, Any]],
+) -> pd.DataFrame:
+    """Convert per-frame metrics list to a DataFrame."""
+    if not per_frame_metrics:
+        return pd.DataFrame()
+    rows = []
+    for d in per_frame_metrics:
+        r = d.copy()
+        # Convert list to comma-separated string for storage
+        r["objects_present"] = ",".join(str(x) for x in r.get("objects_present", []))
+        rows.append(r)
+    return pd.DataFrame(rows)
+
+
+# ---------------------------------------------------------------------------
+# Occlusion-aware identity switch detection
+# ---------------------------------------------------------------------------
+
+
+def detect_identity_switches(
+    per_frame_metrics: List[Dict[str, Any]],
+    window_size: int = 5,
+) -> List[Tuple[int, int, int]]:
+    """
+    Detect suspected identity switches using an occlusion-aware heuristic.
+
+    A switch is flagged when:
+      1. Object count is stable between consecutive frames, but IDs changed.
+      2. A high-occlusion event occurred within the preceding *window_size* frames.
+
+    Args:
+        per_frame_metrics: output of :func:`compute_per_frame_metrics`.
+        window_size: number of frames to look back for occlusion events.
+
+    Returns:
+        List of ``(frame_idx, old_id, new_id)`` tuples.
+    """
+    switches: List[Tuple[int, int, int]] = []
+
+    for i, metrics in enumerate(per_frame_metrics):
+        if i == 0:
+            continue
+
+        prev = per_frame_metrics[i - 1]
+
+        # Stable count but different IDs?
+        if metrics["num_objects"] == prev["num_objects"] > 0:
+            prev_ids = set(prev["objects_present"])
+            curr_ids = set(metrics["objects_present"])
+
+            disappeared = prev_ids - curr_ids
+            appeared = curr_ids - prev_ids
+
+            if disappeared and appeared and len(disappeared) == len(appeared):
+                # Check for recent occlusion
+                recent_occlusion = any(
+                    per_frame_metrics[j].get("is_high_occlusion", False)
+                    for j in range(max(0, i - window_size), i)
+                )
+
+                if recent_occlusion:
+                    for old_id, new_id in zip(sorted(disappeared), sorted(appeared)):
+                        switches.append((metrics["frame_idx"], old_id, new_id))
+
+    return switches
+
+
+# ---------------------------------------------------------------------------
+# Per-ID / Per-run / Summary metrics (box-based, via _normalize_frame_dict)
+# ---------------------------------------------------------------------------
+
+
 def compute_per_id_metrics(
     frame_dict: Dict[Any, Any], low_count_threshold: int = 3, iou_thresh: float = 0.5
 ) -> Dict[Any, Dict[str, Any]]:
     """
     Returns: { id: {first_frame, last_frame, length, runs, gaps_total, frames,
                      coverage, low_count_frames, low_count_total, low_count_fraction,
-                     mean_iou, mean_bbox_area (optional)} }
+                     self_iou, spatial_continuity_iou, mean_iou (alias for self_iou),
+                     mean_bbox_area (optional)} }
     """
     idxs, frames = _normalize_frame_dict(frame_dict)
     if not idxs:
@@ -127,8 +459,8 @@ def compute_per_id_metrics(
                 gaps += b - a - 1
         return runs, gaps
 
-    # compute per-id mean IoU by greedy matching across consecutive frames
-    id_ious = defaultdict(list)
+    # Greedy spatial continuity IoU (matches ANY detection by proximity, ignoring ID)
+    id_spatial_ious = defaultdict(list)
     for A, B in zip(frames, frames[1:]):
         used_b = set()
         for a in A:
@@ -143,7 +475,23 @@ def compute_per_id_metrics(
                     best_iou, best_j = val, j
             if best_j is not None and best_iou >= iou_thresh:
                 aid = a.get("id")
-                id_ious[aid].append(best_iou)
+                id_spatial_ious[aid].append(best_iou)
+
+    # Identity-aware self-IoU (same ID across consecutive frames)
+    frame_id_map: Dict[int, Dict[Any, Dict]] = {}
+    for idx, f in zip(idxs, frames):
+        frame_id_map[idx] = {
+            d.get("id"): d for d in f if isinstance(d, dict) and "id" in d
+        }
+
+    id_self_ious: Dict[Any, List[float]] = defaultdict(list)
+    for uid, flist in id_to_frames.items():
+        fl_sorted = sorted(flist)
+        for a, b in zip(fl_sorted, fl_sorted[1:]):
+            da = frame_id_map.get(a, {}).get(uid)
+            db = frame_id_map.get(b, {}).get(uid)
+            if da and db and "bbox" in da and "bbox" in db:
+                id_self_ious[uid].append(_iou(da["bbox"], db["bbox"]))
 
     per_id = {}
     for uid, flist in id_to_frames.items():
@@ -156,7 +504,12 @@ def compute_per_id_metrics(
         low_in_span = [f for f in fl_sorted if f in low_frames_set]
         low_total = len(low_in_span)
         low_frac = low_total / span if span > 0 else 0.0
-        mean_iou = float(np.mean(id_ious[uid])) if id_ious.get(uid) else None
+        self_iou = float(np.mean(id_self_ious[uid])) if id_self_ious.get(uid) else None
+        spatial_continuity_iou = (
+            float(np.mean(id_spatial_ious[uid]))
+            if id_spatial_ious.get(uid)
+            else None
+        )
         mean_area = (
             float(np.mean(id_bbox_areas[uid])) if id_bbox_areas.get(uid) else None
         )
@@ -174,7 +527,9 @@ def compute_per_id_metrics(
             "low_count_frames": low_in_span,
             "low_count_total": int(low_total),
             "low_count_fraction": float(low_frac),
-            "mean_iou": mean_iou,
+            "self_iou": self_iou,
+            "spatial_continuity_iou": spatial_continuity_iou,
+            "mean_iou": self_iou,  # backward-compat alias
             "mean_bbox_area": mean_area,
         }
     return per_id
@@ -185,9 +540,13 @@ def compute_summary_metrics(
     persistence_k: int = 5,
     iou_match_thresh: float = 0.5,
     low_count_threshold: int = 3,
+    per_frame_metrics: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """
     Returns a flat summary dict aggregating the usual tracking proxies.
+
+    If *per_frame_metrics* (from :func:`compute_per_frame_metrics`) is
+    supplied, occlusion-aware identity switch counts are included.
     """
     idxs, frames = _normalize_frame_dict(frame_dict)
     n_frames = len(idxs)
@@ -309,6 +668,15 @@ def compute_summary_metrics(
         "mean_coverage_per_id": mean_coverage,
         "mean_per_id_iou": mean_per_id_iou,
     }
+
+    # Occlusion-aware switch count (requires per_frame_metrics from mask analysis)
+    if per_frame_metrics is not None:
+        occlusion_switch_events = detect_identity_switches(per_frame_metrics)
+        summary["occlusion_aware_id_switches"] = len(occlusion_switch_events)
+        summary["occlusion_aware_id_switch_rate"] = len(occlusion_switch_events) / (
+            matches or 1
+        )
+
     return summary
 
 
@@ -338,6 +706,8 @@ def per_id_metrics_to_df(per_id_metrics: Dict[Any, Dict[str, Any]]) -> pd.DataFr
         "low_count_total",
         "low_count_fraction",
         "low_count_frames",
+        "self_iou",
+        "spatial_continuity_iou",
         "mean_iou",
         "mean_bbox_area",
         "frames",
@@ -416,12 +786,13 @@ def compute_per_run_metrics(
             ious = []
             areas = []
             scores = []
+            tracker_scores = []
             for a, b in zip(run_frames, run_frames[1:]):
                 da = frame_map.get(a, {}).get(uid)
                 db = frame_map.get(b, {}).get(uid)
                 if da and db and "bbox" in da and "bbox" in db:
                     ious.append(_iou(da["bbox"], db["bbox"]))
-            # gather area/score across run
+            # gather area/score/tracker_score across run
             for fidx in run_frames:
                 d = frame_map.get(fidx, {}).get(uid)
                 if d:
@@ -433,10 +804,18 @@ def compute_per_run_metrics(
                             scores.append(float(d["score"]))
                         except Exception:
                             pass
+                    if "tracker_score" in d and d["tracker_score"] is not None:
+                        try:
+                            tracker_scores.append(float(d["tracker_score"]))
+                        except Exception:
+                            pass
 
             mean_iou = float(np.mean(ious)) if ious else None
             mean_area = float(np.mean(areas)) if areas else None
             mean_score = float(np.mean(scores)) if scores else None
+            mean_tracker_score = (
+                float(np.mean(tracker_scores)) if tracker_scores else None
+            )
 
             runs.append(
                 {
@@ -451,6 +830,7 @@ def compute_per_run_metrics(
                     "mean_iou": mean_iou,
                     "mean_bbox_area": mean_area,
                     "mean_score": mean_score,
+                    "mean_tracker_score": mean_tracker_score,
                 }
             )
 
@@ -497,6 +877,7 @@ def per_run_metrics_to_multiindex_df(
         "mean_iou",
         "mean_bbox_area",
         "mean_score",
+        "mean_tracker_score",
         "frames",
         "low_count_frames",
     ]

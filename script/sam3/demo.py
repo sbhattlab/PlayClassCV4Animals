@@ -63,6 +63,12 @@ for model_outputs in model.propagate_in_video_iterator(
     inference_session=inference_session, max_frame_num_to_track=FRAMES_TO_TRACK
 ):
     processed_outputs = processor.postprocess_outputs(inference_session, model_outputs)
+    # Preserve raw tracking fields
+    processed_outputs["obj_id_to_tracker_score"] = dict(
+        model_outputs.obj_id_to_tracker_score
+    )
+    processed_outputs["removed_obj_ids"] = set(model_outputs.removed_obj_ids)
+    processed_outputs["suppressed_obj_ids"] = set(model_outputs.suppressed_obj_ids)
     outputs_per_frame[model_outputs.frame_idx] = processed_outputs
 
 print(f"Processed {len(outputs_per_frame)} frames")
