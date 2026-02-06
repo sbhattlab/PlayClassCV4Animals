@@ -86,7 +86,7 @@ def _process_video_chunk(chunk_frames, start_idx, cfg, device):
     global frame indices to processed output dicts.
     """
     text_prompt = cfg.text_prompt
-    custom_resolution = cfg.custom_resolution
+    custom_resolution = cfg.get("custom_resolution", None)
 
     if custom_resolution:
         # Build config with tracking overrides
@@ -180,7 +180,7 @@ def _process_tracker_chunk(chunk_frames, start_idx, all_prompt_points, cfg, devi
     cleans up. Returns dict mapping global frame indices to output dicts
     normalized to match Sam3VideoModel output format.
     """
-    custom_resolution = cfg.custom_resolution
+    custom_resolution = cfg.get("custom_resolution", None)
 
     if custom_resolution:
         config = Sam3TrackerVideoConfig.from_pretrained("facebook/sam3")
