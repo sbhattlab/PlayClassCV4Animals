@@ -88,9 +88,10 @@ def _process_video_chunk(chunk_frames, start_idx, cfg, device):
     text_prompt = cfg.text_prompt
     custom_resolution = cfg.get("custom_resolution", None)
 
-    if custom_resolution:
-        # Build config with tracking overrides
-        config = Sam3VideoConfig.from_pretrained("facebook/sam3")
+    # Load config for tracking parameter overrides
+    config = Sam3VideoConfig.from_pretrained("facebook/sam3")
+
+    if custom_resolution is not None:
         config.image_size = custom_resolution
 
         model = Sam3VideoModel.from_pretrained("facebook/sam3", config=config).to(
@@ -104,7 +105,7 @@ def _process_video_chunk(chunk_frames, start_idx, cfg, device):
             f"Custom resolution {custom_resolution}x{custom_resolution} applied to Sam3Video model and processor"
         )
     else:
-        model = Sam3VideoModel.from_pretrained("facebook/sam3").to(
+        model = Sam3VideoModel.from_pretrained("facebook/sam3", config=config).to(
             device, dtype=torch.bfloat16
         )
         processor = Sam3VideoProcessor.from_pretrained("facebook/sam3")
@@ -182,7 +183,7 @@ def _process_tracker_chunk(chunk_frames, start_idx, all_prompt_points, cfg, devi
     """
     custom_resolution = cfg.get("custom_resolution", None)
 
-    if custom_resolution:
+    if custom_resolution is not None:
         config = Sam3TrackerVideoConfig.from_pretrained("facebook/sam3")
         config.image_size = custom_resolution
 
