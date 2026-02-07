@@ -597,6 +597,8 @@ def main():
         per_frame_df=per_frame_df,
         output_dir=vis_dir,
         fps=fps,
+        chunk_info={"chunks": chunk_info_list},
+        video_path=video_path,
     )
     logger.info(f"Visualizations saved to: {vis_dir}")
 
