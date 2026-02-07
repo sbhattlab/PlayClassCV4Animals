@@ -33,6 +33,11 @@ max_frames_to_track: 0  # Maximum number of frames to propagate (0 = all)
 video_model_chunk_seconds: 15  # Duration of first chunk (Sam3VideoModel, text-prompted)
 tracker_chunk_seconds: 45      # Duration of subsequent chunks (Sam3TrackerVideoModel, point-prompted)
 
+# Occlusion-aware adaptive chunking (KMeans pre-scan)
+use_adaptive_chunking: true          # Enable adaptive boundary placement via KMeans pre-scan
+adaptive_min_chunk_seconds: 15       # Minimum chunk duration after adjustment
+adaptive_max_chunk_seconds: 90       # Maximum chunk duration after adjustment
+
 # =============================================================================
 # Multi-object Tracking Heuristics
 # =============================================================================

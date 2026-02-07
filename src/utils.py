@@ -5,9 +5,11 @@ Utility functions for processing SAM3 tracking outputs.
 import gc
 import os
 import sys
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
+import cv2
 import numpy as np
 import pandas as pd
 import pycocotools.mask as mask_util
@@ -15,6 +17,7 @@ import supervision as sv
 import torch
 from loguru import logger
 from omegaconf import DictConfig, OmegaConf
+from sklearn.cluster import MiniBatchKMeans
 
 
 # ---------------------------------------------------------------------------
@@ -88,6 +91,229 @@ def create_run_directory(base_output_dir: Path, job_type: str) -> Path:
 # ---------------------------------------------------------------------------
 # Chunking and model transition utilities
 # ---------------------------------------------------------------------------
+
+
+@dataclass
+class PrescanResult:
+    """Result of KMeans-based video pre-scan for occlusion period detection."""
+
+    frame_indices: np.ndarray  # sampled frame indices (in original video coordinates)
+    cluster_labels: np.ndarray  # cluster label per sampled frame
+    transition_frames: np.ndarray  # frame indices where cluster label changes
+
+
+def prescan_occlusion_periods(
+    video_path: str | Path,
+    fps: float,
+    total_frames: int | None = None,
+) -> PrescanResult:
+    """
+    Pre-scan video with MiniBatchKMeans to identify visual scene-state transitions.
+
+    Samples ~1fps, downscales to 30px width grayscale, clusters frames, and
+    identifies transition points where the visual state changes. Occlusion
+    periods (chickens clustered/overlapping) form a distinct cluster.
+
+    Inspired by DeepLabCut's MiniBatchKMeans frame selection.
+
+    Args:
+        video_path: Path to the video file.
+        fps: Video frame rate (used to compute sample interval).
+        total_frames: If set, only scan up to this many frames.
+
+    Returns:
+        PrescanResult with frame_indices, cluster_labels, and transition_frames.
+    """
+    video_path = str(video_path)
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        raise RuntimeError(f"Could not open video: {video_path}")
+
+    sample_interval = max(1, int(fps))  # ~1fps
+    target_width = 30  # DLC convention
+
+    frame_indices = []
+    frame_data = []
+    frame_idx = 0
+
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+        if total_frames is not None and frame_idx >= total_frames:
+            break
+        if frame_idx % sample_interval == 0:
+            # Downsample to target_width, preserving aspect ratio
+            h, w = frame.shape[:2]
+            scale = target_width / w
+            new_h = max(1, int(h * scale))
+            small = cv2.resize(frame, (target_width, new_h), interpolation=cv2.INTER_AREA)
+            # Grayscale via mean across channels
+            gray = np.mean(small, axis=2).flatten()
+            frame_data.append(gray)
+            frame_indices.append(frame_idx)
+        frame_idx += 1
+
+    cap.release()
+
+    frame_indices = np.array(frame_indices)
+    data = np.array(frame_data, dtype=np.float32)
+
+    # Mean-center
+    data -= data.mean(axis=0)
+
+    # Auto-determine number of clusters
+    video_duration = frame_idx / fps
+    n_clusters = max(2, int(video_duration // 5))
+    # Cap to avoid more clusters than samples
+    n_clusters = min(n_clusters, len(data))
+
+    logger.info(
+        f"Pre-scan: {len(data)} sampled frames, {video_duration:.1f}s duration, "
+        f"{n_clusters} clusters"
+    )
+
+    kmeans = MiniBatchKMeans(n_clusters=n_clusters, random_state=42, batch_size=256)
+    labels = kmeans.fit_predict(data)
+
+    # Identify transitions (where label changes between consecutive samples)
+    transitions = []
+    for i in range(1, len(labels)):
+        if labels[i] != labels[i - 1]:
+            transitions.append(frame_indices[i])
+
+    transition_frames = np.array(transitions, dtype=int)
+
+    # Log cluster statistics
+    unique, counts = np.unique(labels, return_counts=True)
+    largest_pct = counts.max() / len(labels) * 100
+    logger.info(
+        f"Pre-scan: {len(unique)} unique clusters, "
+        f"largest cluster = {largest_pct:.1f}% of frames"
+    )
+    logger.info(f"Pre-scan: {len(transition_frames)} transition frames: {transition_frames.tolist()}")
+
+    return PrescanResult(
+        frame_indices=frame_indices,
+        cluster_labels=labels,
+        transition_frames=transition_frames,
+    )
+
+
+def chunk_video_frames_adaptive(
+    fixed_chunks: list[tuple[int, int, str]],
+    prescan: PrescanResult,
+    fps: float,
+    search_window_seconds: float = 10.0,
+    min_chunk_seconds: float = 15.0,
+    max_chunk_seconds: float = 90.0,
+) -> list[tuple[int, int, str]]:
+    """
+    Adjust fixed chunk boundaries to align with cluster transitions from a pre-scan.
+
+    For each tracker-chunk boundary (skip chunk 0), searches within ±search_window
+    for the nearest cluster transition frame. Validates that adjusted chunks stay
+    within min/max duration constraints. Falls back to original boundary if
+    constraints are violated.
+
+    Args:
+        fixed_chunks: Output from chunk_video_frames_dual().
+        prescan: PrescanResult from prescan_occlusion_periods().
+        fps: Video frame rate.
+        search_window_seconds: Search radius (seconds) around each boundary.
+        min_chunk_seconds: Minimum allowed chunk duration.
+        max_chunk_seconds: Maximum allowed chunk duration.
+
+    Returns:
+        Adjusted chunks in the same format as chunk_video_frames_dual().
+    """
+    if len(fixed_chunks) <= 1:
+        return fixed_chunks
+
+    search_window_frames = int(search_window_seconds * fps)
+    min_frames = int(min_chunk_seconds * fps)
+    max_frames = int(max_chunk_seconds * fps)
+    transitions = prescan.transition_frames
+
+    # Work with mutable list of boundaries
+    # Boundaries are the start frames of chunks 1..N (i.e. the end of the previous chunk)
+    boundaries = [c[0] for c in fixed_chunks]  # start of each chunk
+    total_end = fixed_chunks[-1][1]  # final frame
+
+    adjusted_boundaries = list(boundaries)
+
+    # Only adjust tracker chunk boundaries (indices 1+)
+    for i in range(1, len(adjusted_boundaries)):
+        original = adjusted_boundaries[i]
+
+        # Find nearest transition within search window
+        candidates = transitions[
+            (transitions >= original - search_window_frames)
+            & (transitions <= original + search_window_frames)
+        ]
+
+        if len(candidates) == 0:
+            logger.debug(
+                f"Boundary {i}: frame {original} — no transitions within "
+                f"±{search_window_seconds}s, keeping original"
+            )
+            continue
+
+        nearest = candidates[np.argmin(np.abs(candidates - original))]
+        shift = int(nearest) - original
+
+        # Validate: check chunk sizes with this adjustment
+        prev_start = adjusted_boundaries[i - 1]
+        next_end = adjusted_boundaries[i + 1] if i + 1 < len(adjusted_boundaries) else total_end
+        prev_chunk_len = int(nearest) - prev_start
+        next_chunk_len = next_end - int(nearest)
+
+        if prev_chunk_len < min_frames or prev_chunk_len > max_frames:
+            logger.debug(
+                f"Boundary {i}: frame {original} → {nearest} rejected "
+                f"(prev chunk would be {prev_chunk_len / fps:.1f}s, "
+                f"limits: {min_chunk_seconds}-{max_chunk_seconds}s)"
+            )
+            continue
+
+        if next_chunk_len < min_frames or next_chunk_len > max_frames:
+            logger.debug(
+                f"Boundary {i}: frame {original} → {nearest} rejected "
+                f"(next chunk would be {next_chunk_len / fps:.1f}s, "
+                f"limits: {min_chunk_seconds}-{max_chunk_seconds}s)"
+            )
+            continue
+
+        adjusted_boundaries[i] = int(nearest)
+        logger.info(
+            f"Boundary {i}: frame {original} → {nearest} "
+            f"(shifted by {shift} frames, nearest transition)"
+        )
+
+    # Rebuild chunks from adjusted boundaries
+    adjusted_chunks = []
+    for i in range(len(adjusted_boundaries)):
+        start = adjusted_boundaries[i]
+        end = adjusted_boundaries[i + 1] if i + 1 < len(adjusted_boundaries) else total_end
+        model_type = fixed_chunks[i][2]  # preserve original model type
+        adjusted_chunks.append((start, end, model_type))
+
+    # Absorb small trailing chunks (<10% of tracker chunk size) into last chunk
+    if len(adjusted_chunks) > 1:
+        last_start, last_end, last_type = adjusted_chunks[-1]
+        last_len = last_end - last_start
+        prev_start, prev_end, prev_type = adjusted_chunks[-2]
+        prev_len = prev_end - prev_start
+        # Use the tracker chunk seconds from the original fixed chunks as reference
+        ref_tracker_frames = fixed_chunks[1][1] - fixed_chunks[1][0] if len(fixed_chunks) > 1 else last_len
+        if last_len < ref_tracker_frames * 0.1:
+            adjusted_chunks[-2] = (prev_start, last_end, prev_type)
+            adjusted_chunks.pop()
+            logger.info(
+                f"Absorbed small trailing chunk ({last_len} frames) into previous chunk"
+            )
+
+    return adjusted_chunks
 
 
 def chunk_video_frames_dual(

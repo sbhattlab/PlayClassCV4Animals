@@ -64,11 +64,13 @@ from src.metrics import (  # noqa: E402
 )
 from src.utils import (  # noqa: E402
     annotate_video_with_sam3_outputs,
+    chunk_video_frames_adaptive,
     chunk_video_frames_dual,
     create_run_directory,
     extract_equidistant_points_from_masks,
     find_frame_with_enough_objects,
     free_gpu_memory,
+    prescan_occlusion_periods,
     process_tracking_outputs,
     sample_points_from_masks,
     setup_logger,
@@ -390,6 +392,19 @@ def main():
         cfg.video_model_chunk_seconds,
         cfg.tracker_chunk_seconds,
     )
+
+    # Optionally adjust boundaries via KMeans pre-scan
+    if cfg.get("use_adaptive_chunking", False):
+        logger.info("Running KMeans pre-scan for adaptive chunking...")
+        prescan_result = prescan_occlusion_periods(video_path, fps, total_frames)
+        chunks = chunk_video_frames_adaptive(
+            chunks,
+            prescan_result,
+            fps,
+            min_chunk_seconds=cfg.get("adaptive_min_chunk_seconds", 15),
+            max_chunk_seconds=cfg.get("adaptive_max_chunk_seconds", 90),
+        )
+
     logger.info(f"Video: {total_frames} frames at {fps:.1f} FPS")
     logger.info(f"Chunks: {len(chunks)} ({chunks[0][2]} + {len(chunks) - 1} tracker)")
     for i, (s, e, mtype) in enumerate(chunks):
