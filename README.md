@@ -51,15 +51,20 @@ Currently the following environments are supported in addition to Linux, on macO
 - SAM3
     - huggingface
 
-# How to run scripts
-> [!IMPORTANT] Please read base config file usually named (`config/<tool name>_config.yaml`), and modify appropriately (e.g. which CUDA device to run)
+# How to run tracking pipelines
+> [!IMPORTANT] 
+> Please read base config file usually named (`config/<tool name>_config.yaml`), and modify appropriately (e.g. which CUDA device to run)
 
-Scripts are organized as: executable scripts in `script/`, reusable library modules in `src/`.
+- Scripts are organized as: executable scripts in `script/`, reusable library modules in `src/`.
 
-Run scripts as Python modules:
+- Run scripts as Python modules, e.g.:
 ```sh
-# SAM3 HuggingFace tracking pipeline
-python -m script.sam3.run_sam3_hf --config config/sam3_hf_config.yaml
+python -m script.sam3.run_sam3_hf 
+```
+
+- *OR* check whether a dedicated pixi task has been created for it, e.g.:
+```sh 
+pixi run sam3-hf-tracker
 ```
 
 # Overview of currently implemented test scripts

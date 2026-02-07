@@ -6,7 +6,7 @@ Processes video in chunks:
 - Chunks 1+: Sam3TrackerVideoModel with point prompts (longer, e.g. 45s)
 
 Usage:
-    python -m script.sam3.run_sam3_hf --config config/sam3_hf_config.yaml
+    python -m script.sam3.run_sam3_hf
 """
 
 import argparse
@@ -16,6 +16,7 @@ from pathlib import Path
 
 import numpy as np
 from loguru import logger
+from omegaconf import OmegaConf
 from simpler_timer import SimplerTimer
 from tqdm import tqdm
 
@@ -65,6 +66,7 @@ from src.utils import (  # noqa: E402
     annotate_video_with_sam3_outputs,
     chunk_video_frames_dual,
     create_run_directory,
+    extract_equidistant_points_from_masks,
     find_frame_with_enough_objects,
     free_gpu_memory,
     process_tracking_outputs,
@@ -150,6 +152,8 @@ def _process_video_chunk(chunk_frames, start_idx, cfg, device):
             total=len(chunk_frames),
             desc=f"Chunk (text, frames {start_idx}-{start_idx + len(chunk_frames)})",
             unit="frame",
+            ncols=100,  # Fixed width to prevent wrapping
+            ascii=True,  # Use ASCII chars for better compatibility
         ):
             processed_outputs = processor.postprocess_outputs(
                 inference_session, model_outputs
@@ -342,15 +346,17 @@ def main():
     # Setup logger (console + file in run dir)
     log_file = setup_logger(run_dir, job_type=cfg.job_type)
 
+    logger.info("=" * 60)
+    logger.info("SAM3 HuggingFace Video Tracking (Chunked Pipeline)")
+    logger.info("=" * 60)
     # Copy config for reproducibility
     config_path = Path(args.config)
     shutil.copy(config_path, run_dir / config_path.name)
     logger.info(f"Config copied to {run_dir / config_path.name}")
-
+    logger.info(f"Loaded config file: {args.config}")
+    logger.info("CONFIGURATION")
+    logger.info(f"\n{OmegaConf.to_yaml(cfg, resolve=True)}")
     logger.info("=" * 60)
-    logger.info("SAM3 HuggingFace Video Tracking (Chunked Pipeline)")
-    logger.info("=" * 60)
-    logger.info(f"Config file: {args.config}")
     logger.info(f"Run directory: {run_dir}")
     logger.info(f"Log file: {log_file}")
 
@@ -367,6 +373,15 @@ def main():
     video_frames, video_metadata = load_video(video_path)
     fps = video_metadata.fps
     total_frames = len(video_frames)
+
+    # Cap total frames if max_frames_to_track is set
+    max_frames = cfg.get("max_frames_to_track", 0)
+    if max_frames and max_frames > 0:
+        total_frames = min(total_frames, max_frames)
+        video_frames = video_frames[:total_frames]
+        logger.info(
+            f"Capped to {total_frames} frames (max_frames_to_track={max_frames})"
+        )
 
     # Compute chunks
     chunks = chunk_video_frames_dual(
@@ -430,7 +445,13 @@ def main():
                     ]
                 )
                 # Sample points from all masks -> (N, num_points, 2) in (x, y)
-                sampled = sample_points_from_masks(masks_array, num_points=3)
+                point_method = cfg.get("point_extraction_method", "equidistant")
+                if point_method == "equidistant":
+                    sampled = extract_equidistant_points_from_masks(
+                        masks_array, num_points=3
+                    )
+                else:
+                    sampled = sample_points_from_masks(masks_array, num_points=3)
                 for i, obj_id in enumerate(object_ids_list):
                     pts = sampled[i]
                     if pts.size > 0:
@@ -566,6 +587,7 @@ def main():
         c for c in per_run_df.columns if c not in ("frames", "low_count_frames")
     ]
     logger.info(f"Per-run metrics:\n{per_run_df[log_cols].to_string()}")
+    logger.info(f"Metrics directory: {metrics_dir}")
 
     # Generate visualizations
     logger.info("Generating visualizations...")
@@ -583,6 +605,7 @@ def main():
     total_fps = total_frames / total_elapsed if total_elapsed > 0 else 0.0
 
     logger.info("=" * 60)
+    logger.info(f"Results saved to: {run_dir}")
     logger.info(
         f"Pipeline complete in {total_elapsed:.2f}s ({total_timer.timestamp()})"
     )

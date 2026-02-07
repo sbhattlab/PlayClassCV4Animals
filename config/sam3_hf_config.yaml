@@ -15,32 +15,30 @@ PYTORCH_ALLOC_CONF: "expandable_segments:True,garbage_collection_threshold:0.6" 
 # =============================================================================
 # Video/IO Configuration
 # =============================================================================
-# video_path: "ext-data/test/video_1_5_min.mp4"
-video_path: "data/video/test_1_min_560x560.mp4"
+video_path: "ext-data/test/video_1_5_min.mp4"
 text_prompt: "bird"
 
 # Output directory - results will be saved to a timestamped subdirectory
 # Format: {output_dir}/{YYYYMMDD_HHMMSS}_{job_type}/
-output_dir: "sandbox/output/results/sam3-hf"
+output_dir: "ext-data/output/results/sam3-hf"
 
 # =============================================================================
 # Model Configuration
 # =============================================================================
-custom_resolution: 560  # Image size for SAM3 model and processor
-max_frames_to_track: 3000  # Maximum number of frames to propagate (0 = all)
+max_frames_to_track: 0  # Maximum number of frames to propagate (0 = all)
 
 # =============================================================================
 # Chunking Configuration
 # =============================================================================
 video_model_chunk_seconds: 15  # Duration of first chunk (Sam3VideoModel, text-prompted)
 tracker_chunk_seconds: 45      # Duration of subsequent chunks (Sam3TrackerVideoModel, point-prompted)
-vis_frame_stride: 30 # Visualize every Nth frame
 
 # =============================================================================
 # Multi-object Tracking Heuristics
 # =============================================================================
 min_objects_for_tracking: 3 # Minimum objects to look for in previous chunk
-max_lookback_frames: 10 # Max frames to look back 
+max_lookback_frames: 10 # Max frames to look back
+point_extraction_method: "equidistant"  # "equidistant" (deterministic, better coverage) or "random"
 
 # =============================================================================
 # Sam3VideoConfig Tracking Parameters
@@ -59,9 +57,5 @@ tracking:
 # Metrics Configuration
 # =============================================================================
 metrics:
-  enabled: true # Enable tracking metrics computation
-  log_per_frame: false # Set to true for verbose per-frame logging
   occlusion_iou_threshold: 0.15 # IoU above this = objects overlapping
   clustering_distance_threshold: 50.0 # pixels - objects closer than this are "clustered"
-  save_csv: true # Save metrics to CSV files (human-readable)
-  save_parquet: true # Save metrics to Parquet files (efficient for analysis)

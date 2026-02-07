@@ -192,6 +192,74 @@ def find_frame_with_enough_objects(
     return None, [], [], []
 
 
+def extract_equidistant_points_from_mask(
+    mask: np.ndarray, num_points: int = 3
+) -> list[list[int]] | None:
+    """
+    Extract equidistant points along the mask's major axis (x-axis).
+
+    Samples points deterministically by sorting pixels by x-coordinate
+    and selecting evenly-spaced points using linspace. Provides better
+    spatial coverage than random sampling and naturally avoids border pixels.
+
+    Originally from commit d5b4cda (the "magic run" with perfect tracking).
+
+    Args:
+        mask: Binary mask (H, W) with 1s indicating the object.
+        num_points: Number of equidistant points to extract.
+
+    Returns:
+        List of [x, y] points, or None if mask is empty.
+    """
+    y_coords, x_coords = np.where(mask > 0)
+    if len(y_coords) == 0:
+        return None
+
+    center_x = int(np.mean(x_coords))
+    center_y = int(np.mean(y_coords))
+
+    if num_points == 1:
+        return [[center_x, center_y]]
+
+    sorted_indices = np.argsort(x_coords)
+    n_pixels = len(sorted_indices)
+
+    indices = np.linspace(0, n_pixels - 1, num_points, dtype=int)
+
+    points = []
+    for idx in indices:
+        sorted_idx = sorted_indices[idx]
+        x = int(x_coords[sorted_idx])
+        y = int(y_coords[sorted_idx])
+        points.append([x, y])
+
+    return points
+
+
+def extract_equidistant_points_from_masks(
+    masks: np.ndarray, num_points: int = 3
+) -> np.ndarray:
+    """
+    Batch wrapper for extract_equidistant_points_from_mask().
+
+    Args:
+        masks: np.array with shape (N, H, W), binary masks.
+        num_points: Number of points to extract per mask.
+
+    Returns:
+        points: np.array with shape (N, num_points, 2) in (x, y) format.
+    """
+    n = masks.shape[0]
+    points = []
+    for i in range(n):
+        pts = extract_equidistant_points_from_mask(masks[i], num_points)
+        if pts is None:
+            points.append(np.zeros((num_points, 2)))
+        else:
+            points.append(np.array(pts))
+    return np.array(points, dtype=np.float32)
+
+
 def sample_points_from_masks(masks: np.ndarray, num_points: int = 3) -> np.ndarray:
     """
     Sample random points from mask-positive pixels and return absolute coordinates.
