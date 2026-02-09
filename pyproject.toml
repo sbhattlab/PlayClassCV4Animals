@@ -165,6 +165,7 @@ sam3-native = { features = [
 
 gs2 = { features = ["cuda", "gs2"] }
 gs2-macos = { features = ["macos", "gs2"] }
+yolo = { features = ["yolo", "cuda"] }
 
 [dependency-groups]
 gs2 = [
@@ -238,3 +239,23 @@ setup-gs2 = { depends-on = [
 test-gs2 = { cmd = """
 python -m script.gs2.chicken_tracking_demo --gs2-repo-path Grounded-SAM-2-fork -i ext-data/imgs/imgs_1min --text ".chicken.bird." --save-dir ext-data/output/test/gs2 --save-masks --save-images --create-video
 """ }
+
+# =============================================================================
+# Tasks - YOLO
+# Test tasks for YOLO implementation
+# =============================================================================
+[tool.pixi.feature.yolo]
+platforms = ["linux-64"]
+
+[tool.pixi.feature.yolo.pypi-dependencies]
+pip = "*"
+ipykernel = "*"
+opencv-python = "*"
+pandas = ">=3.0.0"
+ultralytics = "*"
+pyarrow = "*"
+numpy = ">=1.26.4"
+matplotlib = "*"
+seaborn = "*"
+pillow = "*"
+supervision = ">=0.27.0"
