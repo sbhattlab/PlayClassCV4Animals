@@ -19,7 +19,6 @@ from loguru import logger
 from omegaconf import DictConfig, OmegaConf
 from sklearn.cluster import MiniBatchKMeans
 
-
 # ---------------------------------------------------------------------------
 # Config, environment, logging, and output directory utilities
 # ---------------------------------------------------------------------------
@@ -43,7 +42,9 @@ def set_env_vars(cfg):
 
 
 def setup_logger(
-    log_dir: Path, job_type: str = "sam3_demo", debug: bool = False
+    log_dir: Path = Path("sandbox/logs/sam3-hf"),
+    job_type: str = "sam3_hf",
+    debug: bool = False,
 ) -> Path:
     """
     Configure loguru logger with both console and file output.
@@ -100,6 +101,16 @@ class PrescanResult:
     frame_indices: np.ndarray  # sampled frame indices (in original video coordinates)
     cluster_labels: np.ndarray  # cluster label per sampled frame
     transition_frames: np.ndarray  # frame indices where cluster label changes
+    kmeans: MiniBatchKMeans  # fitted KMeans model (for inspecting cluster centers)
+
+    # Explicit data fields:
+    data_original: np.ndarray  # raw sampled frames (N x P), NOT mean-centered
+    data_centered: np.ndarray  # mean-centered data (N x P)
+    data_mean: np.ndarray  # mean vector (P,)
+
+    def labels(self) -> np.ndarray:  # backward-compatible accessor
+        """Alias for cluster labels used by callers expecting .labels."""
+        return self.cluster_labels
 
 
 def prescan_occlusion_periods(
@@ -114,15 +125,9 @@ def prescan_occlusion_periods(
     identifies transition points where the visual state changes. Occlusion
     periods (chickens clustered/overlapping) form a distinct cluster.
 
-    Inspired by DeepLabCut's MiniBatchKMeans frame selection.
-
-    Args:
-        video_path: Path to the video file.
-        fps: Video frame rate (used to compute sample interval).
-        total_frames: If set, only scan up to this many frames.
-
-    Returns:
-        PrescanResult with frame_indices, cluster_labels, and transition_frames.
+    Returns a PrescanResult containing both the original sampled data and the
+    mean-centred version plus the mean vector so callers can choose the
+    representation they need (avoids ambiguous shapes/broadcasting errors).
     """
     video_path = str(video_path)
     cap = cv2.VideoCapture(video_path)
@@ -147,7 +152,9 @@ def prescan_occlusion_periods(
             h, w = frame.shape[:2]
             scale = target_width / w
             new_h = max(1, int(h * scale))
-            small = cv2.resize(frame, (target_width, new_h), interpolation=cv2.INTER_AREA)
+            small = cv2.resize(
+                frame, (target_width, new_h), interpolation=cv2.INTER_AREA
+            )
             # Grayscale via mean across channels
             gray = np.mean(small, axis=2).flatten()
             frame_data.append(gray)
@@ -157,24 +164,29 @@ def prescan_occlusion_periods(
     cap.release()
 
     frame_indices = np.array(frame_indices)
-    data = np.array(frame_data, dtype=np.float32)
+    data_original = np.array(frame_data, dtype=np.float32)  # shape (N, P)
 
-    # Mean-center
-    data -= data.mean(axis=0)
+    if data_original.size == 0:
+        # nothing sampled
+        raise RuntimeError("prescan_occlusion_periods: no frames sampled")
+
+    # Compute mean vector and centred data (do not overwrite original)
+    data_mean = data_original.mean(axis=0)
+    data_centered = data_original - data_mean
 
     # Auto-determine number of clusters
     video_duration = frame_idx / fps
     n_clusters = max(2, int(video_duration // 5))
     # Cap to avoid more clusters than samples
-    n_clusters = min(n_clusters, len(data))
+    n_clusters = min(n_clusters, len(data_centered))
 
     logger.info(
-        f"Pre-scan: {len(data)} sampled frames, {video_duration:.1f}s duration, "
+        f"Pre-scan: {len(data_centered)} sampled frames, {video_duration:.1f}s duration, "
         f"{n_clusters} clusters"
     )
 
     kmeans = MiniBatchKMeans(n_clusters=n_clusters, random_state=42, batch_size=256)
-    labels = kmeans.fit_predict(data)
+    labels = kmeans.fit_predict(data_centered)
 
     # Identify transitions (where label changes between consecutive samples)
     transitions = []
@@ -191,12 +203,18 @@ def prescan_occlusion_periods(
         f"Pre-scan: {len(unique)} unique clusters, "
         f"largest cluster = {largest_pct:.1f}% of frames"
     )
-    logger.info(f"Pre-scan: {len(transition_frames)} transition frames: {transition_frames.tolist()}")
+    logger.info(
+        f"Pre-scan: {len(transition_frames)} transition frames: {transition_frames.tolist()}"
+    )
 
     return PrescanResult(
         frame_indices=frame_indices,
         cluster_labels=labels,
         transition_frames=transition_frames,
+        kmeans=kmeans,
+        data_original=data_original,
+        data_centered=data_centered,
+        data_mean=data_mean,
     )
 
 
@@ -264,7 +282,11 @@ def chunk_video_frames_adaptive(
 
         # Validate: check chunk sizes with this adjustment
         prev_start = adjusted_boundaries[i - 1]
-        next_end = adjusted_boundaries[i + 1] if i + 1 < len(adjusted_boundaries) else total_end
+        next_end = (
+            adjusted_boundaries[i + 1]
+            if i + 1 < len(adjusted_boundaries)
+            else total_end
+        )
         prev_chunk_len = int(nearest) - prev_start
         next_chunk_len = next_end - int(nearest)
 
@@ -294,7 +316,11 @@ def chunk_video_frames_adaptive(
     adjusted_chunks = []
     for i in range(len(adjusted_boundaries)):
         start = adjusted_boundaries[i]
-        end = adjusted_boundaries[i + 1] if i + 1 < len(adjusted_boundaries) else total_end
+        end = (
+            adjusted_boundaries[i + 1]
+            if i + 1 < len(adjusted_boundaries)
+            else total_end
+        )
         model_type = fixed_chunks[i][2]  # preserve original model type
         adjusted_chunks.append((start, end, model_type))
 
@@ -305,7 +331,11 @@ def chunk_video_frames_adaptive(
         prev_start, prev_end, prev_type = adjusted_chunks[-2]
         prev_len = prev_end - prev_start
         # Use the tracker chunk seconds from the original fixed chunks as reference
-        ref_tracker_frames = fixed_chunks[1][1] - fixed_chunks[1][0] if len(fixed_chunks) > 1 else last_len
+        ref_tracker_frames = (
+            fixed_chunks[1][1] - fixed_chunks[1][0]
+            if len(fixed_chunks) > 1
+            else last_len
+        )
         if last_len < ref_tracker_frames * 0.1:
             adjusted_chunks[-2] = (prev_start, last_end, prev_type)
             adjusted_chunks.pop()
@@ -407,9 +437,7 @@ def find_frame_with_enough_objects(
             outputs_per_frame[frame_idx]
         )
         if len(object_ids_list) >= min_objects:
-            logger.debug(
-                f"Found {len(object_ids_list)} objects at frame {frame_idx}"
-            )
+            logger.debug(f"Found {len(object_ids_list)} objects at frame {frame_idx}")
             return frame_idx, masks_list, boxes_list, object_ids_list
 
     logger.warning(
@@ -512,9 +540,7 @@ def sample_points_from_masks(masks: np.ndarray, num_points: int = 3) -> np.ndarr
         if len(indices) < num_points:
             sampled_indices = np.random.choice(len(indices), num_points, replace=True)
         else:
-            sampled_indices = np.random.choice(
-                len(indices), num_points, replace=False
-            )
+            sampled_indices = np.random.choice(len(indices), num_points, replace=False)
         sampled_points = indices[sampled_indices]
         points.append(sampled_points)
     points = np.array(points, dtype=np.float32)
@@ -697,9 +723,7 @@ def create_annotation_callback(outputs_per_frame: dict):
         }
 
         # Create id2label mapping
-        id2label = {
-            int(i): f"id:{int(i)}" for i in to_numpy(ids_t)
-        }
+        id2label = {int(i): f"id:{int(i)}" for i in to_numpy(ids_t)}
 
         # Build detections
         detections = sv.Detections.from_transformers(
@@ -709,9 +733,7 @@ def create_annotation_callback(outputs_per_frame: dict):
         # Create labels with ID and confidence
         labels = [
             f"#{int(obj_id)} {confidence:.2f}"
-            for obj_id, confidence in zip(
-                to_numpy(ids_t), detections.confidence
-            )
+            for obj_id, confidence in zip(to_numpy(ids_t), detections.confidence)
         ]
 
         # Apply annotations
