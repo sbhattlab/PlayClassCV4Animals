@@ -96,6 +96,7 @@ ipywidgets = ">=8.1.8"
 ipykernel = ">=7.1.0"
 ipython = "*"
 jupyter = ">=1.1.1"
+seaborn = "*"
 
 # =============================================================================
 # PyPI Dependencies - SAM3 Native
