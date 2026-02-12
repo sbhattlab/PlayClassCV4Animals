@@ -15,6 +15,7 @@ import shutil
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 from loguru import logger
 from omegaconf import OmegaConf
 from simpler_timer import SimplerTimer
@@ -70,12 +71,12 @@ from src.utils import (  # noqa: E402
     extract_equidistant_points_from_masks,
     find_frame_with_enough_objects,
     free_gpu_memory,
-    prescan_occlusion_periods,
     process_tracking_outputs,
     sample_points_from_masks,
     setup_logger,
 )
 from src.viz import generate_all_visualizations  # noqa: E402
+from src.yolo_prescan import run_yolo_prescan, yolo_prescan_to_df  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Per-chunk processing helpers
@@ -393,13 +394,84 @@ def main():
         cfg.tracker_chunk_seconds,
     )
 
-    # Optionally adjust boundaries via KMeans pre-scan
+    # Optionally adjust boundaries via YOLO-based pre-scan
     if cfg.get("use_adaptive_chunking", False):
-        logger.info("Running KMeans pre-scan for adaptive chunking...")
-        prescan_result = prescan_occlusion_periods(video_path, fps, total_frames)
+        logger.info("Running YOLO pre-scan for adaptive chunking...")
+        yolo_cfg = cfg.get("yolo_prescan", {})
+        yolo_result = run_yolo_prescan(
+            video_path=video_path,
+            fps=fps,
+            total_frames=total_frames,
+            device=str(device),
+            model_name=yolo_cfg.get("model", "yolo11x.pt"),
+            conf_thresh=yolo_cfg.get("conf_thresh", 0.25),
+            iou_thresh=yolo_cfg.get("iou_thresh", 0.45),
+            tracker_config=yolo_cfg.get("tracker_config", "data/yolo/bytetrack.yaml"),
+            allowed_classes=(
+                set(yolo_cfg.get("allowed_classes", []))
+                if yolo_cfg.get("allowed_classes")
+                else None
+            ),
+            window_seconds=yolo_cfg.get("window_seconds", 1.0),
+            high_occlusion_threshold=yolo_cfg.get("high_occlusion_threshold", 0.3),
+            occlusion_iou_threshold=yolo_cfg.get("occlusion_iou_threshold", 0.15),
+            clustering_distance_threshold=yolo_cfg.get(
+                "clustering_distance_threshold", 0.15
+            ),
+        )
+
+        # Save YOLO prescan artifacts
+        yolo_df = yolo_result["yolo_df"]
+        prescan_results = yolo_result["prescan_results"]
+
+        if not yolo_df.empty:
+            yolo_tracking_path = run_dir / "yolo_tracking.parquet"
+            yolo_df.to_parquet(yolo_tracking_path, index=False)
+            logger.info(f"YOLO tracking saved to: {yolo_tracking_path}")
+
+            prescan_metrics_df = yolo_prescan_to_df(
+                prescan_results["per_frame_metrics"]
+            )
+            prescan_metrics_path = run_dir / "yolo_prescan_metrics.parquet"
+            prescan_metrics_df.to_parquet(prescan_metrics_path, index=False)
+            logger.info(f"YOLO prescan metrics saved to: {prescan_metrics_path}")
+
+        # Save summary as single-row Parquet
+        prescan_summary_df = pd.DataFrame(
+            [
+                {
+                    "occlusion_periods": str(prescan_results["occlusion_periods"]),
+                    "transition_frames": str(
+                        prescan_results["transition_frames"].tolist()
+                    ),
+                    "num_occlusion_periods": len(
+                        prescan_results["occlusion_periods"]
+                    ),
+                    "num_transition_frames": len(
+                        prescan_results["transition_frames"]
+                    ),
+                    "total_frames": prescan_results.get(
+                        "total_frames", total_frames
+                    ),
+                    "video_duration_seconds": prescan_results.get(
+                        "video_duration_seconds", total_frames / fps
+                    ),
+                    "fps": fps,
+                    "model_name": yolo_result["model_name"],
+                    "conf_thresh": yolo_result["conf_thresh"],
+                    "iou_thresh": yolo_result["iou_thresh"],
+                }
+            ]
+        )
+        prescan_summary_path = run_dir / "yolo_prescan_summary.parquet"
+        prescan_summary_df.to_parquet(prescan_summary_path, index=False)
+        logger.info(f"YOLO prescan summary saved to: {prescan_summary_path}")
+
+        # Adjust chunk boundaries using YOLO transition frames
+        transition_frames = prescan_results["transition_frames"]
         chunks = chunk_video_frames_adaptive(
             chunks,
-            prescan_result,
+            transition_frames,
             fps,
             min_chunk_seconds=cfg.get("adaptive_min_chunk_seconds", 15),
             max_chunk_seconds=cfg.get("adaptive_max_chunk_seconds", 90),

@@ -15,7 +15,8 @@ PYTORCH_ALLOC_CONF: "expandable_segments:True,garbage_collection_threshold:0.6" 
 # =============================================================================
 # Video/IO Configuration
 # =============================================================================
-video_path: "ext-data/test/video_1_5_min.mp4"
+# video_path: "ext-data/test/video_1_5_min.mp4"
+video_path: "ext-data/test/video_1_2min.mp4"
 text_prompt: "bird"
 
 # Output directory - results will be saved to a timestamped subdirectory
@@ -33,10 +34,22 @@ max_frames_to_track: 0  # Maximum number of frames to propagate (0 = all)
 video_model_chunk_seconds: 15  # Duration of first chunk (Sam3VideoModel, text-prompted)
 tracker_chunk_seconds: 45      # Duration of subsequent chunks (Sam3TrackerVideoModel, point-prompted)
 
-# Occlusion-aware adaptive chunking (KMeans pre-scan)
-use_adaptive_chunking: true          # Enable adaptive boundary placement via KMeans pre-scan
+# Occlusion-aware adaptive chunking (YOLO-based pre-scan)
+use_adaptive_chunking: true          # Enable adaptive boundary placement via YOLO pre-scan
 adaptive_min_chunk_seconds: 15       # Minimum chunk duration after adjustment
 adaptive_max_chunk_seconds: 90       # Maximum chunk duration after adjustment
+
+# YOLO-based pre-scan configuration (used when use_adaptive_chunking: true)
+yolo_prescan:
+  model: "yolo11x.pt"
+  conf_thresh: 0.25
+  iou_thresh: 0.45
+  tracker_config: "data/yolo/bytetrack.yaml"
+  allowed_classes: ["bird"]
+  window_seconds: 1.0
+  high_occlusion_threshold: 0.3
+  occlusion_iou_threshold: 0.15
+  clustering_distance_threshold: 0.15
 
 # =============================================================================
 # Multi-object Tracking Heuristics

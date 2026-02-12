@@ -64,6 +64,7 @@ src/                          # SAM3 library modules
   utils.py                    # Config/logging/output dirs, parquet export, video annotation
   metrics.py                  # Tracking metrics: mask-based, per-frame, per-id, per-run, summary
   viz.py                      # Visualizations: ID timeline, dashboard, score plots, mask evolution, prompt points
+  yolo_prescan.py             # YOLO-based occlusion prescan: inline inference, per-frame metrics, transition detection
 
 config/                       # YAML configs (OmegaConf) for pipeline runs
 test/                         # Test scripts (run via pixi tasks)
@@ -77,7 +78,7 @@ notebook/                     # Jupyter notebooks for EDA and demos
 - **Loguru logging**: Console (colored) + file handler in run directory. Replaces all `print()`.
 - **Chunked processing**: Long videos are split into chunks via `chunk_video_frames_dual()`. Chunk 0 uses `Sam3VideoModel` (text-prompted, shorter: `video_model_chunk_seconds`). Subsequent chunks use `Sam3TrackerVideoModel` (point-prompted, longer: `tracker_chunk_seconds`). Small trailing remainders (<10% of chunk size) are absorbed into the last chunk. Point prompts are extracted from previous chunk's masks via `extract_equidistant_points_from_masks()` (deterministic, equidistant placement) by default, configurable via `point_extraction_method` (`"equidistant"` or `"random"`). `find_frame_with_enough_objects()` searches backwards for a frame with enough detected objects. Object identities are preserved across chunks by passing the same object IDs. `max_frames_to_track` limits how many frames are processed per video.
 - **Two model phases**: `Sam3VideoModel` (text→segmentation) for initialization, `Sam3TrackerVideoModel` (point→tracking) for propagation. Each chunk loads its model fresh and cleans up GPU memory afterwards (`free_gpu_memory()` with triple `gc.collect` + CUDA cache clearing).
-- **Adaptive chunking (KMeans pre-scan)**: When `use_adaptive_chunking: true`, a lightweight pre-scan runs before chunking: sample ~1fps, downscale to 30px width grayscale, cluster via `MiniBatchKMeans`, identify cluster transitions. `chunk_video_frames_adaptive()` shifts tracker-chunk boundaries to align with these transitions (within ±10s search window), so boundaries avoid landing inside high-occlusion periods. Adjusted chunks are validated against `adaptive_min_chunk_seconds` / `adaptive_max_chunk_seconds`; violations revert to the original fixed boundary. The pre-scan adds ~1-2s overhead and requires `scikit-learn`.
+- **Adaptive chunking (YOLO pre-scan)**: When `use_adaptive_chunking: true`, a YOLO+ByteTrack pre-scan runs before chunking: `run_yolo_prescan()` in `src/yolo_prescan.py` runs YOLO tracking on the full video, computes per-frame spatial metrics (bbox IoU, centroid clustering, object counts), identifies occlusion periods via sliding window, and extracts transition frames. `chunk_video_frames_adaptive()` shifts tracker-chunk boundaries to align with these transitions (within ±10s search window), so boundaries avoid landing inside high-occlusion periods. Adjusted chunks are validated against `adaptive_min_chunk_seconds` / `adaptive_max_chunk_seconds`; violations revert to the original fixed boundary. The YOLO model is unloaded and GPU memory freed before SAM3 models load. Pre-scan outputs are saved as run artifacts: `yolo_tracking.parquet` (raw detections), `yolo_prescan_metrics.parquet` (per-frame metrics), `yolo_prescan_summary.parquet` (occlusion periods, transition frames, config). A `yolo_prescan:` config section controls model, thresholds, and tracker config. The previous KMeans pre-scan (`prescan_occlusion_periods()` in `src/utils.py`) remains available for `viz.py` debugging.
 - **Known issue — chunk boundary occlusion**: Tracking quality can degrade across chunk boundaries when objects are heavily occluded or clustered at the source frame used for point prompt extraction. The previous `custom_resolution` issue has been addressed (removed from default config; native resolution is now used). The remaining challenge is selecting good source frames when objects overlap. Adaptive chunking (above) mitigates this by avoiding boundaries during occlusion periods.
 - **Device selection**: `Accelerator().device` from HuggingFace Accelerate.
 
@@ -110,8 +111,9 @@ All plots use MM:SS x-axis when FPS is available. Diagnostic plots (mask evoluti
 - **Model outputs**: See `Sam3VideoSegmentationOutput` in HF Transformers for raw fields. Post-processing in `run_sam3_hf.py:_process_video_chunk()` and `_process_tracker_chunk()`. Key difference: VideoModel outputs GPU tensors with `removed_obj_ids`/`suppressed_obj_ids`; TrackerModel outputs numpy arrays with sigmoid scores.
 - **`tracking_outputs.parquet`**: Written by `src.utils:process_tracking_outputs()`. One row per (frame, object). MultiIndex `["frame_idx", "object_id"]`. Includes bbox, RLE mask, scores, tracker_score, chunk_idx, model_type.
 - **`chunk_info.json`**: Written by `run_sam3_hf.py`. Per-chunk metadata: frame range, model type, prompt points, timing.
+- **YOLO prescan parquets** (when `use_adaptive_chunking: true`): `yolo_tracking.parquet` (raw per-frame detections with track IDs, bboxes, normalized centroids, confidence), `yolo_prescan_metrics.parquet` (per-frame spatial metrics: IoU, clustering, occlusion flags), `yolo_prescan_summary.parquet` (single-row: occlusion periods, transition frames, model config).
 - **Metrics parquets**: Written by `src.metrics`. `per_frame_metrics` (spatial/occlusion per frame), `per_id_metrics` (per contiguous run per ID), `summary_metrics` (single-row aggregates).
-- **Run directory**: `{timestamp}_{job_type}/` containing config copy, log, chunk_info.json, annotated_video.mp4, tracking_outputs.parquet, `metrics/`, `visualizations/`. Diagnostic plots (mask_evolution_chunk*.png, prompt_points_boundary_*.png) are saved alongside other visualizations in `visualizations/`.
+- **Run directory**: `{timestamp}_{job_type}/` containing config copy, log, chunk_info.json, annotated_video.mp4, tracking_outputs.parquet, YOLO prescan parquets (when adaptive chunking enabled), `metrics/`, `visualizations/`. Diagnostic plots (mask_evolution_chunk*.png, prompt_points_boundary_*.png) are saved alongside other visualizations in `visualizations/`.
 
 ## Data Layout
 
@@ -126,7 +128,8 @@ All plots use MM:SS x-axis when FPS is available. Diagnostic plots (mask evoluti
 - HuggingFace Transformers v5.0.0rc2 (installed from git), Accelerate (device management)
 - supervision (annotation/visualization), loguru (logging), OmegaConf (config)
 - pycocotools (RLE mask encoding for parquet storage), matplotlib (visualizations)
-- scikit-learn (MiniBatchKMeans for adaptive chunking pre-scan)
+- ultralytics (YOLO models for adaptive chunking pre-scan)
+- scikit-learn (MiniBatchKMeans for legacy KMeans pre-scan, used by viz.py)
 
 ## Possible Enhancements
 

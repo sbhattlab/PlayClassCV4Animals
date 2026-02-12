@@ -220,23 +220,24 @@ def prescan_occlusion_periods(
 
 def chunk_video_frames_adaptive(
     fixed_chunks: list[tuple[int, int, str]],
-    prescan: PrescanResult,
+    transition_frames: np.ndarray,
     fps: float,
     search_window_seconds: float = 10.0,
     min_chunk_seconds: float = 15.0,
     max_chunk_seconds: float = 90.0,
 ) -> list[tuple[int, int, str]]:
     """
-    Adjust fixed chunk boundaries to align with cluster transitions from a pre-scan.
+    Adjust fixed chunk boundaries to align with transition frames from a pre-scan.
 
     For each tracker-chunk boundary (skip chunk 0), searches within ±search_window
-    for the nearest cluster transition frame. Validates that adjusted chunks stay
+    for the nearest transition frame. Validates that adjusted chunks stay
     within min/max duration constraints. Falls back to original boundary if
     constraints are violated.
 
     Args:
         fixed_chunks: Output from chunk_video_frames_dual().
-        prescan: PrescanResult from prescan_occlusion_periods().
+        transition_frames: Array of frame indices where scene state changes
+            (e.g. from KMeans prescan or YOLO occlusion detection).
         fps: Video frame rate.
         search_window_seconds: Search radius (seconds) around each boundary.
         min_chunk_seconds: Minimum allowed chunk duration.
@@ -251,7 +252,7 @@ def chunk_video_frames_adaptive(
     search_window_frames = int(search_window_seconds * fps)
     min_frames = int(min_chunk_seconds * fps)
     max_frames = int(max_chunk_seconds * fps)
-    transitions = prescan.transition_frames
+    transitions = transition_frames
 
     # Work with mutable list of boundaries
     # Boundaries are the start frames of chunks 1..N (i.e. the end of the previous chunk)

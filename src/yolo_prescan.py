@@ -4,6 +4,10 @@ YOLO-based occlusion period detection for adaptive chunking pre-scan.
 Computes per-frame spatial and overlap metrics from YOLO tracking outputs,
 providing a semantic alternative to pixel-clustering (KMeans) for identifying
 high-occlusion regions.
+
+The ``run_yolo_prescan`` function runs YOLO+ByteTrack inference inline on a
+video file, builds a tracking DataFrame, and calls ``compute_yolo_prescan_results``
+to produce transition frames suitable for ``chunk_video_frames_adaptive``.
 """
 
 from pathlib import Path
@@ -11,16 +15,17 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
+from loguru import logger
 
 
 def compute_bbox_iou(boxA: np.ndarray, boxB: np.ndarray) -> float:
     """
     Compute IoU between two bounding boxes in [x1, y1, x2, y2] format.
-    
+
     Args:
         boxA: (4,) array [x1, y1, x2, y2]
         boxB: (4,) array [x1, y1, x2, y2]
-    
+
     Returns:
         IoU in [0, 1]
     """
@@ -28,32 +33,32 @@ def compute_bbox_iou(boxA: np.ndarray, boxB: np.ndarray) -> float:
     yA = max(boxA[1], boxB[1])
     xB = min(boxA[2], boxB[2])
     yB = min(boxA[3], boxB[3])
-    
+
     interW = max(0, xB - xA)
     interH = max(0, yB - yA)
     inter = interW * interH
-    
+
     areaA = max(0, (boxA[2] - boxA[0]) * (boxA[3] - boxA[1]))
     areaB = max(0, (boxB[2] - boxB[0]) * (boxB[3] - boxB[1]))
     union = areaA + areaB - inter
-    
+
     return inter / union if union > 0 else 0.0
 
 
 def compute_pairwise_bbox_iou(boxes: np.ndarray) -> np.ndarray:
     """
     Compute pairwise IoU matrix for all bounding boxes.
-    
+
     Args:
         boxes: (N, 4) array of [x1, y1, x2, y2] boxes
-    
+
     Returns:
         (N, N) symmetric IoU matrix with zeros on diagonal
     """
     n = len(boxes)
     if n == 0:
         return np.array([])
-    
+
     iou_matrix = np.zeros((n, n))
     for i in range(n):
         for j in range(i + 1, n):
@@ -66,16 +71,16 @@ def compute_pairwise_bbox_iou(boxes: np.ndarray) -> np.ndarray:
 def compute_bbox_centroids(boxes: np.ndarray) -> np.ndarray:
     """
     Compute centroids from bounding boxes.
-    
+
     Args:
         boxes: (N, 4) array of [x1, y1, x2, y2] boxes
-    
+
     Returns:
         (N, 2) array of [cx, cy] centroids
     """
     if len(boxes) == 0:
         return np.array([])
-    
+
     cx = (boxes[:, 0] + boxes[:, 2]) / 2
     cy = (boxes[:, 1] + boxes[:, 3]) / 2
     return np.column_stack([cx, cy])
@@ -84,17 +89,17 @@ def compute_bbox_centroids(boxes: np.ndarray) -> np.ndarray:
 def compute_pairwise_centroid_distances(centroids: np.ndarray) -> np.ndarray:
     """
     Compute pairwise Euclidean distances between centroids.
-    
+
     Args:
         centroids: (N, 2) array of [cx, cy] centroids
-    
+
     Returns:
         (N, N) symmetric distance matrix
     """
     n = len(centroids)
     if n == 0:
         return np.array([])
-    
+
     dist_matrix = np.zeros((n, n))
     for i in range(n):
         for j in range(i + 1, n):
@@ -104,39 +109,36 @@ def compute_pairwise_centroid_distances(centroids: np.ndarray) -> np.ndarray:
     return dist_matrix
 
 
-def compute_clustering_coefficient(
-    centroids: np.ndarray, 
-    threshold: float
-) -> float:
+def compute_clustering_coefficient(centroids: np.ndarray, threshold: float) -> float:
     """
     Fraction of centroid pairs within threshold distance.
-    
+
     Args:
         centroids: (N, 2) array
         threshold: distance in pixels (or normalized coordinates)
-    
+
     Returns:
         Float in [0, 1]. 0.0 when fewer than 2 objects.
     """
     n = len(centroids)
     if n < 2:
         return 0.0
-    
+
     dists = compute_pairwise_centroid_distances(centroids)
     upper = dists[np.triu_indices(n, k=1)]
     if len(upper) == 0:
         return 0.0
-    
+
     return float(np.sum(upper < threshold) / len(upper))
 
 
 def compute_bbox_area_stats(boxes: np.ndarray) -> Dict[str, Any]:
     """
     Compute bounding box area statistics.
-    
+
     Args:
         boxes: (N, 4) array of [x1, y1, x2, y2] boxes
-    
+
     Returns:
         Dict with keys: areas (N,), mean, min, max, variance
     """
@@ -148,10 +150,10 @@ def compute_bbox_area_stats(boxes: np.ndarray) -> Dict[str, Any]:
             "max": 0.0,
             "variance": 0.0,
         }
-    
+
     areas = (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])
     areas = np.maximum(areas, 0.0)
-    
+
     return {
         "areas": areas,
         "mean": float(np.mean(areas)),
@@ -169,16 +171,16 @@ def compute_yolo_per_frame_metrics(
 ) -> List[Dict[str, Any]]:
     """
     Compute per-frame spatial, overlap, and bbox quality metrics from YOLO tracking.
-    
+
     Similar to metrics.compute_per_frame_metrics but operates on YOLO bbox data.
-    
+
     Args:
-        yolo_df: DataFrame with columns [frame, track_id, x1, y1, x2, y2, 
+        yolo_df: DataFrame with columns [frame, track_id, x1, y1, x2, y2,
                  cx_norm, cy_norm, confidence] (from YOLO tracking)
         occlusion_iou_threshold: bbox IoU above which a pair is "overlapping"
         clustering_distance_threshold: centroid distance for clustering coefficient
         use_normalized_coords: use cx_norm/cy_norm for distances (recommended)
-    
+
     Returns:
         List of dicts (sorted by frame), one per frame with metrics:
         - num_objects: detection count
@@ -199,56 +201,65 @@ def compute_yolo_per_frame_metrics(
     """
     results: List[Dict[str, Any]] = []
     prev_num_objects: Optional[int] = None
-    
+
     # Sort by frame to ensure sequential processing
     yolo_df = yolo_df.sort_values("frame").reset_index(drop=True)
-    
+
     for frame_idx in sorted(yolo_df["frame"].unique()):
         frame_dets = yolo_df[yolo_df["frame"] == frame_idx]
         n = len(frame_dets)
-        
+
         if n == 0:
-            results.append({
-                "frame_idx": int(frame_idx),
-                "num_objects": 0,
-                "objects_present": [],
-                "min_centroid_distance": float("inf"),
-                "mean_centroid_distance": float("inf"),
-                "clustering_coefficient": 0.0,
-                "max_pairwise_bbox_iou": 0.0,
-                "mean_pairwise_bbox_iou": 0.0,
-                "num_overlapping_pairs": 0,
-                "mean_bbox_area": 0.0,
-                "min_bbox_area": 0.0,
-                "max_bbox_area": 0.0,
-                "bbox_area_variance": 0.0,
-                "is_high_occlusion": False,
-                "is_object_count_change": prev_num_objects is not None and prev_num_objects != 0,
-                "mean_confidence": 0.0,
-            })
+            results.append(
+                {
+                    "frame_idx": int(frame_idx),
+                    "num_objects": 0,
+                    "objects_present": [],
+                    "min_centroid_distance": float("inf"),
+                    "mean_centroid_distance": float("inf"),
+                    "clustering_coefficient": 0.0,
+                    "max_pairwise_bbox_iou": 0.0,
+                    "mean_pairwise_bbox_iou": 0.0,
+                    "num_overlapping_pairs": 0,
+                    "mean_bbox_area": 0.0,
+                    "min_bbox_area": 0.0,
+                    "max_bbox_area": 0.0,
+                    "bbox_area_variance": 0.0,
+                    "is_high_occlusion": False,
+                    "is_object_count_change": prev_num_objects is not None
+                    and prev_num_objects != 0,
+                    "mean_confidence": 0.0,
+                }
+            )
             prev_num_objects = 0
             continue
-        
+
         # Extract bounding boxes and centroids
         boxes = frame_dets[["x1", "y1", "x2", "y2"]].values
-        
+
         if use_normalized_coords and "cx_norm" in frame_dets.columns:
             centroids = frame_dets[["cx_norm", "cy_norm"]].values
         else:
             centroids = compute_bbox_centroids(boxes)
-        
+
         # Centroid distances
         dist_matrix = compute_pairwise_centroid_distances(centroids)
         if n > 1:
             upper_dists = dist_matrix[np.triu_indices(n, k=1)]
-            min_dist = float(np.nanmin(upper_dists)) if len(upper_dists) else float("inf")
-            mean_dist = float(np.nanmean(upper_dists)) if len(upper_dists) else float("inf")
+            min_dist = (
+                float(np.nanmin(upper_dists)) if len(upper_dists) else float("inf")
+            )
+            mean_dist = (
+                float(np.nanmean(upper_dists)) if len(upper_dists) else float("inf")
+            )
         else:
             min_dist = float("inf")
             mean_dist = float("inf")
-        
-        clust_coef = compute_clustering_coefficient(centroids, clustering_distance_threshold)
-        
+
+        clust_coef = compute_clustering_coefficient(
+            centroids, clustering_distance_threshold
+        )
+
         # Bbox IoU
         iou_matrix = compute_pairwise_bbox_iou(boxes)
         if n > 1:
@@ -260,37 +271,39 @@ def compute_yolo_per_frame_metrics(
             max_iou = 0.0
             mean_iou = 0.0
             num_overlap = 0
-        
+
         # Bbox areas
         area_stats = compute_bbox_area_stats(boxes)
-        
+
         # Confidence
         mean_conf = float(frame_dets["confidence"].mean())
-        
+
         # Flags
         is_high_occ = max_iou > occlusion_iou_threshold or clust_coef > 0.5
         is_count_change = prev_num_objects is not None and prev_num_objects != n
-        
-        results.append({
-            "frame_idx": int(frame_idx),
-            "num_objects": n,
-            "objects_present": frame_dets["track_id"].tolist(),
-            "min_centroid_distance": min_dist,
-            "mean_centroid_distance": mean_dist,
-            "clustering_coefficient": float(clust_coef),
-            "max_pairwise_bbox_iou": max_iou,
-            "mean_pairwise_bbox_iou": mean_iou,
-            "num_overlapping_pairs": num_overlap,
-            "mean_bbox_area": area_stats["mean"],
-            "min_bbox_area": area_stats["min"],
-            "max_bbox_area": area_stats["max"],
-            "bbox_area_variance": area_stats["variance"],
-            "is_high_occlusion": is_high_occ,
-            "is_object_count_change": is_count_change,
-            "mean_confidence": mean_conf,
-        })
+
+        results.append(
+            {
+                "frame_idx": int(frame_idx),
+                "num_objects": n,
+                "objects_present": frame_dets["track_id"].tolist(),
+                "min_centroid_distance": min_dist,
+                "mean_centroid_distance": mean_dist,
+                "clustering_coefficient": float(clust_coef),
+                "max_pairwise_bbox_iou": max_iou,
+                "mean_pairwise_bbox_iou": mean_iou,
+                "num_overlapping_pairs": num_overlap,
+                "mean_bbox_area": area_stats["mean"],
+                "min_bbox_area": area_stats["min"],
+                "max_bbox_area": area_stats["max"],
+                "bbox_area_variance": area_stats["variance"],
+                "is_high_occlusion": is_high_occ,
+                "is_object_count_change": is_count_change,
+                "mean_confidence": mean_conf,
+            }
+        )
         prev_num_objects = n
-    
+
     return results
 
 
@@ -301,36 +314,36 @@ def identify_occlusion_periods(
 ) -> List[Tuple[int, int]]:
     """
     Identify contiguous periods of high occlusion using a sliding window.
-    
+
     Args:
         per_frame_metrics: output of compute_yolo_per_frame_metrics
         window_frames: sliding window size (e.g., 125 frames = 1s @ 25fps)
         high_occlusion_threshold: fraction of frames in window that must be
                                   flagged to mark the period as high-occlusion
-    
+
     Returns:
         List of (start_frame, end_frame) tuples for occlusion periods
     """
     if not per_frame_metrics:
         return []
-    
+
     # Extract frame indices and occlusion flags
     frames = np.array([m["frame_idx"] for m in per_frame_metrics])
     flags = np.array([m["is_high_occlusion"] for m in per_frame_metrics])
-    
+
     periods: List[Tuple[int, int]] = []
     i = 0
-    
+
     while i < len(frames):
         # Define window end
         window_end_idx = min(i + window_frames, len(frames))
         window_flags = flags[i:window_end_idx]
-        
+
         # Check if this window exceeds threshold
         if np.mean(window_flags) >= high_occlusion_threshold:
             # Start of occlusion period
             start_frame = frames[i]
-            
+
             # Extend until occlusion drops below threshold
             j = i
             while j < len(frames):
@@ -339,16 +352,200 @@ def identify_occlusion_periods(
                 if np.mean(window_flags) < high_occlusion_threshold:
                     break
                 j += 1
-            
+
             end_frame = frames[min(j + window_frames - 1, len(frames) - 1)]
             periods.append((int(start_frame), int(end_frame)))
-            
+
             # Skip past this period
             i = j + window_frames
         else:
             i += 1
-    
+
     return periods
+
+
+def run_yolo_prescan(
+    video_path: str | Path,
+    fps: float,
+    total_frames: int,
+    device: str,
+    model_name: str = "model/yolo11x.pt",
+    conf_thresh: float = 0.25,
+    iou_thresh: float = 0.45,
+    tracker_config: str = "data/yolo/bytetrack.yaml",
+    allowed_classes: set[str] | None = None,
+    window_seconds: float = 1.0,
+    high_occlusion_threshold: float = 0.3,
+    occlusion_iou_threshold: float = 0.15,
+    clustering_distance_threshold: float = 0.15,
+) -> Dict[str, Any]:
+    """
+    Run YOLO+ByteTrack inference on a video and compute prescan results.
+
+    Loads a YOLO model, runs tracking with ``model.track(stream=True)``,
+    builds a per-detection DataFrame, then delegates to
+    ``compute_yolo_prescan_results`` for occlusion/transition analysis.
+    The YOLO model and GPU memory are released before returning.
+
+    Args:
+        video_path: Path to the input video file.
+        fps: Video frame rate (used for windowed occlusion detection).
+        total_frames: Total frame count (for logging only).
+        device: Device string (e.g. ``"cuda:0"``, ``"cpu"``). Typically
+            derived from ``Accelerator().device`` which respects the
+            ``CUDA_VISIBLE_DEVICES`` env var set from the config YAML.
+        model_name: YOLO model weight file (e.g. ``"yolo11x.pt"``).
+        conf_thresh: Confidence threshold for detections.
+        iou_thresh: IoU threshold for NMS.
+        tracker_config: Path to ByteTrack YAML config.
+        allowed_classes: Set of class name strings to keep (e.g. ``{"bird"}``).
+            ``None`` keeps all classes.
+        window_seconds: Sliding window for occlusion period detection.
+        high_occlusion_threshold: Fraction of flagged frames in window.
+        occlusion_iou_threshold: Bbox IoU above which a pair is overlapping.
+        clustering_distance_threshold: Normalized centroid distance threshold.
+
+    Returns:
+        Dict with keys:
+        - ``yolo_df``: Raw tracking DataFrame (one row per detection per frame).
+        - ``prescan_results``: Output of ``compute_yolo_prescan_results``.
+        - ``model_name``, ``conf_thresh``, ``iou_thresh``: Echo of config.
+    """
+    try:
+        from ultralytics import YOLO
+    except ImportError as exc:
+        raise ImportError(
+            "ultralytics is required for YOLO prescan. "
+            "Install it with: pixi install -e sam3-hf"
+        ) from exc
+
+    from src.utils import free_gpu_memory
+
+    video_path = str(video_path)
+
+    logger.info(
+        f"YOLO prescan: model={model_name}, device={device}, "
+        f"conf={conf_thresh}, iou={iou_thresh}, tracker={tracker_config}"
+    )
+
+    model = YOLO(model_name)
+
+    # Build allowed class IDs from names if specified
+    allowed_class_ids: set[int] | None = None
+    if allowed_classes is not None:
+        allowed_class_ids = {
+            cid for cid, name in model.names.items() if name in allowed_classes
+        }
+        logger.info(
+            f"YOLO prescan: filtering to classes {allowed_classes} "
+            f"(IDs: {allowed_class_ids})"
+        )
+
+    # Run tracking with stream mode for memory efficiency
+    rows: list[dict] = []
+    frame_count = 0
+
+    results_gen = model.track(
+        source=video_path,
+        stream=True,
+        persist=True,
+        tracker=tracker_config,
+        conf=conf_thresh,
+        iou=iou_thresh,
+        device=device,
+        verbose=False,
+    )
+
+    for result in results_gen:
+        boxes = result.boxes
+        if boxes is None or len(boxes) == 0:
+            frame_count += 1
+            continue
+
+        # Get image dimensions for normalization
+        img_h, img_w = result.orig_shape
+
+        xyxy = boxes.xyxy.cpu().numpy()
+        confs = boxes.conf.cpu().numpy()
+        cls_ids = boxes.cls.cpu().numpy().astype(int)
+        track_ids = boxes.id.cpu().numpy().astype(int) if boxes.id is not None else None
+
+        for i in range(len(xyxy)):
+            # Filter by allowed classes
+            if allowed_class_ids is not None and cls_ids[i] not in allowed_class_ids:
+                continue
+
+            x1, y1, x2, y2 = xyxy[i]
+            cx_norm = ((x1 + x2) / 2) / img_w
+            cy_norm = ((y1 + y2) / 2) / img_h
+            tid = int(track_ids[i]) if track_ids is not None else -1
+
+            rows.append(
+                {
+                    "frame": frame_count,
+                    "track_id": tid,
+                    "x1": float(x1),
+                    "y1": float(y1),
+                    "x2": float(x2),
+                    "y2": float(y2),
+                    "cx_norm": float(cx_norm),
+                    "cy_norm": float(cy_norm),
+                    "confidence": float(confs[i]),
+                }
+            )
+
+        frame_count += 1
+
+    logger.info(f"YOLO prescan: processed {frame_count} frames, {len(rows)} detections")
+
+    # Clean up YOLO model and free GPU
+    del model
+    free_gpu_memory()
+    logger.info("YOLO prescan: model unloaded, GPU memory freed")
+
+    yolo_df = pd.DataFrame(rows)
+
+    if yolo_df.empty:
+        logger.warning("YOLO prescan: no detections found")
+        return {
+            "yolo_df": yolo_df,
+            "prescan_results": {
+                "per_frame_metrics": [],
+                "occlusion_periods": [],
+                "transition_frames": np.array([], dtype=int),
+                "total_frames": total_frames,
+                "video_duration_seconds": total_frames / fps,
+                "fps": fps,
+                "window_frames": int(window_seconds * fps),
+                "high_occlusion_threshold": high_occlusion_threshold,
+            },
+            "model_name": model_name,
+            "conf_thresh": conf_thresh,
+            "iou_thresh": iou_thresh,
+        }
+
+    # Compute prescan results (per-frame metrics, occlusion periods, transitions)
+    prescan_results = compute_yolo_prescan_results(
+        yolo_df,
+        fps=fps,
+        window_seconds=window_seconds,
+        high_occlusion_threshold=high_occlusion_threshold,
+        occlusion_iou_threshold=occlusion_iou_threshold,
+        clustering_distance_threshold=clustering_distance_threshold,
+    )
+
+    logger.info(
+        f"YOLO prescan: {len(prescan_results['occlusion_periods'])} occlusion periods, "
+        f"{len(prescan_results['transition_frames'])} transition frames"
+    )
+
+    return {
+        "yolo_df": yolo_df,
+        "prescan_results": prescan_results,
+        "model_name": model_name,
+        "conf_thresh": conf_thresh,
+        "iou_thresh": iou_thresh,
+    }
 
 
 def compute_yolo_prescan_results(
@@ -361,10 +558,10 @@ def compute_yolo_prescan_results(
 ) -> Dict[str, Any]:
     """
     Run full YOLO-based pre-scan analysis to identify occlusion periods.
-    
+
     This is the main entry point that parallels the KMeans pre-scan but uses
     semantic object detection instead of pixel clustering.
-    
+
     Args:
         yolo_df: YOLO tracking DataFrame
         fps: video frame rate
@@ -372,7 +569,7 @@ def compute_yolo_prescan_results(
         high_occlusion_threshold: fraction of frames flagged in window
         occlusion_iou_threshold: bbox IoU threshold for overlap
         clustering_distance_threshold: normalized centroid distance threshold
-    
+
     Returns:
         Dict containing:
         - per_frame_metrics: List[Dict] with spatial metrics per frame
@@ -383,7 +580,7 @@ def compute_yolo_prescan_results(
         - fps: float
     """
     window_frames = int(window_seconds * fps)
-    
+
     # Compute per-frame metrics
     per_frame_metrics = compute_yolo_per_frame_metrics(
         yolo_df,
@@ -391,23 +588,23 @@ def compute_yolo_prescan_results(
         clustering_distance_threshold=clustering_distance_threshold,
         use_normalized_coords=True,
     )
-    
+
     # Identify occlusion periods
     occlusion_periods = identify_occlusion_periods(
         per_frame_metrics,
         window_frames=window_frames,
         high_occlusion_threshold=high_occlusion_threshold,
     )
-    
+
     # Extract transition frames (start/end of each period)
     transition_frames = []
     for start, end in occlusion_periods:
         transition_frames.extend([start, end])
     transition_frames = np.array(sorted(set(transition_frames)))
-    
+
     total_frames = yolo_df["frame"].max()
     video_duration = total_frames / fps
-    
+
     return {
         "per_frame_metrics": per_frame_metrics,
         "occlusion_periods": occlusion_periods,
@@ -420,22 +617,20 @@ def compute_yolo_prescan_results(
     }
 
 
-def yolo_prescan_to_df(
-    per_frame_metrics: List[Dict[str, Any]]
-) -> pd.DataFrame:
+def yolo_prescan_to_df(per_frame_metrics: List[Dict[str, Any]]) -> pd.DataFrame:
     """
     Convert per-frame metrics list to a DataFrame for analysis/export.
-    
+
     Similar to metrics.per_frame_metrics_to_df.
     """
     if not per_frame_metrics:
         return pd.DataFrame()
-    
+
     rows = []
     for d in per_frame_metrics:
         r = d.copy()
         # Convert list to comma-separated string
         r["objects_present"] = ",".join(str(x) for x in r.get("objects_present", []))
         rows.append(r)
-    
+
     return pd.DataFrame(rows)
