@@ -78,8 +78,7 @@ notebook/                     # Jupyter notebooks for EDA and demos
 - **Loguru logging**: Console (colored) + file handler in run directory. Replaces all `print()`.
 - **Chunked processing**: Long videos are split into chunks via `chunk_video_frames_dual()`. Chunk 0 uses `Sam3VideoModel` (text-prompted, shorter: `video_model_chunk_seconds`). Subsequent chunks use `Sam3TrackerVideoModel` (point-prompted, longer: `tracker_chunk_seconds`). Small trailing remainders (<10% of chunk size) are absorbed into the last chunk. Point prompts are extracted from previous chunk's masks via `extract_equidistant_points_from_masks()` (deterministic, equidistant placement) by default, configurable via `point_extraction_method` (`"equidistant"` or `"random"`). `find_frame_with_enough_objects()` searches backwards for a frame with enough detected objects. Object identities are preserved across chunks by passing the same object IDs. `max_frames_to_track` limits how many frames are processed per video.
 - **Two model phases**: `Sam3VideoModel` (text→segmentation) for initialization, `Sam3TrackerVideoModel` (point→tracking) for propagation. Each chunk loads its model fresh and cleans up GPU memory afterwards (`free_gpu_memory()` with triple `gc.collect` + CUDA cache clearing).
-- **Adaptive chunking (YOLO pre-scan)**: When `use_adaptive_chunking: true`, a YOLO+ByteTrack pre-scan runs before chunking: `run_yolo_prescan()` in `src/yolo_prescan.py` runs YOLO tracking on the full video, computes per-frame spatial metrics (bbox IoU, centroid clustering, object counts), identifies occlusion periods via sliding window, and extracts transition frames. `chunk_video_frames_adaptive()` shifts tracker-chunk boundaries to align with these transitions (within ±10s search window), so boundaries avoid landing inside high-occlusion periods. Adjusted chunks are validated against `adaptive_min_chunk_seconds` / `adaptive_max_chunk_seconds`; violations revert to the original fixed boundary. The YOLO model is unloaded and GPU memory freed before SAM3 models load. Pre-scan outputs are saved as run artifacts: `yolo_tracking.parquet` (raw detections), `yolo_prescan_metrics.parquet` (per-frame metrics), `yolo_prescan_summary.parquet` (occlusion periods, transition frames, config). A `yolo_prescan:` config section controls model, thresholds, and tracker config. The previous KMeans pre-scan (`prescan_occlusion_periods()` in `src/utils.py`) remains available for `viz.py` debugging.
-- **Known issue — chunk boundary occlusion**: Tracking quality can degrade across chunk boundaries when objects are heavily occluded or clustered at the source frame used for point prompt extraction. The previous `custom_resolution` issue has been addressed (removed from default config; native resolution is now used). The remaining challenge is selecting good source frames when objects overlap. Adaptive chunking (above) mitigates this by avoiding boundaries during occlusion periods.
+- **Adaptive chunking (YOLO pre-scan)**: When `use_adaptive_chunking: true`, a YOLO+ByteTrack pre-scan runs before chunking: `run_yolo_prescan()` in `src/yolo_prescan.py` runs YOLO tracking on the full video, computes per-frame spatial metrics (bbox IoU, centroid clustering, object counts), identifies occlusion periods via sliding window, and extracts transition frames. `chunk_video_frames_adaptive()` uses a **quality scoring system** to place boundaries in safe zones: candidates are scored based on distance to nearest occlusion, with heavy penalties (90%) if occlusion is ahead and moderate penalties (50%) if just ended. Boundaries are positioned to maximize distance from occlusion periods (default 3-second margin). If the last chunk boundary falls within an occlusion margin, the chunk is absorbed into the previous one. Adjusted chunks are validated against `adaptive_min_chunk_seconds` / `adaptive_max_chunk_seconds`; violations revert to the original fixed boundary. The YOLO model is unloaded and GPU memory freed before SAM3 models load. Pre-scan outputs are saved as run artifacts: `yolo_tracking.parquet` (raw detections), `yolo_prescan_metrics.parquet` (per-frame metrics), `yolo_prescan_summary.parquet` (occlusion periods, transition frames, config). A `yolo_prescan:` config section controls model, thresholds, and tracker config. The previous KMeans pre-scan (`prescan_occlusion_periods()` in `src/utils.py`) remains available for `viz.py` debugging.
 - **Device selection**: `Accelerator().device` from HuggingFace Accelerate.
 
 ### Metrics module (`src/metrics.py`)
@@ -103,7 +102,7 @@ Auto-generated on each run, saved to `run_dir/visualizations/`:
 - **Per-ID scores** (`plot_per_id_scores`): Tracker score over time per object ID.
 - **Mask evolution** (`plot_mask_evolution`): 2x3 grid per chunk boundary showing frames around the transition with mask overlays, bboxes, and tracker scores. Requires `chunk_info` and `video_path`.
 - **Prompt points** (`plot_prompt_points`): 2-panel per boundary showing source and target frames with point prompt markers. Border points (within 50px of edge) highlighted in red.
-- **YOLO prescan overview** (`plot_yolo_prescan_overview`): 4-panel timeseries of YOLO pre-scan metrics — object count, max bbox IoU, clustering coefficient, high-occlusion flag. Occlusion periods shaded in red. Auto-generated when adaptive chunking is enabled.
+- **YOLO prescan overview** (`plot_yolo_prescan_overview`): 4-panel timeseries of YOLO pre-scan metrics — object count, max bbox IoU, clustering coefficient, high-occlusion flag. Occlusion periods shaded in red, chunk boundaries shown as blue dashed lines. Auto-generated when adaptive chunking is enabled.
 
 All plots use MM:SS x-axis when FPS is available. Diagnostic plots (mask evolution, prompt points) are generated automatically when `chunk_info` and `video_path` are provided to `generate_all_visualizations()`.
 
@@ -132,9 +131,35 @@ All plots use MM:SS x-axis when FPS is available. Diagnostic plots (mask evoluti
 - ultralytics (YOLO models for adaptive chunking pre-scan)
 - scikit-learn (MiniBatchKMeans for legacy KMeans pre-scan, used by viz.py)
 
-## In Development
+## Utilities
 
-- **YOLO-based adaptive chunking**: The YOLO+ByteTrack pre-scan (replacing KMeans pixel clustering) has shown positive results in initial tests by directly detecting object-level occlusion via bbox overlap and centroid clustering. The system identifies high-occlusion periods and shifts chunk boundaries to avoid placing them during problematic frames. However, this feature requires thorough verification across diverse video conditions and longer recordings before being considered production-ready. The legacy KMeans pre-scan remains available for debugging and comparison.
+### Parameter Sensitivity Testing
+
+To test different occlusion detection parameters without re-running YOLO inference, use the regeneration pattern from commit 498cd11. This recomputes prescan metrics and chunk boundaries from existing `yolo_tracking.parquet` data:
+
+```python
+# Load existing YOLO tracking data
+yolo_df = pd.read_parquet(run_dir / "yolo_tracking.parquet")
+
+# Recompute with custom parameters
+from src.yolo_prescan import compute_yolo_prescan_results
+prescan_results = compute_yolo_prescan_results(
+    yolo_df,
+    fps=25.0,
+    occlusion_iou_threshold=0.15,  # Adjust as needed
+    high_occlusion_threshold=0.3,  # Adjust as needed
+)
+
+# Recompute chunk boundaries and regenerate visualizations
+# See commit 498cd11 for full implementation
+```
+
+This is useful for finding optimal thresholds: strict parameters (IoU 0.08, high_occ 0.15) may flag too many periods, while relaxed parameters (IoU 0.15, high_occ 0.3) catch only severe occlusions.
+
+## Notes
+
+- **Occlusion parameter tuning**: Default thresholds (`occlusion_iou_threshold: 0.15`, `high_occlusion_threshold: 0.3`) provide balanced detection. Stricter thresholds may over-flag periods; use the regeneration utility (see Utilities section) to test alternatives on existing runs.
+- **Adaptive chunking stability**: The quality-scoring algorithm (commit 498cd11) successfully avoids placing boundaries in occlusion zones. Typical results show all boundaries positioned 200+ frames from nearest occlusion period.
 
 ## TO-DO
 - Implement logging into prescan step
