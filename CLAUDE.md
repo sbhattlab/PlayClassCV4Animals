@@ -103,6 +103,7 @@ Auto-generated on each run, saved to `run_dir/visualizations/`:
 - **Per-ID scores** (`plot_per_id_scores`): Tracker score over time per object ID.
 - **Mask evolution** (`plot_mask_evolution`): 2x3 grid per chunk boundary showing frames around the transition with mask overlays, bboxes, and tracker scores. Requires `chunk_info` and `video_path`.
 - **Prompt points** (`plot_prompt_points`): 2-panel per boundary showing source and target frames with point prompt markers. Border points (within 50px of edge) highlighted in red.
+- **YOLO prescan overview** (`plot_yolo_prescan_overview`): 4-panel timeseries of YOLO pre-scan metrics — object count, max bbox IoU, clustering coefficient, high-occlusion flag. Occlusion periods shaded in red. Auto-generated when adaptive chunking is enabled.
 
 All plots use MM:SS x-axis when FPS is available. Diagnostic plots (mask evolution, prompt points) are generated automatically when `chunk_info` and `video_path` are provided to `generate_all_visualizations()`.
 
@@ -111,9 +112,9 @@ All plots use MM:SS x-axis when FPS is available. Diagnostic plots (mask evoluti
 - **Model outputs**: See `Sam3VideoSegmentationOutput` in HF Transformers for raw fields. Post-processing in `run_sam3_hf.py:_process_video_chunk()` and `_process_tracker_chunk()`. Key difference: VideoModel outputs GPU tensors with `removed_obj_ids`/`suppressed_obj_ids`; TrackerModel outputs numpy arrays with sigmoid scores.
 - **`tracking_outputs.parquet`**: Written by `src.utils:process_tracking_outputs()`. One row per (frame, object). MultiIndex `["frame_idx", "object_id"]`. Includes bbox, RLE mask, scores, tracker_score, chunk_idx, model_type.
 - **`chunk_info.json`**: Written by `run_sam3_hf.py`. Per-chunk metadata: frame range, model type, prompt points, timing.
-- **YOLO prescan parquets** (when `use_adaptive_chunking: true`): `yolo_tracking.parquet` (raw per-frame detections with track IDs, bboxes, normalized centroids, confidence), `yolo_prescan_metrics.parquet` (per-frame spatial metrics: IoU, clustering, occlusion flags), `yolo_prescan_summary.parquet` (single-row: occlusion periods, transition frames, model config).
+- **YOLO prescan outputs** (when `use_adaptive_chunking: true`): `yolo_tracking.parquet` (run directory root, raw per-frame detections), `metrics/yolo_prescan_metrics.parquet` (per-frame spatial metrics: IoU, clustering, occlusion flags), `metrics/yolo_prescan_summary.parquet` (single-row: occlusion periods, transition frames, model config), `visualizations/yolo_prescan_overview.png` (4-panel timeseries plot).
 - **Metrics parquets**: Written by `src.metrics`. `per_frame_metrics` (spatial/occlusion per frame), `per_id_metrics` (per contiguous run per ID), `summary_metrics` (single-row aggregates).
-- **Run directory**: `{timestamp}_{job_type}/` containing config copy, log, chunk_info.json, annotated_video.mp4, tracking_outputs.parquet, YOLO prescan parquets (when adaptive chunking enabled), `metrics/`, `visualizations/`. Diagnostic plots (mask_evolution_chunk*.png, prompt_points_boundary_*.png) are saved alongside other visualizations in `visualizations/`.
+- **Run directory**: `{timestamp}_{job_type}/` containing config copy, log, chunk_info.json, annotated_video.mp4, tracking_outputs.parquet, yolo_tracking.parquet (when adaptive chunking enabled), `metrics/`, `visualizations/`.
 
 ## Data Layout
 
@@ -131,6 +132,6 @@ All plots use MM:SS x-axis when FPS is available. Diagnostic plots (mask evoluti
 - ultralytics (YOLO models for adaptive chunking pre-scan)
 - scikit-learn (MiniBatchKMeans for legacy KMeans pre-scan, used by viz.py)
 
-## Possible Enhancements
+## In Development
 
-- **YOLO-based pre-scan for adaptive chunking**: Replace or complement the KMeans pixel-clustering pre-scan with a lightweight YOLO detector pass. Running YOLO at ~1fps would produce per-frame object counts and bounding boxes, enabling direct occlusion/clustering detection (e.g. high bbox overlap, low object count) rather than inferring it from pixel similarity. This would be more semantically meaningful but adds a model dependency and GPU cost to the pre-scan step.
+- **YOLO-based adaptive chunking**: The YOLO+ByteTrack pre-scan (replacing KMeans pixel clustering) has shown positive results in initial tests by directly detecting object-level occlusion via bbox overlap and centroid clustering. The system identifies high-occlusion periods and shifts chunk boundaries to avoid placing them during problematic frames. However, this feature requires thorough verification across diverse video conditions and longer recordings before being considered production-ready. The legacy KMeans pre-scan remains available for debugging and comparison.
