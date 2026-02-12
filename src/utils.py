@@ -222,26 +222,34 @@ def chunk_video_frames_adaptive(
     fixed_chunks: list[tuple[int, int, str]],
     transition_frames: np.ndarray,
     fps: float,
+    occlusion_periods: list[tuple[int, int]] | None = None,
     search_window_seconds: float = 10.0,
     min_chunk_seconds: float = 15.0,
     max_chunk_seconds: float = 90.0,
+    margin_seconds: float = 3.0,
 ) -> list[tuple[int, int, str]]:
     """
-    Adjust fixed chunk boundaries to align with transition frames from a pre-scan.
+    Adjust fixed chunk boundaries to avoid occlusion periods detected by pre-scan.
 
     For each tracker-chunk boundary (skip chunk 0), searches within ±search_window
-    for the nearest transition frame. Validates that adjusted chunks stay
-    within min/max duration constraints. Falls back to original boundary if
-    constraints are violated.
+    for frames that are OUTSIDE occlusion periods (with margin). Prefers frames
+    that are farthest from any occlusion period. Falls back to original boundary
+    if no good candidate is found or if constraints are violated.
 
     Args:
         fixed_chunks: Output from chunk_video_frames_dual().
         transition_frames: Array of frame indices where scene state changes
-            (e.g. from KMeans prescan or YOLO occlusion detection).
+            (e.g. from YOLO occlusion detection). Used for legacy compatibility
+            but DEPRECATED - occlusion_periods are preferred.
         fps: Video frame rate.
+        occlusion_periods: List of (start_frame, end_frame) tuples marking
+            high-occlusion periods that should be avoided. If None, falls back
+            to legacy transition-based logic.
         search_window_seconds: Search radius (seconds) around each boundary.
         min_chunk_seconds: Minimum allowed chunk duration.
         max_chunk_seconds: Maximum allowed chunk duration.
+        margin_seconds: Safety margin (seconds) to keep away from occlusion edges.
+            Default 3.0s (~75 frames at 25fps) provides strong separation.
 
     Returns:
         Adjusted chunks in the same format as chunk_video_frames_dual().
@@ -252,34 +260,106 @@ def chunk_video_frames_adaptive(
     search_window_frames = int(search_window_seconds * fps)
     min_frames = int(min_chunk_seconds * fps)
     max_frames = int(max_chunk_seconds * fps)
-    transitions = transition_frames
+    margin_frames = int(margin_seconds * fps)
 
     # Work with mutable list of boundaries
-    # Boundaries are the start frames of chunks 1..N (i.e. the end of the previous chunk)
     boundaries = [c[0] for c in fixed_chunks]  # start of each chunk
     total_end = fixed_chunks[-1][1]  # final frame
-
     adjusted_boundaries = list(boundaries)
+
+    def _is_in_occlusion_period(frame: int) -> bool:
+        """Check if frame falls within any occlusion period (with margin)."""
+        if not occlusion_periods:
+            return False
+        for start, end in occlusion_periods:
+            # Add margin on both sides
+            if (start - margin_frames) <= frame <= (end + margin_frames):
+                return True
+        return False
+
+    def _candidate_quality_score(frame: int) -> float:
+        """
+        Compute quality score for a candidate boundary (higher = better).
+
+        Scoring rules:
+        1. Distance to nearest occlusion (farther = better)
+        2. Strong penalty if occlusion is ahead (within next margin_frames)
+        3. Moderate penalty if occlusion is behind (within prev margin_frames)
+        4. Prefer frames in the middle of safe zones
+        """
+        if not occlusion_periods:
+            return 1000.0  # Arbitrary high score if no occlusions
+
+        min_dist = float("inf")
+        occlusion_ahead = False
+        occlusion_behind = False
+
+        for start, end in occlusion_periods:
+            # Check if occlusion is ahead (about to start)
+            if start > frame and (start - frame) <= margin_frames:
+                occlusion_ahead = True
+            # Check if occlusion just ended
+            if end < frame and (frame - end) <= margin_frames:
+                occlusion_behind = True
+
+            # Distance to nearest edge
+            dist = min(abs(frame - start), abs(frame - end))
+            min_dist = min(min_dist, dist)
+
+        # Base score is distance
+        score = float(min_dist)
+
+        # Heavy penalty if occlusion is just ahead (boundary would feed bad frames to tracker)
+        if occlusion_ahead:
+            score *= 0.1  # 90% penalty
+
+        # Moderate penalty if occlusion just ended (frames might still be messy)
+        if occlusion_behind:
+            score *= 0.5  # 50% penalty
+
+        return score
 
     # Only adjust tracker chunk boundaries (indices 1+)
     for i in range(1, len(adjusted_boundaries)):
         original = adjusted_boundaries[i]
 
-        # Find nearest transition within search window
-        candidates = transitions[
-            (transitions >= original - search_window_frames)
-            & (transitions <= original + search_window_frames)
-        ]
+        # Generate candidate frames within search window
+        search_start = max(0, original - search_window_frames)
+        search_end = min(total_end, original + search_window_frames)
+        candidates = list(range(search_start, search_end + 1))
 
-        if len(candidates) == 0:
-            logger.debug(
-                f"Boundary {i}: frame {original} — no transitions within "
-                f"±{search_window_seconds}s, keeping original"
-            )
+        if not candidates:
+            logger.debug(f"Boundary {i}: frame {original} — no candidates, keeping original")
             continue
 
-        nearest = candidates[np.argmin(np.abs(candidates - original))]
-        shift = int(nearest) - original
+        # Filter out frames inside occlusion periods
+        if occlusion_periods:
+            safe_candidates = [f for f in candidates if not _is_in_occlusion_period(f)]
+
+            if not safe_candidates:
+                logger.warning(
+                    f"Boundary {i}: frame {original} — all candidates within occlusion periods "
+                    f"(±{search_window_seconds}s window), keeping original (RISKY)"
+                )
+                continue
+
+            # Among safe candidates, pick the one with highest quality score
+            # (considers distance + directional penalties)
+            best_candidate = max(safe_candidates, key=_candidate_quality_score)
+        else:
+            # Legacy fallback: find nearest transition (old behavior)
+            transitions = transition_frames
+            trans_candidates = transitions[
+                (transitions >= search_start) & (transitions <= search_end)
+            ]
+            if len(trans_candidates) == 0:
+                logger.debug(
+                    f"Boundary {i}: frame {original} — no transitions, keeping original"
+                )
+                continue
+            best_candidate = trans_candidates[np.argmin(np.abs(trans_candidates - original))]
+
+        shift = int(best_candidate) - original
 
         # Validate: check chunk sizes with this adjustment
         prev_start = adjusted_boundaries[i - 1]
@@ -288,12 +368,12 @@ def chunk_video_frames_adaptive(
             if i + 1 < len(adjusted_boundaries)
             else total_end
         )
-        prev_chunk_len = int(nearest) - prev_start
-        next_chunk_len = next_end - int(nearest)
+        prev_chunk_len = int(best_candidate) - prev_start
+        next_chunk_len = next_end - int(best_candidate)
 
         if prev_chunk_len < min_frames or prev_chunk_len > max_frames:
             logger.debug(
-                f"Boundary {i}: frame {original} → {nearest} rejected "
+                f"Boundary {i}: frame {original} → {best_candidate} rejected "
                 f"(prev chunk would be {prev_chunk_len / fps:.1f}s, "
                 f"limits: {min_chunk_seconds}-{max_chunk_seconds}s)"
             )
@@ -301,17 +381,25 @@ def chunk_video_frames_adaptive(
 
         if next_chunk_len < min_frames or next_chunk_len > max_frames:
             logger.debug(
-                f"Boundary {i}: frame {original} → {nearest} rejected "
+                f"Boundary {i}: frame {original} → {best_candidate} rejected "
                 f"(next chunk would be {next_chunk_len / fps:.1f}s, "
                 f"limits: {min_chunk_seconds}-{max_chunk_seconds}s)"
             )
             continue
 
-        adjusted_boundaries[i] = int(nearest)
-        logger.info(
-            f"Boundary {i}: frame {original} → {nearest} "
-            f"(shifted by {shift} frames, nearest transition)"
-        )
+        adjusted_boundaries[i] = int(best_candidate)
+
+        if occlusion_periods:
+            quality = _candidate_quality_score(int(best_candidate))
+            logger.info(
+                f"Boundary {i}: frame {original} → {best_candidate} "
+                f"(shifted by {shift:+d} frames, quality score: {quality:.1f})"
+            )
+        else:
+            logger.info(
+                f"Boundary {i}: frame {original} → {best_candidate} "
+                f"(shifted by {shift:+d} frames, nearest transition)"
+            )
 
     # Rebuild chunks from adjusted boundaries
     adjusted_chunks = []
@@ -337,12 +425,30 @@ def chunk_video_frames_adaptive(
             if len(fixed_chunks) > 1
             else last_len
         )
+
+        should_absorb = False
+
+        # Case 1: Last chunk is very small (<10% of reference)
         if last_len < ref_tracker_frames * 0.1:
+            should_absorb = True
+            logger.info(
+                f"Absorbing small trailing chunk ({last_len} frames, "
+                f"{last_len/fps:.1f}s) into previous chunk"
+            )
+
+        # Case 2: Last chunk boundary is too close to an occlusion period
+        elif occlusion_periods and _is_in_occlusion_period(last_start):
+            combined_len = last_end - prev_start
+            if combined_len <= max_frames:
+                should_absorb = True
+                logger.info(
+                    f"Absorbing last chunk (boundary at {last_start} too close to occlusion) "
+                    f"into previous chunk (combined: {combined_len/fps:.1f}s)"
+                )
+
+        if should_absorb:
             adjusted_chunks[-2] = (prev_start, last_end, prev_type)
             adjusted_chunks.pop()
-            logger.info(
-                f"Absorbed small trailing chunk ({last_len} frames) into previous chunk"
-            )
 
     return adjusted_chunks
 

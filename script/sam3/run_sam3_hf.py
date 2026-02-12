@@ -475,12 +475,14 @@ def main():
         prescan_summary_df.to_parquet(prescan_summary_path, index=False)
         logger.info(f"YOLO prescan summary saved to: {prescan_summary_path}")
 
-        # Adjust chunk boundaries using YOLO transition frames
+        # Adjust chunk boundaries to avoid YOLO-detected occlusion periods
         transition_frames = prescan_results["transition_frames"]
+        occlusion_periods = prescan_results["occlusion_periods"]
         chunks = chunk_video_frames_adaptive(
             chunks,
             transition_frames,
             fps,
+            occlusion_periods=occlusion_periods,
             min_chunk_seconds=cfg.get("adaptive_min_chunk_seconds", 15),
             max_chunk_seconds=cfg.get("adaptive_max_chunk_seconds", 90),
         )

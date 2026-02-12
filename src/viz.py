@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Optional, Sequence
 
 import cv2
+import matplotlib.lines as mlines
 import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
@@ -1018,6 +1019,7 @@ def plot_prompt_points(tracking_df, chunk_info, video_path, fps=None, output_dir
 def plot_yolo_prescan_overview(
     yolo_prescan_df,
     occlusion_periods=None,
+    chunk_boundaries=None,
     fps=None,
     save_path=None,
 ):
@@ -1026,12 +1028,14 @@ def plot_yolo_prescan_overview(
 
     Panels: object count, max pairwise bbox IoU, clustering coefficient,
     high-occlusion flag. Occlusion periods are shaded in red across all panels.
+    Chunk boundaries (re-initialization points) are shown as vertical lines.
 
     Args:
         yolo_prescan_df: DataFrame from yolo_prescan_to_df() with columns
             frame_idx, num_objects, max_pairwise_bbox_iou,
             clustering_coefficient, is_high_occlusion, mean_confidence.
         occlusion_periods: List of (start_frame, end_frame) tuples. Optional.
+        chunk_boundaries: List of frame indices where chunks start (tracker re-init). Optional.
         fps: Video FPS for MM:SS x-axis. None = frame index.
         save_path: Path to save PNG. None = plt.show().
     """
@@ -1047,6 +1051,12 @@ def plot_yolo_prescan_overview(
                 x_end = _frame_to_x(end, fps)
                 ax.axvspan(x_start, x_end, alpha=0.15, color="red", linewidth=0)
 
+    def _plot_chunk_boundaries(ax):
+        if chunk_boundaries:
+            for boundary_frame in chunk_boundaries:
+                x_boundary = _frame_to_x(boundary_frame, fps)
+                ax.axvline(x_boundary, color="blue", linestyle="--", linewidth=1.2, alpha=0.7)
+
     # Panel 1: Object count
     ax = axes[0]
     ax.step(x, yolo_prescan_df["num_objects"].values, where="mid", color="steelblue",
@@ -1056,6 +1066,7 @@ def plot_yolo_prescan_overview(
     ax.set_title("YOLO Pre-scan Overview", fontsize=12, fontweight="bold")
     ax.grid(True, alpha=0.3)
     _shade_occlusion(ax)
+    _plot_chunk_boundaries(ax)
 
     # Panel 2: Max pairwise bbox IoU
     ax = axes[1]
@@ -1069,6 +1080,7 @@ def plot_yolo_prescan_overview(
     ax.legend(fontsize=8, loc="upper right")
     ax.grid(True, alpha=0.3)
     _shade_occlusion(ax)
+    _plot_chunk_boundaries(ax)
 
     # Panel 3: Clustering coefficient
     ax = axes[2]
@@ -1081,6 +1093,7 @@ def plot_yolo_prescan_overview(
     ax.legend(fontsize=8, loc="upper right")
     ax.grid(True, alpha=0.3)
     _shade_occlusion(ax)
+    _plot_chunk_boundaries(ax)
 
     # Panel 4: High occlusion flag
     ax = axes[3]
@@ -1092,13 +1105,17 @@ def plot_yolo_prescan_overview(
     ax.set_yticklabels(["No", "Yes"])
     ax.grid(True, alpha=0.3)
     _shade_occlusion(ax)
+    _plot_chunk_boundaries(ax)
 
-    # Add legend for occlusion period shading
+    # Add legend for occlusion periods and chunk boundaries
+    legend_handles = []
     if occlusion_periods:
-        axes[0].legend(
-            handles=[mpatches.Patch(fc="red", alpha=0.15, label="Occlusion Period")],
-            fontsize=8, loc="upper right",
-        )
+        legend_handles.append(mpatches.Patch(fc="red", alpha=0.15, label="Occlusion Period"))
+    if chunk_boundaries:
+        legend_handles.append(mlines.Line2D([], [], color="blue", linestyle="--",
+                                            linewidth=1.2, alpha=0.7, label="Chunk Boundary"))
+    if legend_handles:
+        axes[0].legend(handles=legend_handles, fontsize=8, loc="upper right")
 
     _setup_time_xaxis(axes[-1], frames, fps)
 
@@ -1171,9 +1188,19 @@ def generate_all_visualizations(
         )
 
     if yolo_prescan_df is not None and not yolo_prescan_df.empty:
+        # Extract chunk boundaries for overlay on YOLO prescan plot
+        chunk_boundaries_list = None
+        if chunk_info is not None and "chunks" in chunk_info:
+            # Use start frame of each tracker chunk (skip chunk 0 which is text-prompted)
+            chunk_boundaries_list = [
+                c["frame_range"][0]
+                for c in chunk_info["chunks"]
+                if c["model_type"] == "Sam3TrackerVideoModel"
+            ]
         plot_yolo_prescan_overview(
             yolo_prescan_df,
             occlusion_periods=yolo_occlusion_periods,
+            chunk_boundaries=chunk_boundaries_list,
             fps=fps,
             save_path=output_dir / "yolo_prescan_overview.png",
         )

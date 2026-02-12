@@ -15,8 +15,8 @@ PYTORCH_ALLOC_CONF: "expandable_segments:True,garbage_collection_threshold:0.6" 
 # =============================================================================
 # Video/IO Configuration
 # =============================================================================
-# video_path: "ext-data/test/video_1_5_min.mp4"
-video_path: "ext-data/test/video_1_2min.mp4"
+video_path: "ext-data/test/video_1_5_min.mp4"
+# video_path: "ext-data/test/video_1_2min.mp4"
 text_prompt: "bird"
 
 # Output directory - results will be saved to a timestamped subdirectory
@@ -47,9 +47,9 @@ yolo_prescan:
   tracker_config: "data/yolo/bytetrack.yaml"
   allowed_classes: ["bird"]
   window_seconds: 1.0
-  high_occlusion_threshold: 0.3
-  occlusion_iou_threshold: 0.15
-  clustering_distance_threshold: 0.15
+  high_occlusion_threshold: 0.15  # STRICTER: Was 0.3 - lower % of window needed to flag period
+  occlusion_iou_threshold: 0.08   # STRICTER: Was 0.15 - catches 90th percentile overlaps (was only 95th)
+  clustering_distance_threshold: 0.20  # STRICTER: Was 0.15 - slightly more sensitive to clustering
 
 # =============================================================================
 # Multi-object Tracking Heuristics
