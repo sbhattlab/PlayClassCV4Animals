@@ -137,5 +137,7 @@ All plots use MM:SS x-axis when FPS is available. Diagnostic plots (mask evoluti
 - **YOLO-based adaptive chunking**: The YOLO+ByteTrack pre-scan (replacing KMeans pixel clustering) has shown positive results in initial tests by directly detecting object-level occlusion via bbox overlap and centroid clustering. The system identifies high-occlusion periods and shifts chunk boundaries to avoid placing them during problematic frames. However, this feature requires thorough verification across diverse video conditions and longer recordings before being considered production-ready. The legacy KMeans pre-scan remains available for debugging and comparison.
 
 ## TO-DO
+- Implement logging into prescan step
+- Option to run prescan independently from full run_sam3_hf.py script, preferably by providing a 'flag' in the input config YAML
 - Iteratively save outputs every chunk (tracking, metrics, visualizations)
 - Remove inactive code
