@@ -1011,6 +1011,102 @@ def plot_prompt_points(tracking_df, chunk_info, video_path, fps=None, output_dir
 
 
 # ---------------------------------------------------------------------------
+# Plot 6: YOLO prescan overview
+# ---------------------------------------------------------------------------
+
+
+def plot_yolo_prescan_overview(
+    yolo_prescan_df,
+    occlusion_periods=None,
+    fps=None,
+    save_path=None,
+):
+    """
+    4-panel timeseries overview of YOLO-based prescan metrics.
+
+    Panels: object count, max pairwise bbox IoU, clustering coefficient,
+    high-occlusion flag. Occlusion periods are shaded in red across all panels.
+
+    Args:
+        yolo_prescan_df: DataFrame from yolo_prescan_to_df() with columns
+            frame_idx, num_objects, max_pairwise_bbox_iou,
+            clustering_coefficient, is_high_occlusion, mean_confidence.
+        occlusion_periods: List of (start_frame, end_frame) tuples. Optional.
+        fps: Video FPS for MM:SS x-axis. None = frame index.
+        save_path: Path to save PNG. None = plt.show().
+    """
+    frames = yolo_prescan_df["frame_idx"].values
+    x = np.array([_frame_to_x(f, fps) for f in frames])
+
+    fig, axes = plt.subplots(4, 1, sharex=True, figsize=(14, 10))
+
+    def _shade_occlusion(ax):
+        if occlusion_periods:
+            for start, end in occlusion_periods:
+                x_start = _frame_to_x(start, fps)
+                x_end = _frame_to_x(end, fps)
+                ax.axvspan(x_start, x_end, alpha=0.15, color="red", linewidth=0)
+
+    # Panel 1: Object count
+    ax = axes[0]
+    ax.step(x, yolo_prescan_df["num_objects"].values, where="mid", color="steelblue",
+            linewidth=0.8, alpha=0.8)
+    ax.set_ylabel("# Objects")
+    ax.yaxis.set_major_locator(mticker.MaxNLocator(integer=True))
+    ax.set_title("YOLO Pre-scan Overview", fontsize=12, fontweight="bold")
+    ax.grid(True, alpha=0.3)
+    _shade_occlusion(ax)
+
+    # Panel 2: Max pairwise bbox IoU
+    ax = axes[1]
+    iou_vals = yolo_prescan_df["max_pairwise_bbox_iou"].values
+    ax.plot(x, iou_vals, linewidth=0.8, color="tomato", alpha=0.8)
+    ax.axhline(0.15, color="red", linestyle="--", linewidth=0.8, alpha=0.5,
+               label="Threshold (0.15)")
+    ax.fill_between(x, iou_vals, 0.15, where=iou_vals > 0.15, color="red", alpha=0.15)
+    ax.set_ylabel("Max Bbox IoU")
+    ax.set_ylim(bottom=0)
+    ax.legend(fontsize=8, loc="upper right")
+    ax.grid(True, alpha=0.3)
+    _shade_occlusion(ax)
+
+    # Panel 3: Clustering coefficient
+    ax = axes[2]
+    ax.plot(x, yolo_prescan_df["clustering_coefficient"].values,
+            linewidth=0.8, color="mediumpurple", alpha=0.8)
+    ax.axhline(0.5, color="red", linestyle="--", linewidth=0.8, alpha=0.5,
+               label="Threshold (0.5)")
+    ax.set_ylabel("Clustering\nCoefficient")
+    ax.set_ylim(-0.05, 1.05)
+    ax.legend(fontsize=8, loc="upper right")
+    ax.grid(True, alpha=0.3)
+    _shade_occlusion(ax)
+
+    # Panel 4: High occlusion flag
+    ax = axes[3]
+    occ_flags = yolo_prescan_df["is_high_occlusion"].astype(int).values
+    ax.fill_between(x, 0, occ_flags, alpha=0.5, color="red", step="mid")
+    ax.set_ylabel("High\nOcclusion")
+    ax.set_ylim(-0.1, 1.1)
+    ax.set_yticks([0, 1])
+    ax.set_yticklabels(["No", "Yes"])
+    ax.grid(True, alpha=0.3)
+    _shade_occlusion(ax)
+
+    # Add legend for occlusion period shading
+    if occlusion_periods:
+        axes[0].legend(
+            handles=[mpatches.Patch(fc="red", alpha=0.15, label="Occlusion Period")],
+            fontsize=8, loc="upper right",
+        )
+
+    _setup_time_xaxis(axes[-1], frames, fps)
+
+    fig.tight_layout()
+    _save_or_show(fig, save_path)
+
+
+# ---------------------------------------------------------------------------
 # Convenience wrapper
 # ---------------------------------------------------------------------------
 
@@ -1022,6 +1118,8 @@ def generate_all_visualizations(
     fps=None,
     chunk_info=None,
     video_path=None,
+    yolo_prescan_df=None,
+    yolo_occlusion_periods=None,
 ):
     """
     Generate all tracking visualizations and save to output_dir.
@@ -1033,6 +1131,8 @@ def generate_all_visualizations(
         fps: Video FPS for MM:SS axis labels.
         chunk_info: Dict with 'chunks' key for diagnostic plots. Optional.
         video_path: Path to source video for diagnostic plots. Optional.
+        yolo_prescan_df: DataFrame from yolo_prescan_to_df. Optional.
+        yolo_occlusion_periods: List of (start, end) frame tuples. Optional.
     """
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -1068,4 +1168,12 @@ def generate_all_visualizations(
             video_path,
             fps=fps,
             output_dir=output_dir,
+        )
+
+    if yolo_prescan_df is not None and not yolo_prescan_df.empty:
+        plot_yolo_prescan_overview(
+            yolo_prescan_df,
+            occlusion_periods=yolo_occlusion_periods,
+            fps=fps,
+            save_path=output_dir / "yolo_prescan_overview.png",
         )

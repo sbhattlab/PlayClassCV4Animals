@@ -394,6 +394,10 @@ def main():
         cfg.tracker_chunk_seconds,
     )
 
+    # YOLO prescan data (populated when adaptive chunking is enabled)
+    yolo_prescan_metrics_df = None
+    yolo_occlusion_periods = None
+
     # Optionally adjust boundaries via YOLO-based pre-scan
     if cfg.get("use_adaptive_chunking", False):
         logger.info("Running YOLO pre-scan for adaptive chunking...")
@@ -432,9 +436,13 @@ def main():
             prescan_metrics_df = yolo_prescan_to_df(
                 prescan_results["per_frame_metrics"]
             )
-            prescan_metrics_path = run_dir / "yolo_prescan_metrics.parquet"
+            prescan_metrics_path = metrics_dir / "yolo_prescan_metrics.parquet"
             prescan_metrics_df.to_parquet(prescan_metrics_path, index=False)
             logger.info(f"YOLO prescan metrics saved to: {prescan_metrics_path}")
+
+            # Store for visualization
+            yolo_prescan_metrics_df = prescan_metrics_df
+            yolo_occlusion_periods = prescan_results["occlusion_periods"]
 
         # Save summary as single-row Parquet
         prescan_summary_df = pd.DataFrame(
@@ -463,7 +471,7 @@ def main():
                 }
             ]
         )
-        prescan_summary_path = run_dir / "yolo_prescan_summary.parquet"
+        prescan_summary_path = metrics_dir / "yolo_prescan_summary.parquet"
         prescan_summary_df.to_parquet(prescan_summary_path, index=False)
         logger.info(f"YOLO prescan summary saved to: {prescan_summary_path}")
 
@@ -686,6 +694,8 @@ def main():
         fps=fps,
         chunk_info={"chunks": chunk_info_list},
         video_path=video_path,
+        yolo_prescan_df=yolo_prescan_metrics_df,
+        yolo_occlusion_periods=yolo_occlusion_periods,
     )
     logger.info(f"Visualizations saved to: {vis_dir}")
 
