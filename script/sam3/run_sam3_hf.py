@@ -78,6 +78,12 @@ from src.utils import (  # noqa: E402
 from src.viz import generate_all_visualizations  # noqa: E402
 from src.yolo_prescan import run_yolo_prescan, yolo_prescan_to_df  # noqa: E402
 
+# Import parameter sensitivity function for optional testing
+try:
+    from script.sam3.parameter_sensitivity import run_parameter_sensitivity_analysis
+except ImportError:
+    run_parameter_sensitivity_analysis = None  # noqa: E402
+
 # ---------------------------------------------------------------------------
 # Per-chunk processing helpers
 # ---------------------------------------------------------------------------
@@ -434,6 +440,7 @@ def main():
             clustering_distance_threshold=yolo_cfg.get(
                 "clustering_distance_threshold", 0.15
             ),
+            output_video_path=run_dir / "yolo_tracking.mp4",
         )
 
         # Save YOLO prescan artifacts
@@ -481,6 +488,50 @@ def main():
         prescan_summary_df.to_parquet(prescan_summary_path, index=False)
         logger.info(f"YOLO prescan summary saved to: {prescan_summary_path}")
         logger.info(f"YOLO prescan output directory: {run_dir}")
+
+        # Run parameter sensitivity testing if requested
+        if cfg.get("run_parameter_sensitivity", False) and not yolo_df.empty:
+            logger.info("")
+            logger.info("=" * 60)
+            logger.info("Running parameter sensitivity analysis...")
+            logger.info("=" * 60)
+
+            if run_parameter_sensitivity_analysis is not None:
+                try:
+                    # Extract video path for optional video overlay generation
+                    video_path_for_sensitivity = (
+                        Path(video_path) if video_path else None
+                    )
+
+                    run_parameter_sensitivity_analysis(
+                        yolo_df=yolo_df,
+                        run_dir=run_dir,
+                        fps=fps,
+                        total_frames=total_frames,
+                        video_model_chunk_seconds=cfg.video_model_chunk_seconds,
+                        tracker_chunk_seconds=cfg.tracker_chunk_seconds,
+                        adaptive_min_chunk_seconds=cfg.get(
+                            "adaptive_min_chunk_seconds", 15
+                        ),
+                        adaptive_max_chunk_seconds=cfg.get(
+                            "adaptive_max_chunk_seconds", 90
+                        ),
+                        video_path=video_path_for_sensitivity,
+                        generate_video=False,  # Don't generate videos by default
+                    )
+                    logger.info("=" * 60)
+                    logger.info("Parameter sensitivity analysis complete")
+                    logger.info("=" * 60)
+                    logger.info("")
+                except Exception as e:
+                    logger.error(f"Parameter sensitivity analysis failed: {e}")
+                    logger.info("Continuing with main pipeline...")
+                    logger.info("")
+            else:
+                logger.warning(
+                    "Parameter sensitivity module not available (import failed)"
+                )
+                logger.info("")
 
         # Adjust chunk boundaries if adaptive chunking is enabled
         if use_adaptive_chunking and not yolo_df.empty:

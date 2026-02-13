@@ -130,6 +130,199 @@ PARAMETER_SETS = [
 # =============================================================================
 
 
+def run_parameter_sensitivity_analysis(
+    yolo_df: pd.DataFrame,
+    run_dir: Path,
+    fps: float,
+    total_frames: int,
+    video_model_chunk_seconds: float = 15,
+    tracker_chunk_seconds: float = 45,
+    adaptive_min_chunk_seconds: float = 15,
+    adaptive_max_chunk_seconds: float = 90,
+    video_path: Path | None = None,
+    generate_video: bool = False,
+    parameter_sets: list[dict] | None = None,
+) -> pd.DataFrame:
+    """
+    Run parameter sensitivity analysis on existing YOLO tracking data.
+
+    Tests multiple parameter combinations without re-running YOLO inference.
+    Generates comparison visualizations and optionally video overlays.
+
+    Args:
+        yolo_df: YOLO tracking DataFrame from prescan
+        run_dir: Run directory where outputs will be saved
+        fps: Video frame rate
+        total_frames: Total number of frames
+        video_model_chunk_seconds: Duration of first chunk
+        tracker_chunk_seconds: Duration of subsequent chunks
+        adaptive_min_chunk_seconds: Minimum chunk duration
+        adaptive_max_chunk_seconds: Maximum chunk duration
+        video_path: Optional path to source video for overlay generation
+        generate_video: Whether to generate video overlays
+        parameter_sets: List of parameter dicts to test (uses defaults if None)
+
+    Returns:
+        DataFrame with comparison summary
+    """
+    # Use default parameter sets if none provided
+    if parameter_sets is None:
+        parameter_sets = PARAMETER_SETS
+
+    # Create output directory for parameter comparison
+    output_dir = run_dir / "parameter_comparison"
+    output_dir.mkdir(exist_ok=True)
+
+    logger.info("=" * 70)
+    logger.info("YOLO Prescan Parameter Sensitivity Testing")
+    logger.info("=" * 70)
+    logger.info(f"Output directory: {output_dir}")
+    logger.info(
+        f"  → {len(yolo_df)} detections across {yolo_df['frame'].nunique()} frames"
+    )
+    logger.info(f"  → Frame range: {yolo_df['frame'].min()} to {yolo_df['frame'].max()}")
+    logger.info(f"  → FPS: {fps}")
+    logger.info(f"  → Total frames: {total_frames}")
+    logger.info("")
+
+    # Warn if video generation was requested but no video path available
+    if generate_video and video_path is None:
+        logger.warning("Video generation requested but video path not available")
+        logger.warning("Video overlays will be skipped.")
+        generate_video = False
+
+    # Test each parameter set
+    results_summary = []
+
+    for param_set in parameter_sets:
+        name = param_set["name"]
+        logger.info("-" * 70)
+        logger.info(f"Testing: {name}")
+        logger.info(
+            f"  occlusion_iou_threshold:        {param_set['occlusion_iou_threshold']}"
+        )
+        logger.info(
+            f"  high_occlusion_threshold:       {param_set['high_occlusion_threshold']}"
+        )
+        logger.info(
+            f"  clustering_distance_threshold:  {param_set['clustering_distance_threshold']}"
+        )
+
+        # Recompute prescan metrics with new parameters
+        prescan_results = compute_yolo_prescan_results(
+            yolo_df,
+            fps=fps,
+            window_seconds=1.0,
+            high_occlusion_threshold=param_set["high_occlusion_threshold"],
+            occlusion_iou_threshold=param_set["occlusion_iou_threshold"],
+            clustering_distance_threshold=param_set["clustering_distance_threshold"],
+        )
+
+        # Extract results
+        occlusion_periods = prescan_results["occlusion_periods"]
+        transition_frames = prescan_results["transition_frames"]
+        per_frame_metrics = prescan_results["per_frame_metrics"]
+
+        logger.info(f"  → {len(occlusion_periods)} occlusion periods detected")
+        logger.info(f"  → {len(transition_frames)} transition frames identified")
+
+        # Compute original (fixed) chunks
+        chunks = chunk_video_frames_dual(
+            total_frames,
+            fps,
+            video_model_chunk_seconds,
+            tracker_chunk_seconds,
+        )
+
+        # Compute adaptive chunks with new parameters
+        adaptive_chunks = chunk_video_frames_adaptive(
+            chunks,
+            transition_frames,
+            fps,
+            occlusion_periods=occlusion_periods,
+            min_chunk_seconds=adaptive_min_chunk_seconds,
+            max_chunk_seconds=adaptive_max_chunk_seconds,
+        )
+
+        # Extract tracker chunk boundaries for visualization
+        chunk_boundaries = [
+            c[0] for c in adaptive_chunks if c[2] == "tracker"  # (start, end, type)
+        ]
+
+        logger.info(f"  → {len(adaptive_chunks)} chunks after adaptive adjustment")
+
+        # Convert metrics to DataFrame
+        prescan_metrics_df = yolo_prescan_to_df(per_frame_metrics)
+
+        # Generate visualization
+        save_path = output_dir / f"yolo_prescan_overview_{name.replace(' ', '_')}.png"
+        plot_yolo_prescan_overview(
+            prescan_metrics_df,
+            occlusion_periods=occlusion_periods,
+            chunk_boundaries=chunk_boundaries,
+            fps=fps,
+            save_path=save_path,
+            name_suffix=name,
+        )
+        logger.info(f"  → Visualization saved: {save_path.name}")
+
+        # Generate video overlay if requested and video path is available
+        if generate_video and video_path is not None:
+            video_output_path = (
+                output_dir / f"occlusion_overlay_{name.replace(' ', '_')}.mp4"
+            )
+            logger.info(f"  → Generating video overlay: {video_output_path.name}")
+
+            try:
+                generate_occlusion_overlay_video(
+                    video_path=video_path,
+                    occlusion_periods=occlusion_periods,
+                    fps=fps,
+                    output_path=video_output_path,
+                    opacity=0.3,
+                )
+                logger.info(f"  ✓ Video overlay saved: {video_output_path.name}")
+            except Exception as e:
+                logger.warning(f"  ✗ Video generation failed: {e}")
+
+        logger.info("")
+
+        # Store summary
+        results_summary.append(
+            {
+                "parameter_set": name,
+                "occlusion_iou_threshold": param_set["occlusion_iou_threshold"],
+                "high_occlusion_threshold": param_set["high_occlusion_threshold"],
+                "num_occlusion_periods": len(occlusion_periods),
+                "num_transition_frames": len(transition_frames),
+                "num_chunks": len(adaptive_chunks),
+                "num_boundaries_adjusted": sum(
+                    1
+                    for i, (orig, adapt) in enumerate(zip(chunks, adaptive_chunks))
+                    if orig[0] != adapt[0] and i > 0  # skip chunk 0
+                ),
+            }
+        )
+
+    # Print comparison table
+    logger.info("=" * 70)
+    logger.info("SUMMARY COMPARISON")
+    logger.info("=" * 70)
+    summary_df = pd.DataFrame(results_summary)
+    logger.info(summary_df.to_string(index=False))
+    logger.info("")
+
+    # Save summary to CSV
+    summary_path = output_dir / "parameter_comparison_summary.csv"
+    summary_df.to_csv(summary_path, index=False)
+    logger.info(f"Summary saved to: {summary_path}")
+    logger.info("")
+    logger.info("✓ Parameter sensitivity testing complete!")
+    logger.info(f"  Review visualizations in: {output_dir}")
+
+    return summary_df
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Test YOLO prescan parameter sensitivity on existing run",
@@ -151,15 +344,13 @@ def main():
     if not run_dir.exists():
         raise FileNotFoundError(f"Run directory not found: {run_dir}")
 
-    # Create output directory for parameter comparison
+    # Setup logger with timestamped file in output directory
     output_dir = run_dir / "parameter_comparison"
     output_dir.mkdir(exist_ok=True)
-
-    # Setup logger with timestamped file in output directory
     log_file = setup_logger(log_dir=output_dir, job_type="parameter_sensitivity")
 
     logger.info("=" * 70)
-    logger.info("YOLO Prescan Parameter Sensitivity Testing")
+    logger.info("STANDALONE Parameter Sensitivity Testing")
     logger.info("=" * 70)
     logger.info(f"Run directory: {run_dir}")
     logger.info(f"Log file: {log_file}")
@@ -173,8 +364,6 @@ def main():
     logger.info(f"Loading YOLO tracking data from: {yolo_tracking_path}")
     yolo_df = pd.read_parquet(yolo_tracking_path)
     total_frames = yolo_df["frame"].max() + 1  # frames are 0-indexed
-    logger.info(f"  → {len(yolo_df)} detections across {yolo_df['frame'].nunique()} frames")
-    logger.info(f"  → Frame range: {yolo_df['frame'].min()} to {yolo_df['frame'].max()}")
     logger.info("")
 
     # Load config from run directory to get original parameters
@@ -241,147 +430,19 @@ def main():
 
     logger.info("")
 
-    # Warn if video generation was requested but no video path available
-    if args.generate_video and video_path is None:
-        logger.warning("--generate-video requested but video path not available")
-        logger.warning("Video overlays will be skipped.")
-        logger.info("")
-
-    logger.info(f"Saving results to: {output_dir}")
-    logger.info("")
-
-    # Test each parameter set
-    results_summary = []
-
-    for param_set in PARAMETER_SETS:
-        name = param_set["name"]
-        logger.info("-" * 70)
-        logger.info(f"Testing: {name}")
-        logger.info(
-            f"  occlusion_iou_threshold:        {param_set['occlusion_iou_threshold']}"
-        )
-        logger.info(
-            f"  high_occlusion_threshold:       {param_set['high_occlusion_threshold']}"
-        )
-        logger.info(
-            f"  clustering_distance_threshold:  {param_set['clustering_distance_threshold']}"
-        )
-        logger.info("")
-
-        # Recompute prescan metrics with new parameters
-        prescan_results = compute_yolo_prescan_results(
-            yolo_df,
-            fps=fps,
-            window_seconds=1.0,
-            high_occlusion_threshold=param_set["high_occlusion_threshold"],
-            occlusion_iou_threshold=param_set["occlusion_iou_threshold"],
-            clustering_distance_threshold=param_set["clustering_distance_threshold"],
-        )
-
-        # Extract results
-        occlusion_periods = prescan_results["occlusion_periods"]
-        transition_frames = prescan_results["transition_frames"]
-        per_frame_metrics = prescan_results["per_frame_metrics"]
-
-        logger.info(f"  → {len(occlusion_periods)} occlusion periods detected")
-        logger.info(f"  → {len(transition_frames)} transition frames identified")
-
-        # Compute original (fixed) chunks
-        chunks = chunk_video_frames_dual(
-            total_frames,
-            fps,
-            video_model_chunk_seconds,
-            tracker_chunk_seconds,
-        )
-
-        # Compute adaptive chunks with new parameters
-        adaptive_chunks = chunk_video_frames_adaptive(
-            chunks,
-            transition_frames,
-            fps,
-            occlusion_periods=occlusion_periods,
-            min_chunk_seconds=adaptive_min_chunk_seconds,
-            max_chunk_seconds=adaptive_max_chunk_seconds,
-        )
-
-        # Extract tracker chunk boundaries for visualization
-        chunk_boundaries = [
-            c[0]
-            for c in adaptive_chunks
-            if c[2] == "tracker"  # (start, end, type)
-        ]
-
-        logger.info(f"  → {len(adaptive_chunks)} chunks after adaptive adjustment")
-        # logger.info("")
-
-        # Convert metrics to DataFrame
-        prescan_metrics_df = yolo_prescan_to_df(per_frame_metrics)
-
-        # Generate visualization
-        save_path = output_dir / f"yolo_prescan_overview_{name.replace(' ', '_')}.png"
-        plot_yolo_prescan_overview(
-            prescan_metrics_df,
-            occlusion_periods=occlusion_periods,
-            chunk_boundaries=chunk_boundaries,
-            fps=fps,
-            save_path=save_path,
-            name_suffix=name,
-        )
-        logger.info(f"  → Visualization saved: {save_path.name}")
-
-        # Generate video overlay if requested and video path is available
-        if args.generate_video and video_path is not None:
-            video_output_path = (
-                output_dir / f"occlusion_overlay_{name.replace(' ', '_')}.mp4"
-            )
-            logger.info(f"  → Generating video overlay: {video_output_path.name}")
-
-            try:
-                generate_occlusion_overlay_video(
-                    video_path=video_path,
-                    occlusion_periods=occlusion_periods,
-                    fps=fps,
-                    output_path=video_output_path,
-                    opacity=0.3,
-                )
-                logger.info(f"  ✓ Video overlay saved: {video_output_path.name}")
-            except Exception as e:
-                logger.info(f"  ✗ Video generation failed: {e}")
-
-        logger.info("")
-
-        # Store summary
-        results_summary.append(
-            {
-                "parameter_set": name,
-                "occlusion_iou_threshold": param_set["occlusion_iou_threshold"],
-                "high_occlusion_threshold": param_set["high_occlusion_threshold"],
-                "num_occlusion_periods": len(occlusion_periods),
-                "num_transition_frames": len(transition_frames),
-                "num_chunks": len(adaptive_chunks),
-                "num_boundaries_adjusted": sum(
-                    1
-                    for i, (orig, adapt) in enumerate(zip(chunks, adaptive_chunks))
-                    if orig[0] != adapt[0] and i > 0  # skip chunk 0
-                ),
-            }
-        )
-
-    # Print comparison table
-    logger.info("=" * 70)
-    logger.info("SUMMARY COMPARISON")
-    logger.info("=" * 70)
-    summary_df = pd.DataFrame(results_summary)
-    logger.info(summary_df.to_string(index=False))
-    logger.info("")
-
-    # Save summary to CSV
-    summary_path = output_dir / "parameter_comparison_summary.csv"
-    summary_df.to_csv(summary_path, index=False)
-    logger.info(f"Summary saved to: {summary_path}")
-    logger.info("")
-    logger.info("✓ Parameter sensitivity testing complete!")
-    logger.info(f"  Review visualizations in: {output_dir}")
+    # Run the parameter sensitivity analysis using the refactored function
+    run_parameter_sensitivity_analysis(
+        yolo_df=yolo_df,
+        run_dir=run_dir,
+        fps=fps,
+        total_frames=total_frames,
+        video_model_chunk_seconds=video_model_chunk_seconds,
+        tracker_chunk_seconds=tracker_chunk_seconds,
+        adaptive_min_chunk_seconds=adaptive_min_chunk_seconds,
+        adaptive_max_chunk_seconds=adaptive_max_chunk_seconds,
+        video_path=video_path,
+        generate_video=args.generate_video,
+    )
 
 
 if __name__ == "__main__":

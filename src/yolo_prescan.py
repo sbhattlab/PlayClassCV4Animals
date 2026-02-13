@@ -13,10 +13,39 @@ to produce transition frames suitable for ``chunk_video_frames_adaptive``.
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+import cv2
 import numpy as np
 import pandas as pd
 from loguru import logger
 from tqdm import tqdm
+
+
+def _draw_label(img: np.ndarray, label: str, x1: float, y1: float) -> None:
+    """
+    Draw a filled rectangle behind text for readability, positioned above the box.
+
+    Args:
+        img: Image array (modified in-place)
+        label: Text to draw
+        x1, y1: Top-left corner of bounding box
+    """
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    scale = 0.6
+    thickness = 1
+    (w, h), _ = cv2.getTextSize(label, font, scale, thickness)
+    top_left = (int(x1), int(y1) - h - 6)
+    bottom_right = (int(x1) + w + 6, int(y1))
+    cv2.rectangle(img, top_left, bottom_right, (0, 0, 0), -1)
+    cv2.putText(
+        img,
+        label,
+        (int(x1) + 3, int(y1) - 4),
+        font,
+        scale,
+        (255, 255, 255),
+        thickness,
+        cv2.LINE_AA,
+    )
 
 
 def compute_bbox_iou(boxA: np.ndarray, boxB: np.ndarray) -> float:
@@ -379,6 +408,7 @@ def run_yolo_prescan(
     high_occlusion_threshold: float = 0.3,
     occlusion_iou_threshold: float = 0.15,
     clustering_distance_threshold: float = 0.15,
+    output_video_path: str | Path | None = None,
 ) -> Dict[str, Any]:
     """
     Run YOLO+ByteTrack inference on a video and compute prescan results.
@@ -405,6 +435,8 @@ def run_yolo_prescan(
         high_occlusion_threshold: Fraction of flagged frames in window.
         occlusion_iou_threshold: Bbox IoU above which a pair is overlapping.
         clustering_distance_threshold: Normalized centroid distance threshold.
+        output_video_path: Optional path to save annotated video with bounding boxes.
+            If ``None``, no video is written.
 
     Returns:
         Dict with keys:
@@ -442,6 +474,28 @@ def run_yolo_prescan(
             f"(IDs: {allowed_class_ids})"
         )
 
+    # Set up video writer if output path is provided
+    video_writer = None
+    if output_video_path is not None:
+        import cv2
+
+        # Get video metadata for writer
+        cap_meta = cv2.VideoCapture(str(video_path))
+        video_fps = cap_meta.get(cv2.CAP_PROP_FPS)
+        video_fps = float(video_fps) if video_fps and video_fps > 0 else fps
+        width = int(cap_meta.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(cap_meta.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        cap_meta.release()
+
+        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+        video_writer = cv2.VideoWriter(
+            str(output_video_path), fourcc, video_fps, (width, height)
+        )
+        logger.info(
+            f"YOLO prescan: writing annotated video to {output_video_path} "
+            f"({width}x{height} @ {video_fps:.1f} FPS)"
+        )
+
     # Run tracking with stream mode for memory efficiency
     rows: list[dict] = []
     frame_count = 0
@@ -469,8 +523,14 @@ def run_yolo_prescan(
         if frame_count >= total_frames:
             break
 
+        # Get frame image for video writing
+        frame_img = result.orig_img.copy() if video_writer is not None else None
+
         boxes = result.boxes
         if boxes is None or len(boxes) == 0:
+            # Write blank frame if video writer is active
+            if video_writer is not None and frame_img is not None:
+                video_writer.write(frame_img)
             frame_count += 1
             pbar.update(1)
             continue
@@ -507,11 +567,33 @@ def run_yolo_prescan(
                 }
             )
 
+            # Draw bounding box and label on frame for video
+            if video_writer is not None and frame_img is not None:
+                color = (0, 255, 0)  # Green
+                cv2.rectangle(
+                    frame_img,
+                    (int(x1), int(y1)),
+                    (int(x2), int(y2)),
+                    color,
+                    2,
+                )
+                label = f"ID {tid} conf={confs[i]:.2f}"
+                _draw_label(frame_img, label, x1, y1)
+
+        # Write annotated frame to video
+        if video_writer is not None and frame_img is not None:
+            video_writer.write(frame_img)
+
         frame_count += 1
         pbar.update(1)
 
     pbar.close()
     logger.info(f"YOLO prescan: processed {frame_count} frames, {len(rows)} detections")
+
+    # Release video writer if it was used
+    if video_writer is not None:
+        video_writer.release()
+        logger.info(f"YOLO prescan: annotated video saved to {output_video_path}")
 
     # Clean up YOLO model and free GPU
     del model

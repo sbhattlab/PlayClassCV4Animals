@@ -49,9 +49,12 @@ yolo_prescan:
   tracker_config: "data/yolo/bytetrack.yaml"
   allowed_classes: ["bird"]
   window_seconds: 1.0
-  high_occlusion_threshold: 0.3  
-  occlusion_iou_threshold: 0.15 
+  high_occlusion_threshold: 0.3
+  occlusion_iou_threshold: 0.15
   clustering_distance_threshold: 0.15
+
+# Parameter sensitivity testing (only runs when prescan_only or use_adaptive_chunking is true)
+run_parameter_sensitivity: false  # Test multiple threshold combinations on prescan results
 
 # =============================================================================
 # Multi-object Tracking Heuristics
