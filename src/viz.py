@@ -810,6 +810,7 @@ def plot_yolo_prescan_overview(
     chunk_boundaries=None,
     fps=None,
     save_path=None,
+    name_suffix=None,
 ):
     """
     4-panel timeseries overview of YOLO-based prescan metrics.
@@ -859,7 +860,13 @@ def plot_yolo_prescan_overview(
     )
     ax.set_ylabel("# Objects")
     ax.yaxis.set_major_locator(mticker.MaxNLocator(integer=True))
-    ax.set_title("YOLO Pre-scan Overview", fontsize=12, fontweight="bold")
+    if not name_suffix:
+        ax.set_title("YOLO Pre-scan Overview", fontsize=12, fontweight="bold")
+    else:
+        ax.set_title(
+            f"YOLO Pre-scan Overview ({name_suffix})", fontsize=12, fontweight="bold"
+        )
+
     ax.grid(True, alpha=0.3)
     _shade_occlusion(ax)
     _plot_chunk_boundaries(ax)
