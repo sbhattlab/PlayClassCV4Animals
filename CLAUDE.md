@@ -156,13 +156,27 @@ prescan_results = compute_yolo_prescan_results(
 
 This is useful for finding optimal thresholds: strict parameters (IoU 0.08, high_occ 0.15) may flag too many periods, while relaxed parameters (IoU 0.15, high_occ 0.3) catch only severe occlusions.
 
+### Prescan-Only Mode
+
+Run just the YOLO pre-scan (~5 min) without loading SAM3 models (~75 min). Set `prescan_only: true` in the config, or run with pixi task (uses dedicated prescan_only.yaml config)
+
+```sh
+pixi run yolo-prescan
+```
+
+Outputs are saved to `{output_dir}/{timestamp}_yolo_prescan/` with YOLO tracking parquets, prescan metrics, and the overview visualization.
+
 ## Notes
 
 - **Occlusion parameter tuning**: Default thresholds (`occlusion_iou_threshold: 0.15`, `high_occlusion_threshold: 0.3`) provide balanced detection. Stricter thresholds may over-flag periods; use the regeneration utility (see Utilities section) to test alternatives on existing runs.
 - **Adaptive chunking stability**: The quality-scoring algorithm (commit 498cd11) successfully avoids placing boundaries in occlusion zones. Typical results show all boundaries positioned 200+ frames from nearest occlusion period.
 
 ## TO-DO
-- Implement logging into prescan step
-- Option to run prescan independently from full run_sam3_hf.py script, preferably by providing a 'flag' in the input config YAML
+### High priority
 - Iteratively save outputs every chunk (tracking, metrics, visualizations)
 - Remove inactive code
+  - Remove 'random' point sampling legacy method, switch to equidistant method
+
+### Low priority
+- Cache prescan results for reuse across runs with same video
+- Implement config ingest for test scripts

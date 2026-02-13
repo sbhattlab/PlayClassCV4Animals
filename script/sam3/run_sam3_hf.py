@@ -1,5 +1,5 @@
 """
-SAM3 HuggingFace Video Tracking Script (Chunked Pipeline)
+SAM3 HuggingFace Video Tracking Pipeline
 
 Processes video in chunks:
 - Chunk 0: Sam3VideoModel with text prompt (short, e.g. 15s)
@@ -296,7 +296,7 @@ def _process_tracker_chunk(chunk_frames, start_idx, all_prompt_points, cfg, devi
             # Convert object_score_logits → probabilities via sigmoid
             # These are raw logits from the mask decoder's obj_score_head;
             # the video model applies sigmoid internally before storing as
-            # tracker_score (see modeling_sam3_video.py L1678-1679).
+            # tracker_score (see modeling_sam3_video.py).
             if tracker_output.object_score_logits is not None:
                 obj_scores = (
                     torch.sigmoid(tracker_output.object_score_logits)
@@ -342,12 +342,13 @@ def main():
     cfg = _cfg
 
     # Create timestamped run directory
-    run_dir = create_run_directory(Path(cfg.output_dir), cfg.job_type)
+    job_type = "yolo_prescan" if cfg.get("prescan_only", False) else cfg.job_type
+    run_dir = create_run_directory(Path(cfg.output_dir), job_type)
     metrics_dir = run_dir / "metrics"
     metrics_dir.mkdir(parents=True, exist_ok=True)
 
     # Setup logger (console + file in run dir)
-    log_file = setup_logger(run_dir, job_type=cfg.job_type)
+    log_file = setup_logger(run_dir, job_type=job_type)
 
     logger.info("=" * 60)
     logger.info("SAM3 HuggingFace Video Tracking (Chunked Pipeline)")
@@ -386,7 +387,7 @@ def main():
             f"Capped to {total_frames} frames (max_frames_to_track={max_frames})"
         )
 
-    # Compute chunks
+    # Compute chunks (needed for both prescan-only and full pipeline)
     chunks = chunk_video_frames_dual(
         total_frames,
         fps,
@@ -394,13 +395,24 @@ def main():
         cfg.tracker_chunk_seconds,
     )
 
-    # YOLO prescan data (populated when adaptive chunking is enabled)
+    # YOLO prescan data (populated when prescan or adaptive chunking is enabled)
     yolo_prescan_metrics_df = None
     yolo_occlusion_periods = None
 
-    # Optionally adjust boundaries via YOLO-based pre-scan
-    if cfg.get("use_adaptive_chunking", False):
-        logger.info("Running YOLO pre-scan for adaptive chunking...")
+    # -----------------------------------------------------------------------
+    # Run YOLO prescan if requested (prescan_only or use_adaptive_chunking)
+    # -----------------------------------------------------------------------
+    prescan_only = cfg.get("prescan_only", False)
+    use_adaptive_chunking = cfg.get("use_adaptive_chunking", False)
+
+    if prescan_only or use_adaptive_chunking:
+        if prescan_only:
+            logger.info("=" * 60)
+            logger.info("PRESCAN-ONLY MODE — running YOLO pre-scan only")
+            logger.info("=" * 60)
+        else:
+            logger.info("Running YOLO pre-scan for adaptive chunking...")
+
         yolo_cfg = cfg.get("yolo_prescan", {})
         yolo_result = run_yolo_prescan(
             video_path=video_path,
@@ -452,15 +464,9 @@ def main():
                     "transition_frames": str(
                         prescan_results["transition_frames"].tolist()
                     ),
-                    "num_occlusion_periods": len(
-                        prescan_results["occlusion_periods"]
-                    ),
-                    "num_transition_frames": len(
-                        prescan_results["transition_frames"]
-                    ),
-                    "total_frames": prescan_results.get(
-                        "total_frames", total_frames
-                    ),
+                    "num_occlusion_periods": len(prescan_results["occlusion_periods"]),
+                    "num_transition_frames": len(prescan_results["transition_frames"]),
+                    "total_frames": prescan_results.get("total_frames", total_frames),
                     "video_duration_seconds": prescan_results.get(
                         "video_duration_seconds", total_frames / fps
                     ),
@@ -474,18 +480,61 @@ def main():
         prescan_summary_path = metrics_dir / "yolo_prescan_summary.parquet"
         prescan_summary_df.to_parquet(prescan_summary_path, index=False)
         logger.info(f"YOLO prescan summary saved to: {prescan_summary_path}")
+        logger.info(f"YOLO prescan output directory: {run_dir}")
 
-        # Adjust chunk boundaries to avoid YOLO-detected occlusion periods
-        transition_frames = prescan_results["transition_frames"]
-        occlusion_periods = prescan_results["occlusion_periods"]
-        chunks = chunk_video_frames_adaptive(
-            chunks,
-            transition_frames,
-            fps,
-            occlusion_periods=occlusion_periods,
-            min_chunk_seconds=cfg.get("adaptive_min_chunk_seconds", 15),
-            max_chunk_seconds=cfg.get("adaptive_max_chunk_seconds", 90),
-        )
+        # Adjust chunk boundaries if adaptive chunking is enabled
+        if use_adaptive_chunking and not yolo_df.empty:
+            transition_frames = prescan_results["transition_frames"]
+            occlusion_periods = prescan_results["occlusion_periods"]
+            chunks = chunk_video_frames_adaptive(
+                chunks,
+                transition_frames,
+                fps,
+                occlusion_periods=occlusion_periods,
+                min_chunk_seconds=cfg.get("adaptive_min_chunk_seconds", 15),
+                max_chunk_seconds=cfg.get("adaptive_max_chunk_seconds", 90),
+            )
+
+        # Exit early if prescan-only mode
+        if prescan_only:
+            if not yolo_df.empty:
+                # Build chunk_info for visualization
+                chunk_info_for_viz = {
+                    "chunks": [
+                        {
+                            "chunk_idx": i,
+                            "frame_range": [s, e],
+                            "model_type": (
+                                "Sam3VideoModel"
+                                if mtype == "video"
+                                else "Sam3TrackerVideoModel"
+                            ),
+                        }
+                        for i, (s, e, mtype) in enumerate(chunks)
+                    ]
+                }
+
+                viz_dir = run_dir / "visualizations"
+                generate_all_visualizations(
+                    tracking_df=None,
+                    per_frame_df=None,
+                    output_dir=viz_dir,
+                    fps=fps,
+                    chunk_info=chunk_info_for_viz,
+                    yolo_prescan_df=yolo_prescan_metrics_df,
+                    yolo_occlusion_periods=yolo_occlusion_periods,
+                )
+                logger.info(f"Visualizations saved to: {viz_dir}")
+            else:
+                logger.warning("YOLO prescan returned no detections!")
+
+            free_gpu_memory()
+            total_timer.end()
+            logger.info(f"Total prescan time: {total_timer.timestamp()}")
+            logger.info("Prescan-only mode complete. Exiting.")
+            return
+
+    # Continue with SAM3 pipeline (only reached if not prescan_only)
 
     logger.info(f"Video: {total_frames} frames at {fps:.1f} FPS")
     logger.info(f"Chunks: {len(chunks)} ({chunks[0][2]} + {len(chunks) - 1} tracker)")
@@ -626,7 +675,7 @@ def main():
     logger.info(f"Chunk info saved to: {chunk_info_path}")
 
     # -----------------------------------------------------------------------
-    # Post-processing (same as before, using all_outputs_per_frame)
+    # Post-processing (uses all_outputs_per_frame)
     # -----------------------------------------------------------------------
 
     # Create annotated video

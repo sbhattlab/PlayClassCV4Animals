@@ -65,6 +65,7 @@ python -m script.sam3.run_sam3_hf
 - *OR* check whether a dedicated pixi task has been created for it, e.g.:
 ```sh 
 pixi run sam3-hf-tracker
+pixi run yolo-prescan 
 ```
 
 # Overview of currently implemented test scripts

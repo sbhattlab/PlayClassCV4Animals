@@ -16,6 +16,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 from loguru import logger
+from tqdm import tqdm
 
 
 def compute_bbox_iou(boxA: np.ndarray, boxB: np.ndarray) -> float:
@@ -456,10 +457,22 @@ def run_yolo_prescan(
         verbose=False,
     )
 
+    pbar = tqdm(
+        total=total_frames,
+        desc="YOLO prescan",
+        unit="frames",
+        dynamic_ncols=True,
+    )
+
     for result in results_gen:
+        # Stop after processing total_frames
+        if frame_count >= total_frames:
+            break
+
         boxes = result.boxes
         if boxes is None or len(boxes) == 0:
             frame_count += 1
+            pbar.update(1)
             continue
 
         # Get image dimensions for normalization
@@ -495,7 +508,9 @@ def run_yolo_prescan(
             )
 
         frame_count += 1
+        pbar.update(1)
 
+    pbar.close()
     logger.info(f"YOLO prescan: processed {frame_count} frames, {len(rows)} detections")
 
     # Clean up YOLO model and free GPU

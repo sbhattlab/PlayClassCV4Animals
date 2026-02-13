@@ -14,13 +14,9 @@ import matplotlib.ticker as mticker
 import numpy as np
 import pandas as pd
 import pycocotools.mask as mask_util
-import seaborn as sns
 from loguru import logger
 from matplotlib.cm import ScalarMappable
 from matplotlib.colors import Normalize
-from sklearn.decomposition import PCA
-
-from src.utils import prescan_occlusion_periods
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -175,214 +171,6 @@ def _is_border_point(x, y, width, height):
         or y < _BORDER_THRESHOLD
         or y > height - _BORDER_THRESHOLD
     )
-
-
-def plot_prescan_overview(
-    # data: np.ndarray,
-    # frame_indices: np.ndarray,
-    # labels: Optional[np.ndarray] = None,
-    # kmeans=None,
-    small_image_shape: Optional[tuple[int, int]] = None,
-    # data_mean: Optional[np.ndarray] = None,
-    sample_images: Optional[Sequence[np.ndarray]] = None,
-    max_clusters_to_show: int = 12,
-):
-    """
-    Visualise prescan inputs and kmeans outputs.
-
-    Args:
-        data: (N, P) array used for clustering (samples x pixels).
-        frame_indices: (N,) sampled frame indices in original video coords.
-        labels: (N,) cluster labels (if not provided, will try to use kmeans.labels_).
-        kmeans: fitted MiniBatchKMeans instance (optional).
-        small_image_shape: (h, w) shape to reshape centers back into images
-                           (used to display cluster centres). If None, centres
-                           shown as 1D lines.
-        data_mean: mean vector that was subtracted from data (to reconstruct
-                   true intensity of cluster centres). If None, centres shown
-                   as-is.
-        sample_images: optional list/array of thumbnail frames corresponding to
-                       frame_indices (useful to show representative frames per cluster).
-        max_clusters_to_show: cap how many cluster-centre thumbnails to draw.
-    """
-    from src.debug import load_inputs
-
-    cfg, video_info = load_inputs()
-    sns.set(style="whitegrid")
-    small_h = 24  # set to the height used when downsampling (new_h)
-    small_w = 30
-
-    prescan_results = prescan_occlusion_periods(
-        video_path=cfg.video_path, fps=video_info.fps
-    )
-    # Use explicit fields returned by PrescanResult: original, centred and mean
-    # Keep data (centred) as the clustering input for visualisations and
-    # use data_mean to reconstruct cluster-centre thumbnails when needed.
-    data_original = prescan_results.data_original
-    data_centered = prescan_results.data_centered
-    data_mean = prescan_results.data_mean
-    data = data_centered
-    kmeans = prescan_results.kmeans
-    # backward-compatible label accessor
-    if hasattr(prescan_results, "cluster_labels"):
-        labels = prescan_results.cluster_labels
-    else:
-        labels = prescan_results.labels()
-    frame_indices = prescan_results.frame_indices
-
-    assert data.ndim == 2, "data should be 2D (samples x pixels)"
-    n, p = data.shape
-
-    if labels is None and kmeans is not None:
-        labels = np.asarray(kmeans.labels_)
-    if labels is None:
-        labels = np.zeros(n, dtype=int)
-
-    # PCA scatter (2 components)
-    pca = PCA(n_components=2)
-    pcs = pca.fit_transform(data)
-    fig = plt.figure(constrained_layout=True, figsize=(14, 10))
-    gs = fig.add_gridspec(3, 2)
-
-    ax_scatter = fig.add_subplot(gs[0, 0])
-    scatter_colors = labels if labels is not None else frame_indices
-    sc = ax_scatter.scatter(pcs[:, 0], pcs[:, 1], c=scatter_colors, cmap="tab20", s=18)
-    ax_scatter.set_title("PCA scatter (samples) — colored by cluster")
-    ax_scatter.set_xlabel("PC1")
-    ax_scatter.set_ylabel("PC2")
-    if labels is not None:
-        # create legend for up to 12 clusters
-        unique = np.unique(labels)
-        if unique.size <= 12:
-            for u in unique:
-                pts = pcs[labels == u]
-                if pts.size:
-                    ax_scatter.scatter([], [], label=f"c{u}", c=[plt.cm.tab20(u % 20)])
-            ax_scatter.legend(ncol=2, fontsize="small", loc="best")
-
-    # Cluster timeline (1-row color bar)
-    ax_timeline = fig.add_subplot(gs[0, 1])
-    cmap = plt.get_cmap("tab20")
-    # Ensure `labels` becomes a 2D array of shape (1, N) so imshow accepts it.
-    timeline_img = np.atleast_2d(
-        np.asarray(labels)
-    )  # shape (1, N) or (M, N) if labels already 2D
-    ax_timeline.imshow(timeline_img, aspect="auto", cmap=cmap, interpolation="nearest")
-    ax_timeline.set_yticks([])
-    ax_timeline.set_xticks(np.linspace(0, n - 1, min(10, n)).astype(int))
-    ax_timeline.set_xticklabels(
-        [
-            str(int(frame_indices[i]))
-            for i in np.linspace(0, n - 1, min(10, n)).astype(int)
-        ],
-        rotation=45,
-    )
-    ax_timeline.set_title("Cluster assignment timeline (sampled frames)")
-
-    # Heatmap of data (rows sorted by cluster)
-    ax_heat = fig.add_subplot(gs[1, :])
-    order = np.argsort(labels)
-    sns.heatmap(
-        data[order, :],
-        ax=ax_heat,
-        cmap="viridis",
-        cbar_kws={"label": "gray-level"},
-        xticklabels=False,
-        yticklabels=False,
-    )
-    ax_heat.set_title("Sampled-frame × pixel heatmap (rows sorted by cluster)")
-
-    # Cluster size histogram
-    ax_hist = fig.add_subplot(gs[2, 0])
-    counts = Counter(labels)
-    xs = sorted(counts.keys())
-    ys = [counts[x] for x in xs]
-    ax_hist.bar(xs, ys, color=[plt.cm.tab20(x % 20) for x in xs])
-    ax_hist.set_xlabel("cluster")
-    ax_hist.set_ylabel("count")
-    ax_hist.set_title("Cluster sizes")
-
-    # Cluster centres (thumbnail grid or 1D)
-    ax_centres = fig.add_subplot(gs[2, 1])
-    if kmeans is not None and hasattr(kmeans, "cluster_centers_"):
-        centers = np.asarray(kmeans.cluster_centers_)
-        if data_mean is not None:
-            centers = centers + data_mean.reshape(1, -1)
-        n_centers = centers.shape[0]
-        show_n = min(n_centers, max_clusters_to_show)
-        # If small_image_shape provided, render as images grid
-        if (
-            small_image_shape is not None
-            and small_image_shape[0] * small_image_shape[1] == p
-        ):
-            # build small montage
-            h, w = small_image_shape
-            # normalize each centre for display
-            imgs = centers[:show_n].reshape(show_n, h, w)
-            # plot as grid using imshow
-            cols = int(np.ceil(show_n / 2))
-            rows = int(np.ceil(show_n / cols))
-            ax_centres.remove()
-            fig2, axs = plt.subplots(rows, cols, figsize=(4 * cols, 3 * rows))
-            axs = np.atleast_2d(axs)
-            for idx in range(rows * cols):
-                r = idx // cols
-                c = idx % cols
-                ax = axs[r, c]
-                if idx < show_n:
-                    im = imgs[idx]
-                    vmin, vmax = np.percentile(im, (2, 98))
-                    ax.imshow(im, cmap="gray", vmin=vmin, vmax=vmax)
-                    ax.set_title(f"center {idx}")
-                ax.axis("off")
-            fig2.suptitle("Cluster centres (first N)")
-            plt.tight_layout()
-        else:
-            # 1D plot of first show_n centres
-            for i in range(show_n):
-                ax_centres.plot(
-                    centers[i], alpha=0.8, label=f"c{i}", color=plt.cm.tab20(i % 20)
-                )
-            ax_centres.set_title("Cluster centres (1D)")
-            ax_centres.legend(fontsize="x-small", ncol=2)
-    else:
-        ax_centres.text(
-            0.5, 0.5, "No kmeans.cluster_centers_ available", ha="center", va="center"
-        )
-        ax_centres.axis("off")
-
-    plt.show()
-
-    # If sample_images provided, show representative frames per cluster
-    if sample_images is not None:
-        unique_clusters = np.unique(labels)
-        show_clusters = unique_clusters[:max_clusters_to_show]
-        n_show = len(show_clusters)
-        cols = min(6, n_show)
-        rows = int(np.ceil(n_show / cols))
-        fig_samp, axs = plt.subplots(rows, cols, figsize=(3 * cols, 3 * rows))
-        axs = np.atleast_2d(axs)
-        for i, c in enumerate(show_clusters):
-            idxs = np.where(labels == c)[0]
-            if len(idxs) == 0:
-                continue
-            # choose median index in cluster
-            sel = idxs[len(idxs) // 2]
-            img = sample_images[sel]
-            r = i // cols
-            ccol = i % cols
-            ax = axs[r, ccol]
-            ax.imshow(img[..., ::-1] if img.shape[-1] == 3 else img, cmap="gray")
-            ax.set_title(f"cluster {c}\nframe {int(frame_indices[sel])}")
-            ax.axis("off")
-        # hide remaining axes
-        for j in range(i + 1, rows * cols):
-            r = j // cols
-            ccol = j % cols
-            axs[r, ccol].axis("off")
-        fig_samp.suptitle("Representative thumbnails per cluster")
-        plt.tight_layout()
-        plt.show()
 
 
 # ---------------------------------------------------------------------------
@@ -1055,12 +843,20 @@ def plot_yolo_prescan_overview(
         if chunk_boundaries:
             for boundary_frame in chunk_boundaries:
                 x_boundary = _frame_to_x(boundary_frame, fps)
-                ax.axvline(x_boundary, color="blue", linestyle="--", linewidth=1.2, alpha=0.7)
+                ax.axvline(
+                    x_boundary, color="blue", linestyle="--", linewidth=1.2, alpha=0.7
+                )
 
     # Panel 1: Object count
     ax = axes[0]
-    ax.step(x, yolo_prescan_df["num_objects"].values, where="mid", color="steelblue",
-            linewidth=0.8, alpha=0.8)
+    ax.step(
+        x,
+        yolo_prescan_df["num_objects"].values,
+        where="mid",
+        color="steelblue",
+        linewidth=0.8,
+        alpha=0.8,
+    )
     ax.set_ylabel("# Objects")
     ax.yaxis.set_major_locator(mticker.MaxNLocator(integer=True))
     ax.set_title("YOLO Pre-scan Overview", fontsize=12, fontweight="bold")
@@ -1072,8 +868,14 @@ def plot_yolo_prescan_overview(
     ax = axes[1]
     iou_vals = yolo_prescan_df["max_pairwise_bbox_iou"].values
     ax.plot(x, iou_vals, linewidth=0.8, color="tomato", alpha=0.8)
-    ax.axhline(0.15, color="red", linestyle="--", linewidth=0.8, alpha=0.5,
-               label="Threshold (0.15)")
+    ax.axhline(
+        0.15,
+        color="red",
+        linestyle="--",
+        linewidth=0.8,
+        alpha=0.5,
+        label="Threshold (0.15)",
+    )
     ax.fill_between(x, iou_vals, 0.15, where=iou_vals > 0.15, color="red", alpha=0.15)
     ax.set_ylabel("Max Bbox IoU")
     ax.set_ylim(bottom=0)
@@ -1084,10 +886,21 @@ def plot_yolo_prescan_overview(
 
     # Panel 3: Clustering coefficient
     ax = axes[2]
-    ax.plot(x, yolo_prescan_df["clustering_coefficient"].values,
-            linewidth=0.8, color="mediumpurple", alpha=0.8)
-    ax.axhline(0.5, color="red", linestyle="--", linewidth=0.8, alpha=0.5,
-               label="Threshold (0.5)")
+    ax.plot(
+        x,
+        yolo_prescan_df["clustering_coefficient"].values,
+        linewidth=0.8,
+        color="mediumpurple",
+        alpha=0.8,
+    )
+    ax.axhline(
+        0.5,
+        color="red",
+        linestyle="--",
+        linewidth=0.8,
+        alpha=0.5,
+        label="Threshold (0.5)",
+    )
     ax.set_ylabel("Clustering\nCoefficient")
     ax.set_ylim(-0.05, 1.05)
     ax.legend(fontsize=8, loc="upper right")
@@ -1110,10 +923,21 @@ def plot_yolo_prescan_overview(
     # Add legend for occlusion periods and chunk boundaries
     legend_handles = []
     if occlusion_periods:
-        legend_handles.append(mpatches.Patch(fc="red", alpha=0.15, label="Occlusion Period"))
+        legend_handles.append(
+            mpatches.Patch(fc="red", alpha=0.15, label="Occlusion Period")
+        )
     if chunk_boundaries:
-        legend_handles.append(mlines.Line2D([], [], color="blue", linestyle="--",
-                                            linewidth=1.2, alpha=0.7, label="Chunk Boundary"))
+        legend_handles.append(
+            mlines.Line2D(
+                [],
+                [],
+                color="blue",
+                linestyle="--",
+                linewidth=1.2,
+                alpha=0.7,
+                label="Chunk Boundary",
+            )
+        )
     if legend_handles:
         axes[0].legend(handles=legend_handles, fontsize=8, loc="upper right")
 
@@ -1154,24 +978,25 @@ def generate_all_visualizations(
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    plot_id_timeline(
-        tracking_df,
-        per_frame_df,
-        fps=fps,
-        save_path=output_dir / "id_timeline.png",
-    )
-    plot_per_frame_dashboard(
-        per_frame_df,
-        fps=fps,
-        save_path=output_dir / "per_frame_dashboard.png",
-    )
-    plot_per_id_scores(
-        tracking_df,
-        fps=fps,
-        save_path=output_dir / "per_id_scores.png",
-    )
+    if tracking_df is not None and per_frame_df is not None:
+        plot_id_timeline(
+            tracking_df,
+            per_frame_df,
+            fps=fps,
+            save_path=output_dir / "id_timeline.png",
+        )
+        plot_per_frame_dashboard(
+            per_frame_df,
+            fps=fps,
+            save_path=output_dir / "per_frame_dashboard.png",
+        )
+        plot_per_id_scores(
+            tracking_df,
+            fps=fps,
+            save_path=output_dir / "per_id_scores.png",
+        )
 
-    if chunk_info is not None and video_path is not None:
+    if tracking_df is not None and chunk_info is not None and video_path is not None:
         plot_mask_evolution(
             tracking_df,
             chunk_info,
