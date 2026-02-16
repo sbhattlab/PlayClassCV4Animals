@@ -17,6 +17,7 @@ import cv2
 import numpy as np
 import pandas as pd
 from loguru import logger
+from omegaconf import OmegaConf
 from tqdm import tqdm
 
 
@@ -399,7 +400,7 @@ def run_yolo_prescan(
     fps: float,
     total_frames: int,
     device: str,
-    model_name: str = "model/yolo11x.pt",
+    model_name: str = "model/yolo26x.pt",
     conf_thresh: float = 0.25,
     iou_thresh: float = 0.45,
     tracker_config: str = "data/yolo/bytetrack.yaml",
@@ -457,9 +458,11 @@ def run_yolo_prescan(
     video_path = str(video_path)
 
     logger.info(
-        f"YOLO prescan: model={model_name}, device={device}, "
-        f"conf={conf_thresh}, iou={iou_thresh}, tracker={tracker_config}"
+        f"YOLO prescan: model={model_name}, device={device}, tracker={tracker_config}"
+        # f"conf={conf_thresh}, iou={iou_thresh}, tracker={tracker_config}"
     )
+    logger.info("Tracker config:")
+    logger.info(f"\n{OmegaConf.to_yaml(tracker_config, resolve=True)}")
 
     model = YOLO(model_name)
 
@@ -505,8 +508,8 @@ def run_yolo_prescan(
         stream=True,
         persist=True,
         tracker=tracker_config,
-        conf=conf_thresh,
-        iou=iou_thresh,
+        # conf=conf_thresh,
+        # iou=iou_thresh,
         device=device,
         verbose=False,
     )
