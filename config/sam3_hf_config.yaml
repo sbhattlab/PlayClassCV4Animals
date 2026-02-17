@@ -43,7 +43,7 @@ adaptive_max_chunk_seconds: 360       # Maximum chunk duration after adjustment
 
 # YOLO-based pre-scan configuration (used when use_adaptive_chunking: true)
 yolo_prescan:
-  model: "model/yolo11x.pt"
+  model: "model/yolo26x.pt"
   conf_thresh: 0.25
   iou_thresh: 0.45
   tracker_config: "data/yolo/botsort_alternative.yaml"
