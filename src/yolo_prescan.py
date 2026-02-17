@@ -462,7 +462,8 @@ def run_yolo_prescan(
         # f"conf={conf_thresh}, iou={iou_thresh}, tracker={tracker_config}"
     )
     logger.info("Tracker config:")
-    logger.info(f"\n{OmegaConf.to_yaml(tracker_config, resolve=True)}")
+    # logger.info(f"\n{OmegaConf.to_yaml(tracker_config, resolve=True)}")
+    logger.info(OmegaConf.load(tracker_config))
 
     model = YOLO(model_name)
 

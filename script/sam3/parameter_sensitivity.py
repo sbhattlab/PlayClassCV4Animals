@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 """
 Parameter Sensitivity Testing for YOLO Prescan
 
@@ -90,7 +89,7 @@ def generate_occlusion_overlay_video(
             str(output_path),
         ]
 
-    logger.info(f"    Running ffmpeg (this may take a few minutes)...")
+    logger.info("Running ffmpeg (this may take a few minutes)...")
     result = subprocess.run(
         cmd,
         stdout=subprocess.PIPE,
@@ -140,7 +139,7 @@ def run_parameter_sensitivity_analysis(
     adaptive_min_chunk_seconds: float = 15,
     adaptive_max_chunk_seconds: float = 90,
     video_path: Path | None = None,
-    generate_video: bool = False,
+    generate_occlusion_overlays_video: bool = False,
     parameter_sets: list[dict] | None = None,
 ) -> pd.DataFrame:
     """
@@ -159,7 +158,7 @@ def run_parameter_sensitivity_analysis(
         adaptive_min_chunk_seconds: Minimum chunk duration
         adaptive_max_chunk_seconds: Maximum chunk duration
         video_path: Optional path to source video for overlay generation
-        generate_video: Whether to generate video overlays
+        generate_occlusion_overlays_video: Whether to generate video overlays
         parameter_sets: List of parameter dicts to test (uses defaults if None)
 
     Returns:
@@ -180,16 +179,18 @@ def run_parameter_sensitivity_analysis(
     logger.info(
         f"  → {len(yolo_df)} detections across {yolo_df['frame'].nunique()} frames"
     )
-    logger.info(f"  → Frame range: {yolo_df['frame'].min()} to {yolo_df['frame'].max()}")
+    logger.info(
+        f"  → Frame range: {yolo_df['frame'].min()} to {yolo_df['frame'].max()}"
+    )
     logger.info(f"  → FPS: {fps}")
     logger.info(f"  → Total frames: {total_frames}")
     logger.info("")
 
     # Warn if video generation was requested but no video path available
-    if generate_video and video_path is None:
+    if generate_occlusion_overlays_video and video_path is None:
         logger.warning("Video generation requested but video path not available")
         logger.warning("Video overlays will be skipped.")
-        generate_video = False
+        generate_occlusion_overlays_video = False
 
     # Test each parameter set
     results_summary = []
@@ -246,7 +247,9 @@ def run_parameter_sensitivity_analysis(
 
         # Extract tracker chunk boundaries for visualization
         chunk_boundaries = [
-            c[0] for c in adaptive_chunks if c[2] == "tracker"  # (start, end, type)
+            c[0]
+            for c in adaptive_chunks
+            if c[2] == "tracker"  # (start, end, type)
         ]
 
         logger.info(f"  → {len(adaptive_chunks)} chunks after adaptive adjustment")
@@ -267,7 +270,7 @@ def run_parameter_sensitivity_analysis(
         logger.info(f"  → Visualization saved: {save_path.name}")
 
         # Generate video overlay if requested and video path is available
-        if generate_video and video_path is not None:
+        if generate_occlusion_overlays_video and video_path is not None:
             video_output_path = (
                 output_dir / f"occlusion_overlay_{name.replace(' ', '_')}.mp4"
             )
@@ -373,6 +376,10 @@ def main():
         logger.info(f"Loading config from: {config_path.name}")
         cfg = OmegaConf.load(config_path)
 
+        generate_occlusion_overlays_video = (
+            cfg.get("generate_occlusion_overlays_video", False)
+            or args.generate_occlusion_overlays_video
+        )
         fps = cfg.get("yolo_prescan", {}).get(
             "fps", 25.0
         )  # Try to get from yolo_prescan
@@ -397,7 +404,8 @@ def main():
 
         # Extract video path for video generation if requested
         video_path = None
-        if args.generate_video:
+        # if args.generate_video:
+        if generate_occlusion_overlays_video:
             video_path_str = cfg.get("video_path")
             if video_path_str:
                 video_path = Path(video_path_str)
@@ -414,7 +422,7 @@ def main():
         if summary_path.exists():
             summary_df = pd.read_parquet(summary_path)
             fps = summary_df.iloc[0]["fps"]
-            logger.info(f"Config not found, using values from prescan summary")
+            logger.info("Config not found, using values from prescan summary")
             logger.info(f"  → FPS: {fps}")
             logger.info(f"  → Total frames: {total_frames}")
         else:
@@ -428,8 +436,6 @@ def main():
         adaptive_max_chunk_seconds = 90
         video_path = None
 
-    logger.info("")
-
     # Run the parameter sensitivity analysis using the refactored function
     run_parameter_sensitivity_analysis(
         yolo_df=yolo_df,
@@ -441,7 +447,8 @@ def main():
         adaptive_min_chunk_seconds=adaptive_min_chunk_seconds,
         adaptive_max_chunk_seconds=adaptive_max_chunk_seconds,
         video_path=video_path,
-        generate_video=args.generate_video,
+        # generate_video=args.generate_video,
+        generate_occlusion_overlays_video=generate_occlusion_overlays_video,
     )
 
 

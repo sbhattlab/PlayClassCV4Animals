@@ -25,7 +25,7 @@ output_dir: "ext-data/output/results/sam3-hf"
 # =============================================================================
 # Model Configuration
 # =============================================================================
-max_frames_to_track: 6000  # Maximum number of frames to propagate (0 = all)
+max_frames_to_track: 0  # Maximum number of frames to propagate (0 = all)
 
 # =============================================================================
 # Chunking Configuration
@@ -39,15 +39,16 @@ prescan_only: true
 # Occlusion-aware adaptive chunking (YOLO-based pre-scan)
 use_adaptive_chunking: true          # Enable adaptive boundary placement via YOLO pre-scan
 adaptive_min_chunk_seconds: 15       # Minimum chunk duration after adjustment
-adaptive_max_chunk_seconds: 90       # Maximum chunk duration after adjustment
+adaptive_max_chunk_seconds: 360       # Maximum chunk duration after adjustment
 
 # YOLO-based pre-scan configuration (used when use_adaptive_chunking: true)
 yolo_prescan:
   model: "model/yolo26x.pt"
   conf_thresh: 0.25
   iou_thresh: 0.45
-  tracker_config: "data/yolo/bytetrack.yaml"
+  # tracker_config: "data/yolo/bytetrack.yaml"
   # tracker_config: "data/yolo/botsort.yaml"
+  tracker_config: "data/yolo/botsort_alternative.yaml"
   allowed_classes: ["bird"]
   window_seconds: 1.0
   high_occlusion_threshold: 0.3
@@ -56,3 +57,4 @@ yolo_prescan:
 
 # Parameter sensitivity testing (only runs when prescan_only or use_adaptive_chunking is true)
 run_parameter_sensitivity: true  # Test multiple threshold combinations on prescan results
+generate_occlusion_overlays_video : true # Generate video output with occlusion periods highlighted
