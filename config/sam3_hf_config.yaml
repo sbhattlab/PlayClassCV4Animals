@@ -34,7 +34,7 @@ video_model_chunk_seconds: 15  # Duration of first chunk (Sam3VideoModel, text-p
 tracker_chunk_seconds: 45      # Duration of subsequent chunks (Sam3TrackerVideoModel, point-prompted)
 
 # Prescan-only mode: run YOLO pre-scan and exit without loading SAM3 models
-prescan_only: true
+prescan_only: false
 
 # Occlusion-aware adaptive chunking (YOLO-based pre-scan)
 use_adaptive_chunking: true          # Enable adaptive boundary placement via YOLO pre-scan
