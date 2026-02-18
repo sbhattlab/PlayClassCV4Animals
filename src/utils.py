@@ -490,6 +490,17 @@ def chunk_video_frames_dual(
     return chunks
 
 
+def build_manual_chunks(frame_pairs: list[list[int]]) -> list[tuple[int, int, str]]:
+    """Build chunk list from user-supplied (start_frame, end_frame) pairs.
+    First chunk → "video" model; all subsequent → "tracker" model.
+    """
+    chunks = []
+    for i, (start, end) in enumerate(frame_pairs):
+        model_type = "video" if i == 0 else "tracker"
+        chunks.append((int(start), int(end), model_type))
+    return chunks
+
+
 def get_all_objects_from_results(results: dict) -> tuple[list, list, list]:
     """
     Extract masks, boxes, and object_ids from a single frame's output dict.

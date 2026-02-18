@@ -15,7 +15,9 @@ PYTORCH_ALLOC_CONF: "expandable_segments:True,garbage_collection_threshold:0.6" 
 # =============================================================================
 # Video/IO Configuration
 # =============================================================================
+# Video input — specify exactly one:
 video_path: "video-data/C1G1_Test_1_day_28_1_Camera_4_2025_02_04_10_59_56_1.mp4"
+# video_dir: "video-data/"    # Uncomment to batch-process all videos in directory (mutually exclusive with video_path)
 text_prompt: "bird"
 
 # Output directory - results will be saved to a timestamped subdirectory
@@ -55,6 +57,12 @@ yolo_prescan:
 
 # Parameter sensitivity testing (only runs when prescan_only or use_adaptive_chunking is true)
 run_parameter_sensitivity: false  # Test multiple threshold combinations on prescan results
+
+# Manual chunking: override fixed/adaptive chunking with explicit frame boundaries.
+# When set, prescan_only and run_parameter_sensitivity are invalid and will be ignored.
+# manual_chunk_frames:
+#   - [0, 375]      # [start_frame, end_frame] — first entry uses text-prompt model
+#   - [375, 1500]   # subsequent entries use point-prompt tracker model
 
 # =============================================================================
 # Multi-object Tracking Heuristics

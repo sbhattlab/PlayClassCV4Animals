@@ -11,6 +11,7 @@ Usage:
 
 import argparse
 import json
+import re
 import shutil
 from pathlib import Path
 
@@ -65,6 +66,7 @@ from src.metrics import (  # noqa: E402
 )
 from src.utils import (  # noqa: E402
     annotate_video_with_sam3_outputs,
+    build_manual_chunks,
     chunk_video_frames_adaptive,
     chunk_video_frames_dual,
     create_run_directory,
@@ -339,31 +341,39 @@ def _process_tracker_chunk(chunk_frames, start_idx, all_prompt_points, cfg, devi
 
 
 # ---------------------------------------------------------------------------
-# Main
+# Helpers
 # ---------------------------------------------------------------------------
 
 
-def main():
-    args = _args
-    cfg = _cfg
+def _sanitize_filename(name: str) -> str:
+    """Sanitize a stem string for use as a directory name."""
+    sanitized = re.sub(r"[^\w\-]", "_", name)
+    sanitized = re.sub(r"_+", "_", sanitized)
+    return sanitized.strip("_") or "video"
 
-    # Create timestamped run directory
-    job_type = "yolo_prescan" if cfg.get("prescan_only", False) else cfg.job_type
-    run_dir = create_run_directory(Path(cfg.output_dir), job_type)
+
+# ---------------------------------------------------------------------------
+# Single-video pipeline
+# ---------------------------------------------------------------------------
+
+
+def _run_single_video(cfg, run_dir: Path, config_path: Path | None = None):
+    """Run the full SAM3 tracking pipeline for a single video."""
     metrics_dir = run_dir / "metrics"
     metrics_dir.mkdir(parents=True, exist_ok=True)
 
-    # Setup logger (console + file in run dir)
+    job_type = cfg.job_type
     log_file = setup_logger(run_dir, job_type=job_type)
 
     logger.info("=" * 60)
     logger.info("SAM3 HuggingFace Video Tracking (Chunked Pipeline)")
     logger.info("=" * 60)
-    # Copy config for reproducibility
-    config_path = Path(args.config)
-    shutil.copy(config_path, run_dir / config_path.name)
-    logger.info(f"Config copied to {run_dir / config_path.name}")
-    logger.info(f"Loaded config file: {args.config}")
+
+    if config_path is not None and config_path.exists():
+        shutil.copy(config_path, run_dir / config_path.name)
+        logger.info(f"Config copied to {run_dir / config_path.name}")
+    if config_path is not None:
+        logger.info(f"Loaded config file: {config_path}")
     logger.info("CONFIGURATION")
     logger.info(f"\n{OmegaConf.to_yaml(cfg, resolve=True)}")
     logger.info("=" * 60)
@@ -393,13 +403,49 @@ def main():
             f"Capped to {total_frames} frames (max_frames_to_track={max_frames})"
         )
 
-    # Compute chunks (needed for both prescan-only and full pipeline)
+    # Read prescan/chunking flags early so manual chunking can override them
+    prescan_only = cfg.get("prescan_only", False)
+    use_adaptive_chunking = cfg.get("use_adaptive_chunking", False)
+
+    # Compute fixed chunks (baseline, may be overridden by manual chunking)
     chunks = chunk_video_frames_dual(
         total_frames,
         fps,
         cfg.video_model_chunk_seconds,
         cfg.tracker_chunk_seconds,
     )
+
+    # Manual chunking override — supports both a flat list (all videos) and
+    # a dict keyed by basename (per-video, e.g. {"video1.mp4": [[0,375],...], ...})
+    raw_manual_chunks = cfg.get("manual_chunk_frames", None)
+    if raw_manual_chunks is None:
+        manual_chunk_frames = None
+    else:
+        converted = OmegaConf.to_container(raw_manual_chunks, resolve=True)
+        if isinstance(converted, dict):
+            video_basename = Path(video_path).name
+            manual_chunk_frames = converted.get(video_basename, None)
+        else:
+            manual_chunk_frames = converted
+    use_manual_chunking = manual_chunk_frames is not None
+
+    if use_manual_chunking:
+        if prescan_only:
+            logger.warning(
+                "prescan_only is invalid with manual_chunk_frames — ignoring"
+            )
+            prescan_only = False
+        if use_adaptive_chunking:
+            logger.warning(
+                "use_adaptive_chunking is invalid with manual_chunk_frames — ignoring"
+            )
+            use_adaptive_chunking = False
+        if cfg.get("run_parameter_sensitivity", False):
+            logger.warning(
+                "run_parameter_sensitivity is invalid with manual_chunk_frames — ignoring"
+            )
+        chunks = build_manual_chunks(manual_chunk_frames)
+        logger.info(f"Manual chunking: {len(chunks)} chunks from config")
 
     # YOLO prescan data (populated when prescan or adaptive chunking is enabled)
     yolo_prescan_metrics_df = None
@@ -408,9 +454,6 @@ def main():
     # -----------------------------------------------------------------------
     # Run YOLO prescan if requested (prescan_only or use_adaptive_chunking)
     # -----------------------------------------------------------------------
-    prescan_only = cfg.get("prescan_only", False)
-    use_adaptive_chunking = cfg.get("use_adaptive_chunking", False)
-
     if prescan_only or use_adaptive_chunking:
         if prescan_only:
             logger.info("=" * 60)
@@ -498,11 +541,9 @@ def main():
 
             if run_parameter_sensitivity_analysis is not None:
                 try:
-                    # Extract video path for optional video overlay generation
                     video_path_for_sensitivity = (
                         Path(video_path) if video_path else None
                     )
-
                     run_parameter_sensitivity_analysis(
                         yolo_df=yolo_df,
                         run_dir=run_dir,
@@ -517,7 +558,7 @@ def main():
                             "adaptive_max_chunk_seconds", 90
                         ),
                         video_path=video_path_for_sensitivity,
-                        generate_video=False,  # Don't generate videos by default
+                        generate_video=False,
                     )
                     logger.info("=" * 60)
                     logger.info("Parameter sensitivity analysis complete")
@@ -813,6 +854,67 @@ def main():
     logger.info(f"Overall throughput: {total_fps:.2f} FPS ({total_frames} frames)")
     logger.info("=" * 60)
     logger.info("Run complete.")
+
+
+# ---------------------------------------------------------------------------
+# Batch processing
+# ---------------------------------------------------------------------------
+
+
+def _run_batch(cfg, video_dir: Path, job_type: str):
+    """Process all video files in video_dir, each in its own subdirectory."""
+    VIDEO_EXTENSIONS = {".mp4", ".avi", ".mov", ".mkv", ".m4v"}
+    video_files = sorted(
+        f for f in video_dir.iterdir()
+        if f.is_file() and f.suffix.lower() in VIDEO_EXTENSIONS
+    )
+    if not video_files:
+        raise ValueError(f"No video files found in {video_dir}")
+
+    # Shared batch directory (one timestamp for the whole batch)
+    batch_dir = create_run_directory(Path(cfg.output_dir), job_type)
+    config_path = Path(_args.config)
+
+    for video_file in video_files:
+        sanitized = _sanitize_filename(video_file.stem)
+        video_run_dir = batch_dir / sanitized
+        video_run_dir.mkdir(parents=True, exist_ok=True)
+        (video_run_dir / "metrics").mkdir(parents=True, exist_ok=True)
+
+        # Build per-video config with updated video_path
+        video_cfg = OmegaConf.create(
+            {**OmegaConf.to_container(cfg, resolve=True), "video_path": str(video_file)}
+        )
+
+        try:
+            _run_single_video(video_cfg, video_run_dir, config_path=config_path)
+        except Exception as e:
+            logger.error(f"Failed processing {video_file.name}: {e}")
+            continue
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
+
+def main():
+    cfg = _cfg
+    video_path = cfg.get("video_path", None)
+    video_dir = cfg.get("video_dir", None)
+
+    if video_path and video_dir:
+        raise ValueError("Specify exactly one of video_path or video_dir, not both.")
+    if not video_path and not video_dir:
+        raise ValueError("Must specify either video_path or video_dir.")
+
+    job_type = "yolo_prescan" if cfg.get("prescan_only", False) else cfg.job_type
+
+    if video_dir:
+        _run_batch(cfg, Path(video_dir), job_type)
+    else:
+        run_dir = create_run_directory(Path(cfg.output_dir), job_type)
+        _run_single_video(cfg, run_dir, config_path=Path(_args.config))
 
 
 if __name__ == "__main__":

@@ -32,8 +32,10 @@ Scripts are run as Python modules from the project root. CUDA device is specifie
 ```sh
 # Main SAM3 pipeline (config-driven, defaults to config/sam3_hf_config.yaml)
 python -m script.sam3.run_sam3_hf
-# Or via pixi task:
+# Or via pixi task (default config):
 pixi run -e sam3-hf sam3-hf-tracker
+# Custom config (pass --config to override):
+pixi run -e sam3-hf python -m script.sam3.run_sam3_hf --config config/manual_chunking.yaml
 
 # Grounded-SAM-2
 python -m script.gs2.chicken_tracking_demo --gs2-repo-path Grounded-SAM-2-fork -i ext-data/imgs/imgs_1min --text ".chicken.bird."
@@ -79,6 +81,8 @@ notebook/                     # Jupyter notebooks for EDA and demos
 - **Chunked processing**: Long videos are split into chunks via `chunk_video_frames_dual()`. Chunk 0 uses `Sam3VideoModel` (text-prompted, shorter: `video_model_chunk_seconds`). Subsequent chunks use `Sam3TrackerVideoModel` (point-prompted, longer: `tracker_chunk_seconds`). Small trailing remainders (<10% of chunk size) are absorbed into the last chunk. Point prompts are extracted from previous chunk's masks via `extract_equidistant_points_from_masks()` (deterministic, equidistant placement) by default, configurable via `point_extraction_method` (`"equidistant"` or `"random"`). `find_frame_with_enough_objects()` searches backwards for a frame with enough detected objects. Object identities are preserved across chunks by passing the same object IDs. `max_frames_to_track` limits how many frames are processed per video.
 - **Two model phases**: `Sam3VideoModel` (text→segmentation) for initialization, `Sam3TrackerVideoModel` (point→tracking) for propagation. Each chunk loads its model fresh and cleans up GPU memory afterwards (`free_gpu_memory()` with triple `gc.collect` + CUDA cache clearing).
 - **Adaptive chunking (YOLO pre-scan)**: When `use_adaptive_chunking: true`, a YOLO+ByteTrack pre-scan runs before chunking: `run_yolo_prescan()` in `src/yolo_prescan.py` runs YOLO tracking on the full video, computes per-frame spatial metrics (bbox IoU, centroid clustering, object counts), identifies occlusion periods via sliding window, and extracts transition frames. `chunk_video_frames_adaptive()` uses a **quality scoring system** to place boundaries in safe zones: candidates are scored based on distance to nearest occlusion, with heavy penalties (90%) if occlusion is ahead and moderate penalties (50%) if just ended. Boundaries are positioned to maximize distance from occlusion periods (default 3-second margin). If the last chunk boundary falls within an occlusion margin, the chunk is absorbed into the previous one. Adjusted chunks are validated against `adaptive_min_chunk_seconds` / `adaptive_max_chunk_seconds`; violations revert to the original fixed boundary. The YOLO model is unloaded and GPU memory freed before SAM3 models load. Pre-scan outputs are saved as run artifacts: `yolo_tracking.parquet` (raw detections), `yolo_prescan_metrics.parquet` (per-frame metrics), `yolo_prescan_summary.parquet` (occlusion periods, transition frames, config). A `yolo_prescan:` config section controls model, thresholds, and tracker config. The previous KMeans pre-scan (`prescan_occlusion_periods()` in `src/utils.py`) remains available for `viz.py` debugging.
+- **Manual chunking**: Set `manual_chunk_frames` in config to a list of `[start, end]` pairs to override fixed/adaptive chunking entirely. First pair → `Sam3VideoModel`; subsequent pairs → `Sam3TrackerVideoModel`. Disables `prescan_only`, `use_adaptive_chunking`, and `run_parameter_sensitivity` with warnings. See `build_manual_chunks()` in `src/utils.py` and `config/manual_chunking.yaml` for an example.
+- **Batch processing**: Set `video_dir` instead of `video_path` to process all video files in a directory. Creates one timestamped batch directory with a per-video subdirectory for each file (named by sanitized stem). `video_path` and `video_dir` are mutually exclusive; errors are caught per-video so one failure does not abort the batch. `manual_chunk_frames` supports per-video boundaries when given as a dict keyed by **basename** (e.g. `"video1.mp4": [[0,375],...]`); videos not listed fall back to fixed chunking. See `config/batch_mode.yaml` and `ext-data/test/batch_mode_test_set/` for an example.
 - **Device selection**: `Accelerator().device` from HuggingFace Accelerate.
 
 ### Metrics module (`src/metrics.py`)
@@ -113,12 +117,13 @@ All plots use MM:SS x-axis when FPS is available. Diagnostic plots (mask evoluti
 - **`chunk_info.json`**: Written by `run_sam3_hf.py`. Per-chunk metadata: frame range, model type, prompt points, timing.
 - **YOLO prescan outputs** (when `use_adaptive_chunking: true`): `yolo_tracking.parquet` (run directory root, raw per-frame detections), `metrics/yolo_prescan_metrics.parquet` (per-frame spatial metrics: IoU, clustering, occlusion flags), `metrics/yolo_prescan_summary.parquet` (single-row: occlusion periods, transition frames, model config), `visualizations/yolo_prescan_overview.png` (4-panel timeseries plot).
 - **Metrics parquets**: Written by `src.metrics`. `per_frame_metrics` (spatial/occlusion per frame), `per_id_metrics` (per contiguous run per ID), `summary_metrics` (single-row aggregates).
-- **Run directory**: `{timestamp}_{job_type}/` containing config copy, log, chunk_info.json, annotated_video.mp4, tracking_outputs.parquet, yolo_tracking.parquet (when adaptive chunking enabled), `metrics/`, `visualizations/`.
+- **Run directory**: `{timestamp}_{job_type}/` containing config copy, log, chunk_info.json, annotated_video.mp4, tracking_outputs.parquet, yolo_tracking.parquet (when adaptive chunking enabled), `metrics/`, `visualizations/`. In batch mode: `{timestamp}_{job_type}/{sanitized_stem}/` per video with the same structure.
 
 ## Data Layout
 
 - `data/` — Small test data (images, short video clips, DLC annotations, ethogram parquets)
 - `ext-data/` — Symlink to `/mnt/birds/rebecca2025/` (longer videos, output results, image sequences)
+  - `ext-data/test/batch_mode_test_set/` — 3 × 2-min clips (`test_video_1/2/3.mp4`) for batch mode testing
 - `video-data/` — Symlink to `/mnt/birds/rebecca2025/raw` (raw video files)
 - `Grounded-SAM-2-fork/` — Git submodule with SAM2/Grounding DINO code and checkpoints
 
@@ -165,6 +170,15 @@ pixi run yolo-prescan
 ```
 
 Outputs are saved to `{output_dir}/{timestamp}_yolo_prescan/` with YOLO tracking parquets, prescan metrics, and the overview visualization.
+
+### Config Reference
+
+| Config | Purpose |
+|--------|---------|
+| `config/sam3_hf_config.yaml` | Main production config (single video, adaptive chunking on) |
+| `config/manual_chunking.yaml` | Single video with explicit `manual_chunk_frames` list |
+| `config/batch_mode.yaml` | Batch mode (`video_dir`) with per-video `manual_chunk_frames` dict keyed by basename |
+| `config/prescan_only.yaml` | YOLO pre-scan only, no SAM3 |
 
 ## Notes
 
