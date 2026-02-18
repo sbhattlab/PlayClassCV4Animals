@@ -48,8 +48,8 @@ pixi shell -e sam3-hf
 In general, environments assume Linux. 
 
 Currently the following environments are supported in addition to Linux, on macOS:
-- SAM3
-    - huggingface
+- SAM3 (huggingface transformers - the native implementation isn't officially supported on macOS)
+- grounded-sam-2 (the git submodule contains a gs2 fork which allows frame streaming, which reduces GPU memory usage for longer runs)
 
 # How to run tracking pipelines
 > [!IMPORTANT] 
