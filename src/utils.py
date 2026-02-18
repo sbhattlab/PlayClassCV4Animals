@@ -5,9 +5,11 @@ Utility functions for processing SAM3 tracking outputs.
 import gc
 import os
 import sys
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
+import cv2
 import numpy as np
 import pandas as pd
 import pycocotools.mask as mask_util
@@ -15,7 +17,7 @@ import supervision as sv
 import torch
 from loguru import logger
 from omegaconf import DictConfig, OmegaConf
-
+from sklearn.cluster import MiniBatchKMeans
 
 # ---------------------------------------------------------------------------
 # Config, environment, logging, and output directory utilities
@@ -40,7 +42,9 @@ def set_env_vars(cfg):
 
 
 def setup_logger(
-    log_dir: Path, job_type: str = "sam3_demo", debug: bool = False
+    log_dir: Path = Path("sandbox/logs/sam3-hf"),
+    job_type: str = "sam3_hf",
+    debug: bool = False,
 ) -> Path:
     """
     Configure loguru logger with both console and file output.
@@ -88,6 +92,365 @@ def create_run_directory(base_output_dir: Path, job_type: str) -> Path:
 # ---------------------------------------------------------------------------
 # Chunking and model transition utilities
 # ---------------------------------------------------------------------------
+
+
+@dataclass
+class PrescanResult:
+    """Result of KMeans-based video pre-scan for occlusion period detection."""
+
+    frame_indices: np.ndarray  # sampled frame indices (in original video coordinates)
+    cluster_labels: np.ndarray  # cluster label per sampled frame
+    transition_frames: np.ndarray  # frame indices where cluster label changes
+    kmeans: MiniBatchKMeans  # fitted KMeans model (for inspecting cluster centers)
+
+    # Explicit data fields:
+    data_original: np.ndarray  # raw sampled frames (N x P), NOT mean-centered
+    data_centered: np.ndarray  # mean-centered data (N x P)
+    data_mean: np.ndarray  # mean vector (P,)
+
+    def labels(self) -> np.ndarray:  # backward-compatible accessor
+        """Alias for cluster labels used by callers expecting .labels."""
+        return self.cluster_labels
+
+
+def prescan_occlusion_periods(
+    video_path: str | Path,
+    fps: float,
+    total_frames: int | None = None,
+) -> PrescanResult:
+    """
+    Pre-scan video with MiniBatchKMeans to identify visual scene-state transitions.
+
+    Samples ~1fps, downscales to 30px width grayscale, clusters frames, and
+    identifies transition points where the visual state changes. Occlusion
+    periods (chickens clustered/overlapping) form a distinct cluster.
+
+    Returns a PrescanResult containing both the original sampled data and the
+    mean-centred version plus the mean vector so callers can choose the
+    representation they need (avoids ambiguous shapes/broadcasting errors).
+    """
+    video_path = str(video_path)
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        raise RuntimeError(f"Could not open video: {video_path}")
+
+    sample_interval = max(1, int(fps))  # ~1fps
+    target_width = 30  # DLC convention
+
+    frame_indices = []
+    frame_data = []
+    frame_idx = 0
+
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+        if total_frames is not None and frame_idx >= total_frames:
+            break
+        if frame_idx % sample_interval == 0:
+            # Downsample to target_width, preserving aspect ratio
+            h, w = frame.shape[:2]
+            scale = target_width / w
+            new_h = max(1, int(h * scale))
+            small = cv2.resize(
+                frame, (target_width, new_h), interpolation=cv2.INTER_AREA
+            )
+            # Grayscale via mean across channels
+            gray = np.mean(small, axis=2).flatten()
+            frame_data.append(gray)
+            frame_indices.append(frame_idx)
+        frame_idx += 1
+
+    cap.release()
+
+    frame_indices = np.array(frame_indices)
+    data_original = np.array(frame_data, dtype=np.float32)  # shape (N, P)
+
+    if data_original.size == 0:
+        # nothing sampled
+        raise RuntimeError("prescan_occlusion_periods: no frames sampled")
+
+    # Compute mean vector and centred data (do not overwrite original)
+    data_mean = data_original.mean(axis=0)
+    data_centered = data_original - data_mean
+
+    # Auto-determine number of clusters
+    video_duration = frame_idx / fps
+    n_clusters = max(2, int(video_duration // 5))
+    # Cap to avoid more clusters than samples
+    n_clusters = min(n_clusters, len(data_centered))
+
+    logger.info(
+        f"Pre-scan: {len(data_centered)} sampled frames, {video_duration:.1f}s duration, "
+        f"{n_clusters} clusters"
+    )
+
+    kmeans = MiniBatchKMeans(n_clusters=n_clusters, random_state=42, batch_size=256)
+    labels = kmeans.fit_predict(data_centered)
+
+    # Identify transitions (where label changes between consecutive samples)
+    transitions = []
+    for i in range(1, len(labels)):
+        if labels[i] != labels[i - 1]:
+            transitions.append(frame_indices[i])
+
+    transition_frames = np.array(transitions, dtype=int)
+
+    # Log cluster statistics
+    unique, counts = np.unique(labels, return_counts=True)
+    largest_pct = counts.max() / len(labels) * 100
+    logger.info(
+        f"Pre-scan: {len(unique)} unique clusters, "
+        f"largest cluster = {largest_pct:.1f}% of frames"
+    )
+    logger.info(
+        f"Pre-scan: {len(transition_frames)} transition frames: {transition_frames.tolist()}"
+    )
+
+    return PrescanResult(
+        frame_indices=frame_indices,
+        cluster_labels=labels,
+        transition_frames=transition_frames,
+        kmeans=kmeans,
+        data_original=data_original,
+        data_centered=data_centered,
+        data_mean=data_mean,
+    )
+
+
+def chunk_video_frames_adaptive(
+    fixed_chunks: list[tuple[int, int, str]],
+    transition_frames: np.ndarray,
+    fps: float,
+    occlusion_periods: list[tuple[int, int]] | None = None,
+    search_window_seconds: float = 10.0,
+    min_chunk_seconds: float = 15.0,
+    max_chunk_seconds: float = 90.0,
+    margin_seconds: float = 3.0,
+) -> list[tuple[int, int, str]]:
+    """
+    Adjust fixed chunk boundaries to avoid occlusion periods detected by pre-scan.
+
+    For each tracker-chunk boundary (skip chunk 0), searches within ±search_window
+    for frames that are OUTSIDE occlusion periods (with margin). Prefers frames
+    that are farthest from any occlusion period. Falls back to original boundary
+    if no good candidate is found or if constraints are violated.
+
+    Args:
+        fixed_chunks: Output from chunk_video_frames_dual().
+        transition_frames: Array of frame indices where scene state changes
+            (e.g. from YOLO occlusion detection). Used for legacy compatibility
+            but DEPRECATED - occlusion_periods are preferred.
+        fps: Video frame rate.
+        occlusion_periods: List of (start_frame, end_frame) tuples marking
+            high-occlusion periods that should be avoided. If None, falls back
+            to legacy transition-based logic.
+        search_window_seconds: Search radius (seconds) around each boundary.
+        min_chunk_seconds: Minimum allowed chunk duration.
+        max_chunk_seconds: Maximum allowed chunk duration.
+        margin_seconds: Safety margin (seconds) to keep away from occlusion edges.
+            Default 3.0s (~75 frames at 25fps) provides strong separation.
+
+    Returns:
+        Adjusted chunks in the same format as chunk_video_frames_dual().
+    """
+    if len(fixed_chunks) <= 1:
+        return fixed_chunks
+
+    search_window_frames = int(search_window_seconds * fps)
+    min_frames = int(min_chunk_seconds * fps)
+    max_frames = int(max_chunk_seconds * fps)
+    margin_frames = int(margin_seconds * fps)
+
+    # Work with mutable list of boundaries
+    boundaries = [c[0] for c in fixed_chunks]  # start of each chunk
+    total_end = fixed_chunks[-1][1]  # final frame
+    adjusted_boundaries = list(boundaries)
+
+    def _is_in_occlusion_period(frame: int) -> bool:
+        """Check if frame falls within any occlusion period (with margin)."""
+        if not occlusion_periods:
+            return False
+        for start, end in occlusion_periods:
+            # Add margin on both sides
+            if (start - margin_frames) <= frame <= (end + margin_frames):
+                return True
+        return False
+
+    def _candidate_quality_score(frame: int) -> float:
+        """
+        Compute quality score for a candidate boundary (higher = better).
+
+        Scoring rules:
+        1. Distance to nearest occlusion (farther = better)
+        2. Strong penalty if occlusion is ahead (within next margin_frames)
+        3. Moderate penalty if occlusion is behind (within prev margin_frames)
+        4. Prefer frames in the middle of safe zones
+        """
+        if not occlusion_periods:
+            return 1000.0  # Arbitrary high score if no occlusions
+
+        min_dist = float("inf")
+        occlusion_ahead = False
+        occlusion_behind = False
+
+        for start, end in occlusion_periods:
+            # Check if occlusion is ahead (about to start)
+            if start > frame and (start - frame) <= margin_frames:
+                occlusion_ahead = True
+            # Check if occlusion just ended
+            if end < frame and (frame - end) <= margin_frames:
+                occlusion_behind = True
+
+            # Distance to nearest edge
+            dist = min(abs(frame - start), abs(frame - end))
+            min_dist = min(min_dist, dist)
+
+        # Base score is distance
+        score = float(min_dist)
+
+        # Heavy penalty if occlusion is just ahead (boundary would feed bad frames to tracker)
+        if occlusion_ahead:
+            score *= 0.1  # 90% penalty
+
+        # Moderate penalty if occlusion just ended (frames might still be messy)
+        if occlusion_behind:
+            score *= 0.5  # 50% penalty
+
+        return score
+
+    # Only adjust tracker chunk boundaries (indices 1+)
+    for i in range(1, len(adjusted_boundaries)):
+        original = adjusted_boundaries[i]
+
+        # Generate candidate frames within search window
+        search_start = max(0, original - search_window_frames)
+        search_end = min(total_end, original + search_window_frames)
+        candidates = list(range(search_start, search_end + 1))
+
+        if not candidates:
+            logger.debug(f"Boundary {i}: frame {original} — no candidates, keeping original")
+            continue
+
+        # Filter out frames inside occlusion periods
+        if occlusion_periods:
+            safe_candidates = [f for f in candidates if not _is_in_occlusion_period(f)]
+
+            if not safe_candidates:
+                logger.warning(
+                    f"Boundary {i}: frame {original} — all candidates within occlusion periods "
+                    f"(±{search_window_seconds}s window), keeping original (RISKY)"
+                )
+                continue
+
+            # Among safe candidates, pick the one with highest quality score
+            # (considers distance + directional penalties)
+            best_candidate = max(safe_candidates, key=_candidate_quality_score)
+        else:
+            # Legacy fallback: find nearest transition (old behavior)
+            transitions = transition_frames
+            trans_candidates = transitions[
+                (transitions >= search_start) & (transitions <= search_end)
+            ]
+            if len(trans_candidates) == 0:
+                logger.debug(
+                    f"Boundary {i}: frame {original} — no transitions, keeping original"
+                )
+                continue
+            best_candidate = trans_candidates[np.argmin(np.abs(trans_candidates - original))]
+
+        shift = int(best_candidate) - original
+
+        # Validate: check chunk sizes with this adjustment
+        prev_start = adjusted_boundaries[i - 1]
+        next_end = (
+            adjusted_boundaries[i + 1]
+            if i + 1 < len(adjusted_boundaries)
+            else total_end
+        )
+        prev_chunk_len = int(best_candidate) - prev_start
+        next_chunk_len = next_end - int(best_candidate)
+
+        if prev_chunk_len < min_frames or prev_chunk_len > max_frames:
+            logger.debug(
+                f"Boundary {i}: frame {original} → {best_candidate} rejected "
+                f"(prev chunk would be {prev_chunk_len / fps:.1f}s, "
+                f"limits: {min_chunk_seconds}-{max_chunk_seconds}s)"
+            )
+            continue
+
+        if next_chunk_len < min_frames or next_chunk_len > max_frames:
+            logger.debug(
+                f"Boundary {i}: frame {original} → {best_candidate} rejected "
+                f"(next chunk would be {next_chunk_len / fps:.1f}s, "
+                f"limits: {min_chunk_seconds}-{max_chunk_seconds}s)"
+            )
+            continue
+
+        adjusted_boundaries[i] = int(best_candidate)
+
+        if occlusion_periods:
+            quality = _candidate_quality_score(int(best_candidate))
+            logger.info(
+                f"Boundary {i}: frame {original} → {best_candidate} "
+                f"(shifted by {shift:+d} frames, quality score: {quality:.1f})"
+            )
+        else:
+            logger.info(
+                f"Boundary {i}: frame {original} → {best_candidate} "
+                f"(shifted by {shift:+d} frames, nearest transition)"
+            )
+
+    # Rebuild chunks from adjusted boundaries
+    adjusted_chunks = []
+    for i in range(len(adjusted_boundaries)):
+        start = adjusted_boundaries[i]
+        end = (
+            adjusted_boundaries[i + 1]
+            if i + 1 < len(adjusted_boundaries)
+            else total_end
+        )
+        model_type = fixed_chunks[i][2]  # preserve original model type
+        adjusted_chunks.append((start, end, model_type))
+
+    # Absorb small trailing chunks (<10% of tracker chunk size) into last chunk
+    if len(adjusted_chunks) > 1:
+        last_start, last_end, last_type = adjusted_chunks[-1]
+        last_len = last_end - last_start
+        prev_start, prev_end, prev_type = adjusted_chunks[-2]
+        prev_len = prev_end - prev_start
+        # Use the tracker chunk seconds from the original fixed chunks as reference
+        ref_tracker_frames = (
+            fixed_chunks[1][1] - fixed_chunks[1][0]
+            if len(fixed_chunks) > 1
+            else last_len
+        )
+
+        should_absorb = False
+
+        # Case 1: Last chunk is very small (<10% of reference)
+        if last_len < ref_tracker_frames * 0.1:
+            should_absorb = True
+            logger.info(
+                f"Absorbing small trailing chunk ({last_len} frames, "
+                f"{last_len/fps:.1f}s) into previous chunk"
+            )
+
+        # Case 2: Last chunk boundary is too close to an occlusion period
+        elif occlusion_periods and _is_in_occlusion_period(last_start):
+            combined_len = last_end - prev_start
+            if combined_len <= max_frames:
+                should_absorb = True
+                logger.info(
+                    f"Absorbing last chunk (boundary at {last_start} too close to occlusion) "
+                    f"into previous chunk (combined: {combined_len/fps:.1f}s)"
+                )
+
+        if should_absorb:
+            adjusted_chunks[-2] = (prev_start, last_end, prev_type)
+            adjusted_chunks.pop()
+
+    return adjusted_chunks
 
 
 def chunk_video_frames_dual(
@@ -181,15 +544,81 @@ def find_frame_with_enough_objects(
             outputs_per_frame[frame_idx]
         )
         if len(object_ids_list) >= min_objects:
-            logger.debug(
-                f"Found {len(object_ids_list)} objects at frame {frame_idx}"
-            )
+            logger.debug(f"Found {len(object_ids_list)} objects at frame {frame_idx}")
             return frame_idx, masks_list, boxes_list, object_ids_list
 
     logger.warning(
         f"No frame with >= {min_objects} objects found in last {max_lookback} frames"
     )
     return None, [], [], []
+
+
+def extract_equidistant_points_from_mask(
+    mask: np.ndarray, num_points: int = 3
+) -> list[list[int]] | None:
+    """
+    Extract equidistant points along the mask's major axis (x-axis).
+
+    Samples points deterministically by sorting pixels by x-coordinate
+    and selecting evenly-spaced points using linspace. Provides better
+    spatial coverage than random sampling and naturally avoids border pixels.
+
+    Originally from commit d5b4cda (the "magic run" with perfect tracking).
+
+    Args:
+        mask: Binary mask (H, W) with 1s indicating the object.
+        num_points: Number of equidistant points to extract.
+
+    Returns:
+        List of [x, y] points, or None if mask is empty.
+    """
+    y_coords, x_coords = np.where(mask > 0)
+    if len(y_coords) == 0:
+        return None
+
+    center_x = int(np.mean(x_coords))
+    center_y = int(np.mean(y_coords))
+
+    if num_points == 1:
+        return [[center_x, center_y]]
+
+    sorted_indices = np.argsort(x_coords)
+    n_pixels = len(sorted_indices)
+
+    indices = np.linspace(0, n_pixels - 1, num_points, dtype=int)
+
+    points = []
+    for idx in indices:
+        sorted_idx = sorted_indices[idx]
+        x = int(x_coords[sorted_idx])
+        y = int(y_coords[sorted_idx])
+        points.append([x, y])
+
+    return points
+
+
+def extract_equidistant_points_from_masks(
+    masks: np.ndarray, num_points: int = 3
+) -> np.ndarray:
+    """
+    Batch wrapper for extract_equidistant_points_from_mask().
+
+    Args:
+        masks: np.array with shape (N, H, W), binary masks.
+        num_points: Number of points to extract per mask.
+
+    Returns:
+        points: np.array with shape (N, num_points, 2) in (x, y) format.
+    """
+    n = masks.shape[0]
+    points = []
+    for i in range(n):
+        pts = extract_equidistant_points_from_mask(masks[i], num_points)
+        if pts is None:
+            points.append(np.zeros((num_points, 2)))
+        else:
+            points.append(np.array(pts))
+    return np.array(points, dtype=np.float32)
 
 
 def sample_points_from_masks(masks: np.ndarray, num_points: int = 3) -> np.ndarray:
@@ -218,9 +647,7 @@ def sample_points_from_masks(masks: np.ndarray, num_points: int = 3) -> np.ndarr
         if len(indices) < num_points:
             sampled_indices = np.random.choice(len(indices), num_points, replace=True)
         else:
-            sampled_indices = np.random.choice(
-                len(indices), num_points, replace=False
-            )
+            sampled_indices = np.random.choice(len(indices), num_points, replace=False)
         sampled_points = indices[sampled_indices]
         points.append(sampled_points)
     points = np.array(points, dtype=np.float32)
@@ -403,9 +830,7 @@ def create_annotation_callback(outputs_per_frame: dict):
         }
 
         # Create id2label mapping
-        id2label = {
-            int(i): f"id:{int(i)}" for i in to_numpy(ids_t)
-        }
+        id2label = {int(i): f"id:{int(i)}" for i in to_numpy(ids_t)}
 
         # Build detections
         detections = sv.Detections.from_transformers(
@@ -415,9 +840,7 @@ def create_annotation_callback(outputs_per_frame: dict):
         # Create labels with ID and confidence
         labels = [
             f"#{int(obj_id)} {confidence:.2f}"
-            for obj_id, confidence in zip(
-                to_numpy(ids_t), detections.confidence
-            )
+            for obj_id, confidence in zip(to_numpy(ids_t), detections.confidence)
         ]
 
         # Apply annotations

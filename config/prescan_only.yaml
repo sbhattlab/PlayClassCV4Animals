@@ -4,7 +4,7 @@
 # =============================================================================
 # Job Configuration
 # =============================================================================
-job_type: "sam3_hf"  # Type of job to run
+job_type: "prescan_only"  # Type of job to run
 
 # =============================================================================
 # Environmental variables
@@ -15,7 +15,7 @@ PYTORCH_ALLOC_CONF: "expandable_segments:True,garbage_collection_threshold:0.6" 
 # =============================================================================
 # Video/IO Configuration
 # =============================================================================
-video_path: "video-data/C1G1_Test_1_day_28_1_Camera_4_2025_02_04_10_59_56_1.mp4"
+video_path: "ext-data/raw/C1G1_Test_1_day_28_1_Camera_4_2025_02_04_10_59_56_1.mp4"
 text_prompt: "bird"
 
 # Output directory - results will be saved to a timestamped subdirectory
@@ -34,7 +34,7 @@ video_model_chunk_seconds: 15  # Duration of first chunk (Sam3VideoModel, text-p
 tracker_chunk_seconds: 45      # Duration of subsequent chunks (Sam3TrackerVideoModel, point-prompted)
 
 # Prescan-only mode: run YOLO pre-scan and exit without loading SAM3 models
-prescan_only: false
+prescan_only: true
 
 # Occlusion-aware adaptive chunking (YOLO-based pre-scan)
 use_adaptive_chunking: true          # Enable adaptive boundary placement via YOLO pre-scan
@@ -46,39 +46,15 @@ yolo_prescan:
   model: "model/yolo26x.pt"
   conf_thresh: 0.25
   iou_thresh: 0.45
+  # tracker_config: "data/yolo/bytetrack.yaml"
+  # tracker_config: "data/yolo/botsort.yaml"
   tracker_config: "data/yolo/botsort_alternative.yaml"
   allowed_classes: ["bird"]
   window_seconds: 1.0
-  high_occlusion_threshold: 0.08
+  high_occlusion_threshold: 0.3
   occlusion_iou_threshold: 0.15
   clustering_distance_threshold: 0.15
 
 # Parameter sensitivity testing (only runs when prescan_only or use_adaptive_chunking is true)
-run_parameter_sensitivity: false  # Test multiple threshold combinations on prescan results
-
-# =============================================================================
-# Multi-object Tracking Heuristics
-# =============================================================================
-min_objects_for_tracking: 3 # Minimum objects to look for in previous chunk
-max_lookback_frames: 10 # Max frames to look back
-point_extraction_method: "equidistant"  # "equidistant" (deterministic, better coverage) or "random"
-
-# =============================================================================
-# Sam3VideoConfig Tracking Parameters
-# These help prevent identity loss and duplicate assignments
-# =============================================================================
-tracking:
-  init_trk_keep_alive: 60 # Keep tracks alive longer (default: 30)
-  max_trk_keep_alive: 60 # Higher ceiling for keep-alive (default: 30)
-  min_trk_keep_alive: 0 # Don't go negative as quickly (default: -1)
-  trk_assoc_iou_thresh: 0.3 # More lenient matching (default: 0.5)
-  hotstart_dup_thresh: 12 # Stricter duplicate detection (default: 8)
-  suppress_overlap_thresh: 0.8 # Stricter overlap suppression (default: 0.7)
-  recondition_every_nth_frame: 8 # More frequent reconditioning (default: 16)
-
-# =============================================================================
-# Metrics Configuration
-# =============================================================================
-metrics:
-  occlusion_iou_threshold: 0.15 # IoU above this = objects overlapping
-  clustering_distance_threshold: 50.0 # pixels - objects closer than this are "clustered"
+run_parameter_sensitivity: true  # Test multiple threshold combinations on prescan results
+generate_occlusion_overlays_video : true # Generate video output with occlusion periods highlighted

@@ -3,5 +3,9 @@
 		{
 			"path": "."
 		}
-	]
+	],
+	"settings": {
+		"python.defaultInterpreterPath": "${workspaceFolder}/.pixi/envs/sam3-hf/bin/python",
+		"claudeCode.useTerminal": true
+	}
 }
