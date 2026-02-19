@@ -144,8 +144,17 @@ Outputs saved to `{output_dir}/{timestamp}_yolo_prescan/`.
 
 ### High priority
 - Iteratively save outputs every chunk (tracking, metrics, visualizations)
+- 'Resume' a partial run (i.e. a run on a video which progressed a third way through)
 - Remove inactive code: remove 'random' point sampling legacy method
+- Option to add point prompts, in manual chunking mode (list of tuples; first list is positive, second is negative; if a list is None, then ignore)
 
 ### Low priority
 - Cache prescan results for reuse across runs with same video
 - Implement config ingest for test scripts
+- Method for marking output run directory as 'incomplete' 
+  - Possible solution: placeholder name has `_incomplete` suffix, until completed, in which case the suffix is stripped.
+- `video_model_chunk_seconds` and `tracker_chunk_seconds` config keys should *not* be required - currently, failure to provide them during e.g. manual mode causes run to fail
+- Benchmark tracking performance using frame streaming vs frame preloading 
+
+# Misc. notes
+- For whatever reason, Sam3 both hf-transformers and the native implementations are extremely unstable when being run in Jupyter Notebooks, and frequently kernel

@@ -1,5 +1,5 @@
 # Manual chunking mode
-# Processes 30s (750 frames @ ~25fps) of one video with explicit chunk boundaries.
+# Processes video with explicit chunk boundaries.
 # Run: pixi run -e sam3-hf python -m script.sam3.run_sam3_hf --config config/manual_chunking.yaml
 
 job_type: "sam3_hf"
@@ -9,9 +9,10 @@ PYTORCH_ALLOC_CONF: "expandable_segments:True,garbage_collection_threshold:0.6"
 
 video_path: "video-data/C1G1_Test_1_day_28_1_Camera_4_2025_02_04_10_59_56_1.mp4"
 text_prompt: "bird"
-output_dir: "ext-data/output/results/test"
+output_dir: "ext-data/output/results/sam3-hf"
 
-max_frames_to_track: 750  # 30s @ ~25fps
+# max_frames_to_track: 750  # 30s @ ~25fps
+max_frames_to_track: 0  
 
 video_model_chunk_seconds: 15
 tracker_chunk_seconds: 45
@@ -24,9 +25,24 @@ run_parameter_sensitivity: false
 # Chunk 0: frames 0-375 (~15s) — text-prompt model
 # Chunk 1: frames 375-750 (~15s) — point-prompt tracker model
 manual_chunk_frames:
-  - [0, 375]
-  - [375, 750]
-
+  # - [0, 375]
+  # - [375, 750]
+  - [0, 364]
+  - [364, 2698]
+  - [2698, 3960]
+  - [3960, 6186]
+  - [6186, 7318]
+  - [7318, 8406]
+  - [8406, 9528]
+  - [9528, 10603]
+  - [10603, 11574]
+  - [11574, 12573]
+  - [12573, 14231]
+  - [14231, 15780]
+  - [15780, 17475]
+  - [17475, 19509]
+  - [19509, 21011]
+  - [21011, 22529]
 min_objects_for_tracking: 3
 max_lookback_frames: 10
 point_extraction_method: "equidistant"

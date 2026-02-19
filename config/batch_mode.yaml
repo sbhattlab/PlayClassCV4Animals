@@ -9,7 +9,7 @@ PYTORCH_ALLOC_CONF: "expandable_segments:True,garbage_collection_threshold:0.6"
 
 video_dir: "ext-data/test/batch_mode_test_set"
 text_prompt: "bird"
-output_dir: "ext-data/output/results/test"
+output_dir: "ext-data/output/results/sam3-hf"
 
 max_frames_to_track: 750  # 30s @ ~25fps — keeps each video run short
 
