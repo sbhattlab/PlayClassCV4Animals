@@ -11,6 +11,7 @@ video_dir: "ext-data/test/batch_mode_test_set"
 text_prompt: "bird"
 output_dir: "ext-data/output/results/sam3-hf"
 
+start_frame: 0          # Frame index to start processing from (0 = beginning)
 max_frames_to_track: 750  # 30s @ ~25fps — keeps each video run short
 
 video_model_chunk_seconds: 15

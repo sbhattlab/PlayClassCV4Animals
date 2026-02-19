@@ -394,6 +394,18 @@ def _run_single_video(cfg, run_dir: Path, config_path: Path | None = None):
     fps = video_metadata.fps
     total_frames = len(video_frames)
 
+    # Apply start_frame offset (before capping, so max_frames_to_track is relative to start_frame)
+    start_frame = cfg.get("start_frame", 0)
+    if start_frame > 0:
+        if start_frame >= total_frames:
+            logger.error(
+                f"start_frame ({start_frame}) >= total_frames ({total_frames}), aborting"
+            )
+            return
+        video_frames = video_frames[start_frame:]
+        total_frames = len(video_frames)
+        logger.info(f"Starting from frame {start_frame}: {total_frames} frames remaining")
+
     # Cap total frames if max_frames_to_track is set
     max_frames = cfg.get("max_frames_to_track", 0)
     if max_frames and max_frames > 0:
@@ -714,12 +726,14 @@ def _run_single_video(cfg, run_dir: Path, config_path: Path | None = None):
             chunk_info["model_type"] = "Sam3VideoModel"
 
         # --- Process chunk with appropriate model ---
+        # start_frame offset ensures global frame indices match original video positions
+        global_start_idx = start_frame + start_idx
         if use_tracker:
             chunk_outputs = _process_tracker_chunk(
-                chunk_frames, start_idx, all_prompt_points, cfg, device
+                chunk_frames, global_start_idx, all_prompt_points, cfg, device
             )
         else:
-            chunk_outputs = _process_video_chunk(chunk_frames, start_idx, cfg, device)
+            chunk_outputs = _process_video_chunk(chunk_frames, global_start_idx, cfg, device)
 
         # Stop timer and calculate metrics
         elapsed_seconds = timer.end()

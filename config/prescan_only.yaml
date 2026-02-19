@@ -25,6 +25,7 @@ output_dir: "ext-data/output/results/sam3-hf"
 # =============================================================================
 # Model Configuration
 # =============================================================================
+start_frame: 0          # Frame index to start processing from (0 = beginning)
 max_frames_to_track: 0  # Maximum number of frames to propagate (0 = all)
 
 # =============================================================================
