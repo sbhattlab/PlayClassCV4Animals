@@ -54,7 +54,6 @@ from transformers import (  # noqa: E402
     Sam3VideoModel,
     Sam3VideoProcessor,
 )
-from transformers.video_utils import load_video  # noqa: E402
 
 from src.metrics import (  # noqa: E402
     compute_per_frame_metrics,
@@ -73,6 +72,9 @@ from src.utils import (  # noqa: E402
     extract_equidistant_points_from_masks,
     find_frame_with_enough_objects,
     free_gpu_memory,
+    free_system_memory,
+    get_video_metadata,
+    load_video_frames_range,
     process_tracking_outputs,
     sample_points_from_masks,
     setup_logger,
@@ -386,13 +388,11 @@ def _run_single_video(cfg, run_dir: Path, config_path: Path | None = None):
     # Read config values
     video_path = cfg.video_path
 
-    # Load video frames
+    # Read video metadata only (frames are loaded per-chunk to avoid holding the full video in RAM)
     device = Accelerator().device
     logger.info(f"Using device: {device}")
-    logger.info(f"Loading video: {video_path}")
-    video_frames, video_metadata = load_video(video_path)
-    fps = video_metadata.fps
-    total_frames = len(video_frames)
+    logger.info(f"Reading video metadata: {video_path}")
+    fps, total_frames = get_video_metadata(video_path)
 
     # Apply start_frame offset (before capping, so max_frames_to_track is relative to start_frame)
     start_frame = cfg.get("start_frame", 0)
@@ -402,15 +402,13 @@ def _run_single_video(cfg, run_dir: Path, config_path: Path | None = None):
                 f"start_frame ({start_frame}) >= total_frames ({total_frames}), aborting"
             )
             return
-        video_frames = video_frames[start_frame:]
-        total_frames = len(video_frames)
+        total_frames = total_frames - start_frame
         logger.info(f"Starting from frame {start_frame}: {total_frames} frames remaining")
 
     # Cap total frames if max_frames_to_track is set
     max_frames = cfg.get("max_frames_to_track", 0)
     if max_frames and max_frames > 0:
         total_frames = min(total_frames, max_frames)
-        video_frames = video_frames[:total_frames]
         logger.info(
             f"Capped to {total_frames} frames (max_frames_to_track={max_frames})"
         )
@@ -653,12 +651,21 @@ def _run_single_video(cfg, run_dir: Path, config_path: Path | None = None):
     previous_chunk_outputs = None
 
     for chunk_idx, (start_idx, end_idx, chunk_type) in enumerate(chunks):
-        chunk_frames = video_frames[start_idx:end_idx]
+        # Load only this chunk's frames from disk — avoids holding the full video in RAM
+        global_chunk_start = start_frame + start_idx
+        global_chunk_end = start_frame + end_idx
+        chunk_frames = load_video_frames_range(video_path, global_chunk_start, global_chunk_end)
         num_frames = len(chunk_frames)
 
         # Start timing this chunk
         timer = SimplerTimer()
 
+        if torch.cuda.is_available():
+            alloc_mb = torch.cuda.memory_allocated() / 1024**2
+            res_mb = torch.cuda.memory_reserved() / 1024**2
+            logger.info(
+                f"GPU memory before chunk {chunk_idx}: {alloc_mb:.1f} MB allocated, {res_mb:.1f} MB reserved"
+            )
         logger.info(
             f"Processing chunk {chunk_idx}/{len(chunks) - 1}: "
             f"frames {start_idx}-{end_idx} ({chunk_type})"
@@ -727,7 +734,7 @@ def _run_single_video(cfg, run_dir: Path, config_path: Path | None = None):
 
         # --- Process chunk with appropriate model ---
         # start_frame offset ensures global frame indices match original video positions
-        global_start_idx = start_frame + start_idx
+        global_start_idx = global_chunk_start
         if use_tracker:
             chunk_outputs = _process_tracker_chunk(
                 chunk_frames, global_start_idx, all_prompt_points, cfg, device
@@ -758,7 +765,9 @@ def _run_single_video(cfg, run_dir: Path, config_path: Path | None = None):
         previous_chunk_outputs = chunk_outputs
         chunk_info_list.append(chunk_info)
 
-        # Free GPU memory between chunks
+        # Free this chunk's frames from RAM and GPU memory
+        del chunk_frames
+        free_system_memory(label=f"chunk {chunk_idx}")
         free_gpu_memory(log_stats=True)
 
         # Log timing metrics

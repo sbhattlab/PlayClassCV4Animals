@@ -5,19 +5,17 @@ Utility functions for processing SAM3 tracking outputs.
 import gc
 import os
 import sys
-from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-import cv2
 import numpy as np
 import pandas as pd
+import psutil
 import pycocotools.mask as mask_util
 import supervision as sv
 import torch
 from loguru import logger
 from omegaconf import DictConfig, OmegaConf
-from sklearn.cluster import MiniBatchKMeans
 
 # ---------------------------------------------------------------------------
 # Config, environment, logging, and output directory utilities
@@ -92,132 +90,6 @@ def create_run_directory(base_output_dir: Path, job_type: str) -> Path:
 # ---------------------------------------------------------------------------
 # Chunking and model transition utilities
 # ---------------------------------------------------------------------------
-
-
-@dataclass
-class PrescanResult:
-    """Result of KMeans-based video pre-scan for occlusion period detection."""
-
-    frame_indices: np.ndarray  # sampled frame indices (in original video coordinates)
-    cluster_labels: np.ndarray  # cluster label per sampled frame
-    transition_frames: np.ndarray  # frame indices where cluster label changes
-    kmeans: MiniBatchKMeans  # fitted KMeans model (for inspecting cluster centers)
-
-    # Explicit data fields:
-    data_original: np.ndarray  # raw sampled frames (N x P), NOT mean-centered
-    data_centered: np.ndarray  # mean-centered data (N x P)
-    data_mean: np.ndarray  # mean vector (P,)
-
-    def labels(self) -> np.ndarray:  # backward-compatible accessor
-        """Alias for cluster labels used by callers expecting .labels."""
-        return self.cluster_labels
-
-
-def prescan_occlusion_periods(
-    video_path: str | Path,
-    fps: float,
-    total_frames: int | None = None,
-) -> PrescanResult:
-    """
-    Pre-scan video with MiniBatchKMeans to identify visual scene-state transitions.
-
-    Samples ~1fps, downscales to 30px width grayscale, clusters frames, and
-    identifies transition points where the visual state changes. Occlusion
-    periods (chickens clustered/overlapping) form a distinct cluster.
-
-    Returns a PrescanResult containing both the original sampled data and the
-    mean-centred version plus the mean vector so callers can choose the
-    representation they need (avoids ambiguous shapes/broadcasting errors).
-    """
-    video_path = str(video_path)
-    cap = cv2.VideoCapture(video_path)
-    if not cap.isOpened():
-        raise RuntimeError(f"Could not open video: {video_path}")
-
-    sample_interval = max(1, int(fps))  # ~1fps
-    target_width = 30  # DLC convention
-
-    frame_indices = []
-    frame_data = []
-    frame_idx = 0
-
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
-        if total_frames is not None and frame_idx >= total_frames:
-            break
-        if frame_idx % sample_interval == 0:
-            # Downsample to target_width, preserving aspect ratio
-            h, w = frame.shape[:2]
-            scale = target_width / w
-            new_h = max(1, int(h * scale))
-            small = cv2.resize(
-                frame, (target_width, new_h), interpolation=cv2.INTER_AREA
-            )
-            # Grayscale via mean across channels
-            gray = np.mean(small, axis=2).flatten()
-            frame_data.append(gray)
-            frame_indices.append(frame_idx)
-        frame_idx += 1
-
-    cap.release()
-
-    frame_indices = np.array(frame_indices)
-    data_original = np.array(frame_data, dtype=np.float32)  # shape (N, P)
-
-    if data_original.size == 0:
-        # nothing sampled
-        raise RuntimeError("prescan_occlusion_periods: no frames sampled")
-
-    # Compute mean vector and centred data (do not overwrite original)
-    data_mean = data_original.mean(axis=0)
-    data_centered = data_original - data_mean
-
-    # Auto-determine number of clusters
-    video_duration = frame_idx / fps
-    n_clusters = max(2, int(video_duration // 5))
-    # Cap to avoid more clusters than samples
-    n_clusters = min(n_clusters, len(data_centered))
-
-    logger.info(
-        f"Pre-scan: {len(data_centered)} sampled frames, {video_duration:.1f}s duration, "
-        f"{n_clusters} clusters"
-    )
-
-    kmeans = MiniBatchKMeans(n_clusters=n_clusters, random_state=42, batch_size=256)
-    labels = kmeans.fit_predict(data_centered)
-
-    # Identify transitions (where label changes between consecutive samples)
-    transitions = []
-    for i in range(1, len(labels)):
-        if labels[i] != labels[i - 1]:
-            transitions.append(frame_indices[i])
-
-    transition_frames = np.array(transitions, dtype=int)
-
-    # Log cluster statistics
-    unique, counts = np.unique(labels, return_counts=True)
-    largest_pct = counts.max() / len(labels) * 100
-    logger.info(
-        f"Pre-scan: {len(unique)} unique clusters, "
-        f"largest cluster = {largest_pct:.1f}% of frames"
-    )
-    logger.info(
-        f"Pre-scan: {len(transition_frames)} transition frames: {transition_frames.tolist()}"
-    )
-
-    return PrescanResult(
-        frame_indices=frame_indices,
-        cluster_labels=labels,
-        transition_frames=transition_frames,
-        kmeans=kmeans,
-        data_original=data_original,
-        data_centered=data_centered,
-        data_mean=data_mean,
-    )
-
-
 def chunk_video_frames_adaptive(
     fixed_chunks: list[tuple[int, int, str]],
     transition_frames: np.ndarray,
@@ -329,7 +201,9 @@ def chunk_video_frames_adaptive(
         candidates = list(range(search_start, search_end + 1))
 
         if not candidates:
-            logger.debug(f"Boundary {i}: frame {original} — no candidates, keeping original")
+            logger.debug(
+                f"Boundary {i}: frame {original} — no candidates, keeping original"
+            )
             continue
 
         # Filter out frames inside occlusion periods
@@ -357,7 +231,9 @@ def chunk_video_frames_adaptive(
                     f"Boundary {i}: frame {original} — no transitions, keeping original"
                 )
                 continue
-            best_candidate = trans_candidates[np.argmin(np.abs(trans_candidates - original))]
+            best_candidate = trans_candidates[
+                np.argmin(np.abs(trans_candidates - original))
+            ]
 
         shift = int(best_candidate) - original
 
@@ -433,7 +309,7 @@ def chunk_video_frames_adaptive(
             should_absorb = True
             logger.info(
                 f"Absorbing small trailing chunk ({last_len} frames, "
-                f"{last_len/fps:.1f}s) into previous chunk"
+                f"{last_len / fps:.1f}s) into previous chunk"
             )
 
         # Case 2: Last chunk boundary is too close to an occlusion period
@@ -443,7 +319,7 @@ def chunk_video_frames_adaptive(
                 should_absorb = True
                 logger.info(
                     f"Absorbing last chunk (boundary at {last_start} too close to occlusion) "
-                    f"into previous chunk (combined: {combined_len/fps:.1f}s)"
+                    f"into previous chunk (combined: {combined_len / fps:.1f}s)"
                 )
 
         if should_absorb:
@@ -668,19 +544,73 @@ def sample_points_from_masks(masks: np.ndarray, num_points: int = 3) -> np.ndarr
 def free_gpu_memory(log_stats: bool = False):
     """Free GPU memory between chunks via garbage collection and cache clearing."""
     if log_stats and torch.cuda.is_available():
-        before = torch.cuda.memory_allocated() / 1024**2
-        logger.debug(f"GPU memory before cleanup: {before:.1f} MB")
+        before_alloc = torch.cuda.memory_allocated() / 1024**2
+        before_res = torch.cuda.memory_reserved() / 1024**2
+        logger.info(
+            f"GPU memory before cleanup: {before_alloc:.1f} MB allocated, {before_res:.1f} MB reserved"
+        )
 
     gc.collect()
     gc.collect()
     gc.collect()
     if torch.cuda.is_available():
+        torch.cuda.synchronize()
         torch.cuda.empty_cache()
+        gc.collect()
+        torch.cuda.empty_cache()  # second pass clears anything freed by first-pass destructors
         torch.cuda.ipc_collect()
 
     if log_stats and torch.cuda.is_available():
-        after = torch.cuda.memory_allocated() / 1024**2
-        logger.debug(f"GPU memory after cleanup: {after:.1f} MB")
+        after_alloc = torch.cuda.memory_allocated() / 1024**2
+        after_res = torch.cuda.memory_reserved() / 1024**2
+        logger.info(
+            f"GPU memory after cleanup: {after_alloc:.1f} MB allocated, {after_res:.1f} MB reserved"
+        )
+
+
+def free_system_memory(label: str = ""):
+    """Run gc.collect() and log system RAM before/after."""
+    prefix = f"{label}: " if label else ""
+
+    vm = psutil.virtual_memory()
+    before_gb = vm.used / 1024**3
+    available_gb = vm.available / 1024**3
+    logger.info(f"RAM before gc ({prefix}{before_gb:.1f} GB used, {available_gb:.1f} GB available)")
+
+    gc.collect()
+
+    vm = psutil.virtual_memory()
+    after_gb = vm.used / 1024**3
+    available_gb = vm.available / 1024**3
+    freed_gb = before_gb - after_gb
+    logger.info(
+        f"RAM after gc ({prefix}{after_gb:.1f} GB used, {available_gb:.1f} GB available, freed {freed_gb:.1f} GB)"
+    )
+
+
+def get_video_metadata(video_path: str | Path) -> tuple[float, int]:
+    """Return (fps, total_frames) for a video without loading all frames into RAM."""
+    import cv2
+    cap = cv2.VideoCapture(str(video_path))
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    cap.release()
+    return fps, total_frames
+
+
+def load_video_frames_range(video_path: str | Path, start_frame: int, end_frame: int) -> list:
+    """Load frames [start_frame, end_frame) from a video file as a list of RGB numpy arrays."""
+    import cv2
+    cap = cv2.VideoCapture(str(video_path))
+    cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
+    frames = []
+    for _ in range(end_frame - start_frame):
+        ret, frame = cap.read()
+        if not ret:
+            break
+        frames.append(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+    cap.release()
+    return frames
 
 
 # ---------------------------------------------------------------------------
