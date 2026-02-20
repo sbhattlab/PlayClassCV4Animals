@@ -200,8 +200,23 @@ def _process_tracker_chunk(chunk_frames, start_idx, all_prompt_points, cfg, devi
     """
     custom_resolution = cfg.get("custom_resolution", None)
 
+    config = Sam3TrackerVideoConfig.from_pretrained("facebook/sam3")
+
+    tracking_cfg = cfg.get("tracking", {})
+    for key in [
+        "init_trk_keep_alive",
+        "max_trk_keep_alive",
+        "min_trk_keep_alive",
+        "trk_assoc_iou_thresh",
+        "hotstart_dup_thresh",
+        "suppress_overlap_thresh",
+        "recondition_every_nth_frame",
+    ]:
+        val = tracking_cfg.get(key)
+        if val is not None:
+            setattr(config, key, val)
+
     if custom_resolution is not None:
-        config = Sam3TrackerVideoConfig.from_pretrained("facebook/sam3")
         config.image_size = custom_resolution
 
         model = Sam3TrackerVideoModel.from_pretrained(
@@ -215,7 +230,7 @@ def _process_tracker_chunk(chunk_frames, start_idx, all_prompt_points, cfg, devi
             f"Custom resolution {custom_resolution}x{custom_resolution} applied to Sam3TrackerVideo model and processor"
         )
     else:
-        model = Sam3TrackerVideoModel.from_pretrained("facebook/sam3").to(
+        model = Sam3TrackerVideoModel.from_pretrained("facebook/sam3", config=config).to(
             device, dtype=torch.bfloat16
         )
         processor = Sam3TrackerVideoProcessor.from_pretrained("facebook/sam3")

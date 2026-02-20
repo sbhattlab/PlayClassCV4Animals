@@ -42,6 +42,31 @@ manual_chunk_frames:
 - [17475, 19509]
 - [19509, 21011]
 - [21011, 22529]
-min_objects_for_tracking: 3
-max_lookback_frames: 10
-point_extraction_method: "equidistant"
+
+# =============================================================================
+# Multi-object Tracking Heuristics
+# =============================================================================
+min_objects_for_tracking: 3 # Minimum objects to look for in previous chunk
+max_lookback_frames: 10 # Max frames to look back
+point_extraction_method: "equidistant"  # "equidistant" (deterministic, better coverage) or "random"
+
+# =============================================================================
+# Sam3VideoConfig Tracking Parameters
+# These help prevent identity loss and duplicate assignments
+# =============================================================================
+tracking:
+  init_trk_keep_alive: 60 # Keep tracks alive longer (default: 30)
+  max_trk_keep_alive: 60 # Higher ceiling for keep-alive (default: 30)
+  min_trk_keep_alive: 0 # Don't go negative as quickly (default: -1)
+  trk_assoc_iou_thresh: 0.3 # More lenient matching (default: 0.5)
+  hotstart_dup_thresh: 12 # Stricter duplicate detection (default: 8)
+  suppress_overlap_thresh: 0.8 # Stricter overlap suppression (default: 0.7)
+  recondition_every_nth_frame: 8 # More frequent reconditioning (default: 16)
+
+# =============================================================================
+# Metrics Configuration
+# =============================================================================
+metrics:
+  occlusion_iou_threshold: 0.15 # IoU above this = objects overlapping
+  clustering_distance_threshold: 50.0 # pixels - objects closer than this are "clustered"
+
