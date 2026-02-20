@@ -20,7 +20,6 @@ import pandas as pd
 from loguru import logger
 from omegaconf import OmegaConf
 from simpler_timer import SimplerTimer
-from tqdm import tqdm
 
 
 def _early_init():
@@ -155,18 +154,12 @@ def _process_video_chunk(chunk_frames, start_idx, cfg, device):
     )
 
     # Process all frames
+    total_frames = len(chunk_frames)
     outputs_per_frame = {}
     with torch.inference_mode():
-        for model_outputs in tqdm(
-            model.propagate_in_video_iterator(
-                inference_session=inference_session,
-                max_frame_num_to_track=len(chunk_frames),
-            ),
-            total=len(chunk_frames),
-            desc=f"Chunk (text, frames {start_idx}-{start_idx + len(chunk_frames)})",
-            unit="frame",
-            ncols=100,  # Fixed width to prevent wrapping
-            ascii=True,  # Use ASCII chars for better compatibility
+        for model_outputs in model.propagate_in_video_iterator(
+            inference_session=inference_session,
+            max_frame_num_to_track=total_frames,
         ):
             processed_outputs = processor.postprocess_outputs(
                 inference_session, model_outputs
@@ -181,6 +174,12 @@ def _process_video_chunk(chunk_frames, start_idx, cfg, device):
             )
             global_frame_idx = start_idx + model_outputs.frame_idx
             outputs_per_frame[global_frame_idx] = processed_outputs
+            local_frame_idx = model_outputs.frame_idx
+            if local_frame_idx % 25 == 0 or local_frame_idx == total_frames - 1:
+                logger.info(
+                    f"  [text] frame {local_frame_idx + 1}/{total_frames} "
+                    f"({100 * (local_frame_idx + 1) / total_frames:.0f}%)"
+                )
 
     # Cleanup
     if hasattr(inference_session, "reset_inference_session"):
@@ -268,10 +267,11 @@ def _process_tracker_chunk(chunk_frames, start_idx, all_prompt_points, cfg, devi
         )
 
     # Process all frames
+    total_frames = len(chunk_frames)
     outputs_per_frame = {}
     with torch.inference_mode():
         for tracker_output in model.propagate_in_video_iterator(
-            inference_session, show_progress_bar=True
+            inference_session, show_progress_bar=False
         ):
             # Post-process masks
             video_res_masks = processor.post_process_masks(
@@ -340,7 +340,8 @@ def _process_tracker_chunk(chunk_frames, start_idx, all_prompt_points, cfg, devi
                 int(oid): float(active_scores[i]) for i, oid in enumerate(active_ids)
             }
 
-            global_frame_idx = start_idx + tracker_output.frame_idx
+            local_frame_idx = tracker_output.frame_idx
+            global_frame_idx = start_idx + local_frame_idx
             outputs_per_frame[global_frame_idx] = {
                 "masks": masks_np,
                 "boxes": np.array(boxes),
@@ -348,6 +349,11 @@ def _process_tracker_chunk(chunk_frames, start_idx, all_prompt_points, cfg, devi
                 "scores": active_scores,
                 "obj_id_to_tracker_score": obj_id_to_tracker_score,
             }
+            if local_frame_idx % 25 == 0 or local_frame_idx == total_frames - 1:
+                logger.info(
+                    f"  [tracker] frame {local_frame_idx + 1}/{total_frames} "
+                    f"({100 * (local_frame_idx + 1) / total_frames:.0f}%)"
+                )
 
     # Cleanup
     if hasattr(inference_session, "reset_inference_session"):
