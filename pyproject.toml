@@ -99,6 +99,7 @@ ipykernel = ">=7.1.0"
 ipython = "*"
 jupyter = ">=1.1.1"
 seaborn = "*"
+openpyxl = "*"
 
 # =============================================================================
 # PyPI Dependencies - SAM3 Native
