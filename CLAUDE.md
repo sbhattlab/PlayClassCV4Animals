@@ -27,7 +27,7 @@ Scripts are run as Python modules from the project root. CUDA device is specifie
 # Main pipeline (defaults to config/sam3_hf_config.yaml)
 pixi run -e sam3-hf sam3-hf-tracker
 # Custom config:
-pixi run -e sam3-hf python -m script.sam3.run_sam3_hf --config config/manual_chunking.yaml
+pixi run -e sam3-hf python -m script.sam3.run_sam3_hf --config config/sam3_hf_manual_chunking.yaml
 ```
 
 ## Running Tests
@@ -64,7 +64,7 @@ notebook/                   # Jupyter notebooks for EDA and demos
 - **Chunked processing**: Long videos are split into chunks via `chunk_video_frames_dual()`. Chunk 0 uses `Sam3VideoModel` (text-prompted, shorter: `video_model_chunk_seconds`). Subsequent chunks use `Sam3TrackerVideoModel` (point-prompted, longer: `tracker_chunk_seconds`). Small trailing remainders (<10% of chunk size) are absorbed into the last chunk. Point prompts are extracted from previous chunk's masks via `extract_equidistant_points_from_masks()`. `find_frame_with_enough_objects()` searches backwards for a frame with enough detected objects. `max_frames_to_track` limits how many frames are processed per video.
 - **Two model phases**: `Sam3VideoModel` (text→segmentation) for initialization, `Sam3TrackerVideoModel` (point→tracking) for propagation. Each chunk loads its model fresh and cleans up GPU memory afterwards (`free_gpu_memory()` with triple `gc.collect` + CUDA cache clearing).
 - **Adaptive chunking (YOLO pre-scan)**: When `use_adaptive_chunking: true`, `run_yolo_prescan()` runs YOLO tracking on the full video, computes per-frame spatial metrics, identifies occlusion periods, and extracts transition frames. `chunk_video_frames_adaptive()` scores candidate boundaries by distance to nearest occlusion (90% penalty if occlusion is ahead, 50% if just ended), validated against `adaptive_min/max_chunk_seconds`. Pre-scan outputs saved as `yolo_tracking.parquet`, `yolo_prescan_metrics.parquet`, `yolo_prescan_summary.parquet`. A `yolo_prescan:` config section controls model, thresholds, and tracker config.
-- **Manual chunking**: Set `manual_chunk_frames` to a list of `[start, end]` pairs to override fixed/adaptive chunking entirely. First pair → `Sam3VideoModel`; subsequent → `Sam3TrackerVideoModel`. Disables `prescan_only`/`use_adaptive_chunking` with warnings. See `build_manual_chunks()` in `src/utils.py` and `config/manual_chunking.yaml`.
+- **Manual chunking**: Set `manual_chunk_frames` to a list of `[start, end]` pairs to override fixed/adaptive chunking entirely. First pair → `Sam3VideoModel`; subsequent → `Sam3TrackerVideoModel`. Disables `prescan_only`/`use_adaptive_chunking` with warnings. See `build_manual_chunks()` in `src/utils.py` and `config/sam3_hf_manual_chunking.yaml`.
 - **Batch processing**: Set `video_dir` instead of `video_path` to process all videos in a directory. Each video gets its own subdirectory under a shared timestamped batch dir. Errors caught per-video. `manual_chunk_frames` accepts a dict keyed by **basename** (e.g. `"video1.mp4": [[0,375],...]`) for per-video boundaries; unlisted videos use fixed chunking. See `config/batch_mode.yaml`.
 - **Device selection**: `Accelerator().device` from HuggingFace Accelerate.
 
@@ -136,7 +136,8 @@ Outputs saved to `{output_dir}/{timestamp}_yolo_prescan/`.
 | Config | Purpose |
 |--------|---------|
 | `config/sam3_hf_config.yaml` | Main production config (single video, adaptive chunking on) |
-| `config/manual_chunking.yaml` | Single video with explicit `manual_chunk_frames` list |
+| `config/sam3_hf_manual_chunking.yaml` | SAM3-HF: single video with explicit `manual_chunk_frames` list |
+| `config/gs2_manual_chunking.yaml` | GS2: single video with explicit `manual_chunk_frames` list |
 | `config/batch_mode.yaml` | Batch mode (`video_dir`) with per-video `manual_chunk_frames` dict |
 | `config/prescan_only.yaml` | YOLO pre-scan only, no SAM3 |
 

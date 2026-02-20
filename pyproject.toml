@@ -150,6 +150,9 @@ pandas = ">=3.0.0,<4"
 supervision = ">=0.27.0,<0.28"
 tqdm = ">=4.67.1,<5"
 pyarrow = ">=23.0.0,<24"
+loguru = ">=0.7.3"
+omegaconf = ">=2.3.0"
+psutil = ">=5.9.0"
 
 # =============================================================================
 # Pixi Environments
@@ -243,6 +246,9 @@ setup-gs2 = { depends-on = [
 test-gs2 = { cmd = """
 python -m script.gs2.chicken_tracking_demo --gs2-repo-path Grounded-SAM-2-fork -i ext-data/imgs/imgs_1min --text ".chicken.bird." --save-dir ext-data/output/test/gs2 --save-masks --save-images --create-video
 """ }
+
+# GS2 manual chunking pipeline (mask-based carryover between chunks)
+gs2-manual-chunking = "python -m script.gs2.run_gs2_manual_chunking --config config/gs2_manual_chunking.yaml"
 
 # =============================================================================
 # Tasks - YOLO

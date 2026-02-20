@@ -1,6 +1,5 @@
-# Manual chunking mode
-# Processes video with explicit chunk boundaries.
-# Run: pixi run -e sam3-hf python -m script.sam3.run_sam3_hf --config config/manual_chunking.yaml
+# SAM3-HF manual chunking mode
+# Usage: pixi run -e sam3-hf python -m script.sam3.run_sam3_hf --config config/sam3_hf_manual_chunking.yaml
 
 job_type: "sam3_hf"
 
@@ -69,4 +68,3 @@ tracking:
 metrics:
   occlusion_iou_threshold: 0.15 # IoU above this = objects overlapping
   clustering_distance_threshold: 50.0 # pixels - objects closer than this are "clustered"
-

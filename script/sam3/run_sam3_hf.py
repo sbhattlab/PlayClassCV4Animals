@@ -670,6 +670,7 @@ def _run_single_video(cfg, run_dir: Path, config_path: Path | None = None):
     all_outputs_per_frame = {}
     chunk_info_list = []
     previous_chunk_outputs = None
+    results_path = run_dir / "tracking_outputs.parquet"
 
     for chunk_idx, (start_idx, end_idx, chunk_type) in enumerate(chunks):
         # Load only this chunk's frames from disk — avoids holding the full video in RAM
@@ -782,6 +783,17 @@ def _run_single_video(cfg, run_dir: Path, config_path: Path | None = None):
             chunk_outputs[frame_idx]["_model_type"] = chunk_info["model_type"]
             chunk_outputs[frame_idx]["_is_chunk_start"] = frame_idx == start_idx
 
+        # Incrementally write chunk results to parquet (fault-tolerant)
+        chunk_df = process_tracking_outputs(chunk_outputs)
+        chunk_df = chunk_df.sort_index()
+        if results_path.exists():
+            existing_df = pd.read_parquet(results_path)
+            chunk_df = pd.concat([existing_df, chunk_df]).sort_index()
+            del existing_df
+        chunk_df.to_parquet(results_path)
+        del chunk_df
+        logger.info(f"Tracking results saved to {results_path} (chunk {chunk_idx})")
+
         all_outputs_per_frame.update(chunk_outputs)
         previous_chunk_outputs = chunk_outputs
         chunk_info_list.append(chunk_info)
@@ -824,12 +836,9 @@ def _run_single_video(cfg, run_dir: Path, config_path: Path | None = None):
     )
     logger.info(f"Annotated video saved to: {annotated_video_path}")
 
-    # Save raw tracking results
-    results_path = run_dir / "tracking_outputs.parquet"
-    logger.info(f"Saving all per-frame outputs to {results_path}...")
-    df_results = process_tracking_outputs(all_outputs_per_frame)
-    df_results = df_results.sort_index()
-    df_results.to_parquet(results_path)
+    # Load tracking results (already written incrementally per chunk)
+    logger.info(f"Loading tracking results from {results_path}...")
+    df_results = pd.read_parquet(results_path)
 
     # Compute per-frame metrics (mask-based spatial/overlap/quality)
     logger.info("Computing per-frame metrics...")

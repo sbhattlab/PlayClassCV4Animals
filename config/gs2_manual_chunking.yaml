@@ -1,0 +1,53 @@
+# Grounded-SAM-2 manual chunking mode
+# Usage: pixi run -e gs2 gs2-manual-chunking
+#    or: pixi run -e gs2 python -m script.gs2.run_gs2_manual_chunking --config config/gs2_manual_chunking.yaml
+
+job_type: "gs2_manual"
+
+CUDA_VISIBLE_DEVICES: "1"
+PYTORCH_ALLOC_CONF: "expandable_segments:True,garbage_collection_threshold:0.6"
+
+video_path: "video-data/C1G1_Test_1_day_28_1_Camera_4_2025_02_04_10_59_56_1.mp4"
+text_prompt: ".bird."
+output_dir: "ext-data/output/results/grounded-sam-2"
+
+start_frame: 0          # Frame index to start processing from (0 = beginning)
+# max_frames_to_track: 750  # 30s @ ~25fps
+max_frames_to_track: 0
+
+# Explicit chunk boundaries (overrides fixed/adaptive chunking)
+manual_chunk_frames:
+- [0, 383]
+- [383, 2698]
+- [2698, 3826]
+- [3826, 7318]
+- [7318, 8419]
+- [8419, 9446]
+- [9446, 10390]
+- [10390, 12339]
+- [12339, 14231]
+- [14231, 15780]
+- [15780, 17475]
+- [17475, 19509]
+- [19509, 21011]
+- [21011, 22529]
+
+# Minimum objects that must be detected/carried over before tracking starts
+min_objects_for_tracking: 3
+max_lookback_frames: 10 # Max frames to look back when extracting carryover masks
+
+# =============================================================================
+# Grounded-SAM-2 (GS2) Configuration
+# =============================================================================
+gs2:
+  model_size: "large"         # SAM2 model size: large / base_plus / small / tiny
+  box_threshold: 0.25         # GroundingDINO box detection threshold
+  text_threshold: 0.3         # GroundingDINO text matching threshold
+  offload_video_to_cpu: true  # Keep video frames in CPU RAM (saves VRAM)
+  # Box area filters — reject detections outside this fraction of total frame area.
+  # Prevents scene-level false positives (huge boxes) and noise (tiny boxes).
+  min_box_area_fraction: 0.003   # ~0.3% — filters sub-pixel noise
+  max_box_area_fraction: 0.40    # ~40%  — filters whole-scene false positives
+
+# Limit processing to first N chunks — set to null to process all chunks
+max_chunks: null
