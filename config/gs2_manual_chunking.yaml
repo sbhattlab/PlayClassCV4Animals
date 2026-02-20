@@ -50,4 +50,5 @@ gs2:
   max_box_area_fraction: 0.40    # ~40%  — filters whole-scene false positives
 
 # Limit processing to first N chunks — set to null to process all chunks
-max_chunks: null
+# max_chunks: null
+max_chunks: 2

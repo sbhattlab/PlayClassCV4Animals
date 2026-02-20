@@ -13,6 +13,7 @@ import argparse
 import json
 import re
 import shutil
+from collections import deque
 from pathlib import Path
 
 import numpy as np
@@ -44,6 +45,10 @@ def _early_init():
 _args, _cfg = _early_init()
 
 import torch  # noqa: E402
+
+# Allow TF32 on Ampere+ GPUs — ~2x faster matmul with negligible precision loss
+torch.backends.cuda.matmul.allow_tf32 = True
+torch.backends.cudnn.allow_tf32 = True
 from accelerate import Accelerator  # noqa: E402
 from transformers import (  # noqa: E402
     Sam3TrackerVideoConfig,
@@ -90,6 +95,44 @@ except ImportError:
 # ---------------------------------------------------------------------------
 # Per-chunk processing helpers
 # ---------------------------------------------------------------------------
+
+
+def _compute_max_pairwise_iou(masks_np: np.ndarray) -> float:
+    """Return max pixel-IoU over all pairs of binary masks (N, H, W)."""
+    n = len(masks_np)
+    max_iou = 0.0
+    for i in range(n):
+        for j in range(i + 1, n):
+            inter = float((masks_np[i] & masks_np[j]).sum())
+            union = float((masks_np[i] | masks_np[j]).sum())
+            if union > 0:
+                max_iou = max(max_iou, inter / union)
+    return max_iou
+
+
+def _reseed_tracker_memory(
+    model, inference_session, frame_idx: int, masks_np: np.ndarray, device
+):
+    """
+    Inject current binary masks as a fresh conditioning frame.
+    Removes frame_idx from frames_tracked so forward() treats it
+    as is_init_cond_frame=True, re-encoding the memory bank.
+    masks_np: (N, H, W) bool/float numpy array.
+    """
+    masks_tensor = torch.from_numpy(masks_np.astype(np.float32)).to(device)
+
+    obj_ids = list(inference_session.obj_ids)[: len(masks_np)]
+    for i, obj_id in enumerate(obj_ids):
+        obj_idx = inference_session.obj_id_to_idx(obj_id)
+        mask_t = masks_tensor[i].unsqueeze(0).unsqueeze(0)  # (1, 1, H, W)
+        inference_session.add_mask_inputs(obj_idx, frame_idx, mask_t)
+        # Clear tracked status so forward treats this as an init-cond frame
+        inference_session.frames_tracked_per_obj[obj_idx].pop(frame_idx, None)
+        if obj_id not in inference_session.obj_with_new_inputs:
+            inference_session.obj_with_new_inputs.append(obj_id)
+
+    # Re-run forward for this frame — encodes fresh memory anchor
+    model(inference_session, frame_idx=frame_idx, run_mem_encoder=True)
 
 
 def _process_video_chunk(chunk_frames, start_idx, cfg, device):
@@ -156,7 +199,7 @@ def _process_video_chunk(chunk_frames, start_idx, cfg, device):
     # Process all frames
     total_frames = len(chunk_frames)
     outputs_per_frame = {}
-    with torch.inference_mode():
+    with torch.inference_mode(), torch.autocast("cuda", dtype=torch.bfloat16):
         for model_outputs in model.propagate_in_video_iterator(
             inference_session=inference_session,
             max_frame_num_to_track=total_frames,
@@ -215,6 +258,12 @@ def _process_tracker_chunk(chunk_frames, start_idx, all_prompt_points, cfg, devi
         if val is not None:
             setattr(config, key, val)
 
+    reseed_cfg = cfg.get("mid_chunk_reseed", {})
+    reseed_enabled = reseed_cfg.get("enabled", False)
+    reseed_max_iou = reseed_cfg.get("max_iou_threshold", 0.08)
+    reseed_window = reseed_cfg.get("window_frames", 10)
+    reseed_cooldown = reseed_cfg.get("cooldown_frames", 50)
+
     if custom_resolution is not None:
         config.image_size = custom_resolution
 
@@ -260,16 +309,20 @@ def _process_tracker_chunk(chunk_frames, start_idx, all_prompt_points, cfg, devi
     )
 
     # Run inference on first frame to initialize tracking
-    with torch.inference_mode():
+    with torch.inference_mode(), torch.autocast("cuda", dtype=torch.bfloat16):
         _ = model(
             inference_session=inference_session,
             frame_idx=ann_frame_idx,
         )
 
+    # Rolling state for mid-chunk re-seeding
+    iou_window = deque(maxlen=reseed_window)
+    frames_since_reseed = reseed_cooldown  # start "ready" — allows first eligible reseed immediately
+
     # Process all frames
     total_frames = len(chunk_frames)
     outputs_per_frame = {}
-    with torch.inference_mode():
+    with torch.inference_mode(), torch.autocast("cuda", dtype=torch.bfloat16):
         for tracker_output in model.propagate_in_video_iterator(
             inference_session, show_progress_bar=False
         ):
@@ -294,6 +347,30 @@ def _process_tracker_chunk(chunk_frames, start_idx, all_prompt_points, cfg, devi
             # (N, 1, H, W) -> (N, H, W)
             if masks_np.ndim == 4:
                 masks_np = masks_np.squeeze(1)
+
+            local_frame_idx = tracker_output.frame_idx
+
+            # --- mid-chunk re-seeding ---
+            if reseed_enabled and masks_np.shape[0] >= 2:
+                current_max_iou = _compute_max_pairwise_iou(masks_np)
+                iou_window.append(current_max_iou)
+                frames_since_reseed += 1
+
+                window_full = len(iou_window) == reseed_window
+                window_stable = window_full and (sum(iou_window) / reseed_window) < reseed_max_iou
+                cooldown_ok = frames_since_reseed >= reseed_cooldown
+                not_occluded = current_max_iou < reseed_max_iou
+
+                if window_stable and cooldown_ok and not_occluded:
+                    _reseed_tracker_memory(
+                        model, inference_session, local_frame_idx, masks_np, device
+                    )
+                    frames_since_reseed = 0
+                    iou_window.clear()
+                    logger.info(
+                        f"  [tracker] re-seeded memory at local frame {local_frame_idx} "
+                        f"(max_iou={current_max_iou:.3f})"
+                    )
 
             # Compute bounding boxes from masks
             boxes = []
@@ -340,7 +417,6 @@ def _process_tracker_chunk(chunk_frames, start_idx, all_prompt_points, cfg, devi
                 int(oid): float(active_scores[i]) for i, oid in enumerate(active_ids)
             }
 
-            local_frame_idx = tracker_output.frame_idx
             global_frame_idx = start_idx + local_frame_idx
             outputs_per_frame[global_frame_idx] = {
                 "masks": masks_np,
