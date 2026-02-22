@@ -86,6 +86,21 @@ tracking:
   recondition_every_nth_frame: 8 # More frequent reconditioning (default: 16)
 
 # =============================================================================
+# Text Prescreen Re-Grounding
+# Run Sam3VideoModel on first N frames of each tracker chunk for fresh
+# text-grounded detections, replacing drifted point prompts from prev chunk.
+# Cost: ~same as Chunk 0 per tracker chunk. Keep prescreen_frames small.
+# =============================================================================
+text_prescreen:
+  enabled: false                  # Off by default
+  prescreen_frames: 25            # Frames to prescreen (~1 s at 25 fps)
+  min_objects: 3                  # Min detections to accept prescreen result
+  best_frame_method: "combined"   # "combined" | "min_occlusion" | "best_scores"
+  fallback_to_prev_chunk: true    # Fall back to prev-chunk points if prescreen fails
+  id_matching: true               # Remap fresh IDs to previous chunk IDs
+  id_match_iou_threshold: 0.10    # Min mask IoU to accept an ID assignment
+
+# =============================================================================
 # Metrics Configuration
 # =============================================================================
 metrics:

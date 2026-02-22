@@ -110,6 +110,133 @@ def _compute_max_pairwise_iou(masks_np: np.ndarray) -> float:
     return max_iou
 
 
+def _find_best_prescreen_frame(
+    prescreen_outputs: dict,
+    min_objects: int = 3,
+    method: str = "combined",
+) -> tuple[int | None, list, list, list]:
+    """
+    Select best frame from prescreen outputs by detection quality.
+    Filters frames with >= min_objects, then ranks by:
+      "min_occlusion"  — lowest max pairwise IoU
+      "best_scores"    — highest mean detection score
+      "combined"       — low-occlusion frames first (max_iou < 0.10),
+                         then by descending mean score within that tier
+    Returns (frame_idx, masks_list, boxes_list, object_ids_list)
+    or (None, [], [], []) if no frame qualifies.
+    """
+    from src.utils import get_all_objects_from_results
+
+    candidates = []
+    for frame_idx, results in prescreen_outputs.items():
+        masks_list, boxes_list, object_ids_list = get_all_objects_from_results(results)
+        if len(object_ids_list) < min_objects:
+            continue
+        masks_array = np.stack(
+            [m.squeeze(0) if m.ndim == 3 and m.shape[0] == 1 else m for m in masks_list]
+        ).astype(bool)
+        max_iou = _compute_max_pairwise_iou(masks_array)
+
+        scores = results.get("scores")
+        if scores is not None:
+            scores_arr = scores if isinstance(scores, np.ndarray) else np.array(scores)
+            mean_score = float(scores_arr.mean()) if scores_arr.size > 0 else 0.0
+        else:
+            tracker_scores = results.get("obj_id_to_tracker_score", {})
+            if tracker_scores:
+                mean_score = float(np.mean(list(tracker_scores.values())))
+            else:
+                mean_score = 0.0
+
+        candidates.append(
+            (frame_idx, masks_list, boxes_list, object_ids_list, max_iou, mean_score)
+        )
+
+    if not candidates:
+        return None, [], [], []
+
+    if method == "min_occlusion":
+        candidates.sort(key=lambda x: x[4])
+    elif method == "best_scores":
+        candidates.sort(key=lambda x: -x[5])
+    else:  # "combined"
+        candidates.sort(key=lambda x: (x[4] >= 0.10, -x[5]))
+
+    best = candidates[0]
+    return best[0], best[1], best[2], best[3]
+
+
+def _match_prescreen_ids_to_previous(
+    prescreen_masks: list,
+    prescreen_ids: list,
+    prev_masks: list,
+    prev_ids: list,
+    iou_threshold: float = 0.10,
+) -> dict[int, int]:
+    """
+    Greedy IoU-based assignment of prescreen IDs to previous-chunk IDs.
+    Builds P×Q IoU matrix, iteratively picks highest-IoU pair, removes both
+    from pool, stops when below iou_threshold. Unmatched prescreen IDs keep
+    their original value in the returned dict.
+    """
+    if not prescreen_masks or not prev_masks:
+        return {int(pid): int(pid) for pid in prescreen_ids}
+
+    def _to_bool(m):
+        arr = m.squeeze(0) if m.ndim == 3 and m.shape[0] == 1 else m
+        return arr.astype(bool)
+
+    ps_masks = [_to_bool(m) for m in prescreen_masks]
+    pv_masks = [_to_bool(m) for m in prev_masks]
+
+    P, Q = len(ps_masks), len(pv_masks)
+    iou_matrix = np.zeros((P, Q), dtype=np.float32)
+    for i in range(P):
+        for j in range(Q):
+            inter = float((ps_masks[i] & pv_masks[j]).sum())
+            union = float((ps_masks[i] | pv_masks[j]).sum())
+            iou_matrix[i, j] = inter / union if union > 0 else 0.0
+
+    id_map: dict[int, int] = {}
+    assigned_ps = set()
+    assigned_pv = set()
+
+    flat_indices = np.argsort(iou_matrix.ravel())[::-1]
+    for flat_idx in flat_indices:
+        i, j = divmod(int(flat_idx), Q)
+        if iou_matrix[i, j] < iou_threshold:
+            break
+        if i in assigned_ps or j in assigned_pv:
+            continue
+        id_map[int(prescreen_ids[i])] = int(prev_ids[j])
+        assigned_ps.add(i)
+        assigned_pv.add(j)
+
+    # Unmatched prescreen IDs pass through unchanged
+    for i, pid in enumerate(prescreen_ids):
+        if int(pid) not in id_map:
+            id_map[int(pid)] = int(pid)
+
+    return id_map
+
+
+def _run_text_prescreen(
+    chunk_frames: list,
+    global_start_idx: int,
+    prescreen_frames: int,
+    cfg,
+    device,
+) -> dict:
+    """
+    Run Sam3VideoModel on chunk_frames[:prescreen_frames] for fresh detections.
+    Clamps prescreen_frames to len(chunk_frames). Frees GPU memory before returning.
+    """
+    n = min(prescreen_frames, len(chunk_frames))
+    outputs = _process_video_chunk(chunk_frames[:n], global_start_idx, cfg, device)
+    free_gpu_memory()
+    return outputs
+
+
 def _reseed_tracker_memory(
     model, inference_session, frame_idx: int, masks_np: np.ndarray, device
 ):
@@ -278,9 +405,9 @@ def _process_tracker_chunk(chunk_frames, start_idx, all_prompt_points, cfg, devi
             f"Custom resolution {custom_resolution}x{custom_resolution} applied to Sam3TrackerVideo model and processor"
         )
     else:
-        model = Sam3TrackerVideoModel.from_pretrained("facebook/sam3", config=config).to(
-            device, dtype=torch.bfloat16
-        )
+        model = Sam3TrackerVideoModel.from_pretrained(
+            "facebook/sam3", config=config
+        ).to(device, dtype=torch.bfloat16)
         processor = Sam3TrackerVideoProcessor.from_pretrained("facebook/sam3")
 
     # Initialize video inference session
@@ -317,7 +444,9 @@ def _process_tracker_chunk(chunk_frames, start_idx, all_prompt_points, cfg, devi
 
     # Rolling state for mid-chunk re-seeding
     iou_window = deque(maxlen=reseed_window)
-    frames_since_reseed = reseed_cooldown  # start "ready" — allows first eligible reseed immediately
+    frames_since_reseed = (
+        reseed_cooldown  # start "ready" — allows first eligible reseed immediately
+    )
 
     # Process all frames
     total_frames = len(chunk_frames)
@@ -357,7 +486,9 @@ def _process_tracker_chunk(chunk_frames, start_idx, all_prompt_points, cfg, devi
                 frames_since_reseed += 1
 
                 window_full = len(iou_window) == reseed_window
-                window_stable = window_full and (sum(iou_window) / reseed_window) < reseed_max_iou
+                window_stable = (
+                    window_full and (sum(iou_window) / reseed_window) < reseed_max_iou
+                )
                 cooldown_ok = frames_since_reseed >= reseed_cooldown
                 not_occluded = current_max_iou < reseed_max_iou
 
@@ -500,7 +631,9 @@ def _run_single_video(cfg, run_dir: Path, config_path: Path | None = None):
             )
             return
         total_frames = total_frames - start_frame
-        logger.info(f"Starting from frame {start_frame}: {total_frames} frames remaining")
+        logger.info(
+            f"Starting from frame {start_frame}: {total_frames} frames remaining"
+        )
 
     # Cap total frames if max_frames_to_track is set
     max_frames = cfg.get("max_frames_to_track", 0)
@@ -736,9 +869,22 @@ def _run_single_video(cfg, run_dir: Path, config_path: Path | None = None):
     # Continue with SAM3 pipeline (only reached if not prescan_only)
 
     logger.info(f"Video: {total_frames} frames at {fps:.1f} FPS")
-    logger.info(f"Chunks: {len(chunks)} ({chunks[0][2]} + {len(chunks) - 1} tracker)")
+    _prescreen_on = OmegaConf.to_container(
+        cfg.get("text_prescreen", {}), resolve=True
+    ).get("enabled", False)
+    if _prescreen_on:
+        logger.info(
+            f"Chunks: {len(chunks)} (all via video model text-prompt prescreen for {cfg.get('prescreen_frames')} frames -> video tracker model)"
+        )
+    else:
+        logger.info(
+            f"Chunks: {len(chunks)} ({chunks[0][2]} + {len(chunks) - 1} tracker)"
+        )
     for i, (s, e, mtype) in enumerate(chunks):
-        logger.info(f"  Chunk {i}: frames {s}-{e} ({mtype}, {(e - s) / fps:.1f}s)")
+        display_type = "prescreen→tracker" if _prescreen_on else mtype
+        logger.info(
+            f"  Chunk {i}: frames {s}-{e} ({display_type}, {(e - s) / fps:.1f}s)"
+        )
 
     # -----------------------------------------------------------------------
     # Chunk processing loop
@@ -747,12 +893,15 @@ def _run_single_video(cfg, run_dir: Path, config_path: Path | None = None):
     chunk_info_list = []
     previous_chunk_outputs = None
     results_path = run_dir / "tracking_outputs.parquet"
+    prescreen_results_path = run_dir / "prescreen_outputs.parquet"
 
     for chunk_idx, (start_idx, end_idx, chunk_type) in enumerate(chunks):
         # Load only this chunk's frames from disk — avoids holding the full video in RAM
         global_chunk_start = start_frame + start_idx
         global_chunk_end = start_frame + end_idx
-        chunk_frames = load_video_frames_range(video_path, global_chunk_start, global_chunk_end)
+        chunk_frames = load_video_frames_range(
+            video_path, global_chunk_start, global_chunk_end
+        )
         num_frames = len(chunk_frames)
 
         # Start timing this chunk
@@ -777,57 +926,211 @@ def _run_single_video(cfg, run_dir: Path, config_path: Path | None = None):
             "num_objects_tracked": 0,
             "source_frame_idx": None,
             "fallback_reason": None,
+            "prescreen_used": False,
+            "prescreen_source_frame_idx": None,
+            "prescreen_num_objects": 0,
+            "prescreen_fallback_reason": None,
         }
 
         use_tracker = False
         all_prompt_points = {}
 
-        if chunk_type == "tracker" and previous_chunk_outputs is not None:
-            # Try to extract point prompts from previous chunk
-            source_frame_idx, masks_list, boxes_list, object_ids_list = (
-                find_frame_with_enough_objects(
-                    previous_chunk_outputs,
-                    min_objects=cfg.min_objects_for_tracking,
-                    max_lookback=cfg.max_lookback_frames,
-                )
+        prescreen_cfg = cfg.get("text_prescreen", {})
+        prescreen_enabled = prescreen_cfg.get("enabled", False)
+
+        if prescreen_enabled:
+            # --- Text prescreen drives EVERY chunk: prescreen → tracker ---
+            prescreen_outputs = _run_text_prescreen(
+                chunk_frames,
+                global_chunk_start,
+                prescreen_cfg.get("prescreen_frames", 25),
+                cfg,
+                device,
             )
-            if source_frame_idx is not None and len(masks_list) > 0:
-                # Stack masks to (N, H, W), squeeze (1, H, W) -> (H, W) if needed
-                masks_array = np.stack(
+            ps_frame_idx, ps_masks, ps_boxes, ps_ids = _find_best_prescreen_frame(
+                prescreen_outputs,
+                min_objects=prescreen_cfg.get(
+                    "min_objects", cfg.min_objects_for_tracking
+                ),
+                method=prescreen_cfg.get("best_frame_method", "combined"),
+            )
+
+            if ps_frame_idx is not None:
+                # Remap fresh IDs to previous-chunk IDs (if a previous chunk exists)
+                if previous_chunk_outputs is not None and prescreen_cfg.get(
+                    "id_matching", True
+                ):
+                    _, prev_masks_for_iou, _, prev_ids_for_iou = (
+                        find_frame_with_enough_objects(
+                            previous_chunk_outputs,
+                            min_objects=1,
+                            max_lookback=cfg.max_lookback_frames,
+                        )
+                    )
+                    if prev_masks_for_iou:
+                        id_map = _match_prescreen_ids_to_previous(
+                            ps_masks,
+                            ps_ids,
+                            prev_masks_for_iou,
+                            prev_ids_for_iou,
+                            iou_threshold=prescreen_cfg.get(
+                                "id_match_iou_threshold", 0.10
+                            ),
+                        )
+                    else:
+                        id_map = {int(pid): int(pid) for pid in ps_ids}
+                else:
+                    id_map = {int(pid): int(pid) for pid in ps_ids}
+
+                ps_masks_array = np.stack(
                     [
                         m.squeeze(0) if m.ndim == 3 and m.shape[0] == 1 else m
-                        for m in masks_list
+                        for m in ps_masks
                     ]
                 )
-                # Sample points from all masks -> (N, num_points, 2) in (x, y)
-                point_method = cfg.get("point_extraction_method", "equidistant")
-                if point_method == "equidistant":
-                    sampled = extract_equidistant_points_from_masks(
-                        masks_array, num_points=3
-                    )
-                else:
-                    sampled = sample_points_from_masks(masks_array, num_points=3)
-                for i, obj_id in enumerate(object_ids_list):
+                sampled = extract_equidistant_points_from_masks(
+                    ps_masks_array, num_points=3
+                )
+                prescreen_prompt_points = {}
+                for i, ps_id in enumerate(ps_ids):
+                    mapped_id = id_map.get(int(ps_id), int(ps_id))
                     pts = sampled[i]
                     if pts.size > 0:
-                        all_prompt_points[obj_id] = pts.tolist()
+                        prescreen_prompt_points[mapped_id] = pts.tolist()
 
-                if all_prompt_points:
+                if prescreen_prompt_points:
+                    all_prompt_points = prescreen_prompt_points
                     use_tracker = True
                     chunk_info["model_type"] = "Sam3TrackerVideoModel"
                     chunk_info["prompt_points"] = {
                         str(k): v for k, v in all_prompt_points.items()
                     }
                     chunk_info["num_objects_tracked"] = len(all_prompt_points)
-                    chunk_info["source_frame_idx"] = int(source_frame_idx)
+                    chunk_info["prescreen_used"] = True
+                    chunk_info["prescreen_source_frame_idx"] = int(ps_frame_idx)
+                    chunk_info["prescreen_num_objects"] = len(prescreen_prompt_points)
+                    logger.info(
+                        f"  [prescreen] fresh text-grounded points from frame {ps_frame_idx} "
+                        f"({len(prescreen_prompt_points)} objects)"
+                    )
                 else:
-                    chunk_info["fallback_reason"] = "could_not_extract_points"
+                    chunk_info["prescreen_fallback_reason"] = "no_points_extracted"
+                    logger.warning("[prescreen] point extraction failed")
+
             else:
-                chunk_info["fallback_reason"] = "no_objects_found"
+                # No qualifying frame in prescreen — try prev-chunk fallback
+                chunk_info["prescreen_fallback_reason"] = "insufficient_objects"
+                logger.warning("[prescreen] no qualifying frame found")
+
+                if (
+                    prescreen_cfg.get("fallback_to_prev_chunk", True)
+                    and previous_chunk_outputs is not None
+                ):
+                    source_frame_idx, masks_list, boxes_list, object_ids_list = (
+                        find_frame_with_enough_objects(
+                            previous_chunk_outputs,
+                            min_objects=cfg.min_objects_for_tracking,
+                            max_lookback=cfg.max_lookback_frames,
+                        )
+                    )
+                    if source_frame_idx is not None and len(masks_list) > 0:
+                        masks_array = np.stack(
+                            [
+                                m.squeeze(0) if m.ndim == 3 and m.shape[0] == 1 else m
+                                for m in masks_list
+                            ]
+                        )
+                        point_method = cfg.get("point_extraction_method", "equidistant")
+                        if point_method == "equidistant":
+                            sampled = extract_equidistant_points_from_masks(
+                                masks_array, num_points=3
+                            )
+                        else:
+                            sampled = sample_points_from_masks(
+                                masks_array, num_points=3
+                            )
+                        for i, obj_id in enumerate(object_ids_list):
+                            pts = sampled[i]
+                            if pts.size > 0:
+                                all_prompt_points[obj_id] = pts.tolist()
+
+                        if all_prompt_points:
+                            use_tracker = True
+                            chunk_info["model_type"] = "Sam3TrackerVideoModel"
+                            chunk_info["prompt_points"] = {
+                                str(k): v for k, v in all_prompt_points.items()
+                            }
+                            chunk_info["num_objects_tracked"] = len(all_prompt_points)
+                            chunk_info["source_frame_idx"] = int(source_frame_idx)
+                            logger.warning(
+                                "[prescreen] using previous-chunk points as fallback"
+                            )
+                        else:
+                            chunk_info["fallback_reason"] = "could_not_extract_points"
+                    else:
+                        chunk_info["fallback_reason"] = "no_objects_found"
+
+            # Incrementally save prescreen outputs (mirrors tracking_outputs.parquet pattern)
+            ps_chunk_df = process_tracking_outputs(prescreen_outputs)
+            ps_chunk_df = ps_chunk_df.sort_index()
+            if prescreen_results_path.exists():
+                ps_existing_df = pd.read_parquet(prescreen_results_path)
+                ps_chunk_df = pd.concat([ps_existing_df, ps_chunk_df]).sort_index()
+                del ps_existing_df
+            ps_chunk_df.to_parquet(prescreen_results_path)
+            del ps_chunk_df
+            logger.info(f"Prescreen outputs saved to {prescreen_results_path} (chunk {chunk_idx})")
+
+            del prescreen_outputs
+            free_gpu_memory()
+
+        else:
+            # --- Original logic (prescreen disabled) ---
+            if chunk_type == "tracker" and previous_chunk_outputs is not None:
+                source_frame_idx, masks_list, boxes_list, object_ids_list = (
+                    find_frame_with_enough_objects(
+                        previous_chunk_outputs,
+                        min_objects=cfg.min_objects_for_tracking,
+                        max_lookback=cfg.max_lookback_frames,
+                    )
+                )
+                if source_frame_idx is not None and len(masks_list) > 0:
+                    masks_array = np.stack(
+                        [
+                            m.squeeze(0) if m.ndim == 3 and m.shape[0] == 1 else m
+                            for m in masks_list
+                        ]
+                    )
+                    point_method = cfg.get("point_extraction_method", "equidistant")
+                    if point_method == "equidistant":
+                        sampled = extract_equidistant_points_from_masks(
+                            masks_array, num_points=3
+                        )
+                    else:
+                        sampled = sample_points_from_masks(masks_array, num_points=3)
+                    for i, obj_id in enumerate(object_ids_list):
+                        pts = sampled[i]
+                        if pts.size > 0:
+                            all_prompt_points[obj_id] = pts.tolist()
+
+                    if all_prompt_points:
+                        use_tracker = True
+                        chunk_info["model_type"] = "Sam3TrackerVideoModel"
+                        chunk_info["prompt_points"] = {
+                            str(k): v for k, v in all_prompt_points.items()
+                        }
+                        chunk_info["num_objects_tracked"] = len(all_prompt_points)
+                        chunk_info["source_frame_idx"] = int(source_frame_idx)
+                    else:
+                        chunk_info["fallback_reason"] = "could_not_extract_points"
+                else:
+                    chunk_info["fallback_reason"] = "no_objects_found"
 
         if not use_tracker:
             if chunk_info["fallback_reason"] is None:
-                chunk_info["fallback_reason"] = "first_chunk"
+                chunk_info["fallback_reason"] = (
+                    "first_chunk" if chunk_idx == 0 else "prescreen_failed_no_fallback"
+                )
             chunk_info["model_type"] = "Sam3VideoModel"
 
         # --- Process chunk with appropriate model ---
@@ -838,7 +1141,9 @@ def _run_single_video(cfg, run_dir: Path, config_path: Path | None = None):
                 chunk_frames, global_start_idx, all_prompt_points, cfg, device
             )
         else:
-            chunk_outputs = _process_video_chunk(chunk_frames, global_start_idx, cfg, device)
+            chunk_outputs = _process_video_chunk(
+                chunk_frames, global_start_idx, cfg, device
+            )
 
         # Stop timer and calculate metrics
         elapsed_seconds = timer.end()
@@ -994,7 +1299,8 @@ def _run_batch(cfg, video_dir: Path, job_type: str):
     """Process all video files in video_dir, each in its own subdirectory."""
     VIDEO_EXTENSIONS = {".mp4", ".avi", ".mov", ".mkv", ".m4v"}
     video_files = sorted(
-        f for f in video_dir.iterdir()
+        f
+        for f in video_dir.iterdir()
         if f.is_file() and f.suffix.lower() in VIDEO_EXTENSIONS
     )
     if not video_files:
