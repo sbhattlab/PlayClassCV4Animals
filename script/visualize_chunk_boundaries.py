@@ -1,3 +1,4 @@
+import json
 from argparse import ArgumentParser
 from datetime import datetime
 from pathlib import Path
@@ -9,10 +10,14 @@ from omegaconf import OmegaConf
 
 def parse_args():
     parser = ArgumentParser(
-        description="Visualize chunk boundary frames from a config file"
+        description="Visualize chunk boundary frames from a config file or prescan run directory"
     )
-    parser.add_argument(
-        "config", help="Path to YAML config (e.g. config/manual_chunking.yaml)"
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument(
+        "--config", help="Path to YAML config with manual_chunk_frames"
+    )
+    group.add_argument(
+        "--run-dir", help="Path to a prescan run directory containing chunk_info.json"
     )
     parser.add_argument(
         "--output-dir", default=None, help="Directory to save the output image"
@@ -39,16 +44,28 @@ def fmt_timestamp(frame_idx, fps):
 def main():
     args = parse_args()
 
-    cfg = OmegaConf.load(args.config)
-
     if args.output_dir is None:
         output_dir = Path("sandbox")
     else:
         output_dir = Path(args.output_dir)
     output_dir.mkdir(exist_ok=True, parents=True)
 
-    video_path = cfg.video_path
-    chunks = list(cfg.manual_chunk_frames)  # list of [start, end] pairs
+    if args.config:
+        cfg = OmegaConf.load(args.config)
+        video_path = cfg.video_path
+        chunks = list(cfg.manual_chunk_frames)  # list of [start, end] pairs
+    else:
+        run_dir = Path(args.run_dir)
+        chunk_info_path = run_dir / "chunk_info.json"
+        assert chunk_info_path.exists(), f"No chunk_info.json found in: {run_dir}"
+        with open(chunk_info_path) as f:
+            chunk_info = json.load(f)
+        # Read video_path from the config copy saved in the run dir
+        config_copies = list(run_dir.glob("*.yaml"))
+        assert config_copies, f"No YAML config copy found in: {run_dir}"
+        cfg = OmegaConf.load(config_copies[0])
+        video_path = cfg.video_path
+        chunks = [c["frame_range"] for c in chunk_info["chunks"]]
 
     cap = cv2.VideoCapture(video_path)
     assert cap.isOpened(), f"Could not open video: {video_path}"

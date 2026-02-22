@@ -817,7 +817,7 @@ def _run_single_video(cfg, run_dir: Path, config_path: Path | None = None):
                             "adaptive_max_chunk_seconds", 90
                         ),
                         video_path=video_path_for_sensitivity,
-                        generate_video=False,
+                        generate_occlusion_overlays_video=False,
                     )
                     logger.info("=" * 60)
                     logger.info("Parameter sensitivity analysis complete")
@@ -884,6 +884,11 @@ def _run_single_video(cfg, run_dir: Path, config_path: Path | None = None):
                         for i, (s, e, mtype) in enumerate(chunks)
                     ]
                 }
+
+                chunk_info_path = run_dir / "chunk_info.json"
+                with open(chunk_info_path, "w") as f:
+                    json.dump(chunk_info_for_viz, f, indent=2)
+                logger.info(f"Chunk info saved to: {chunk_info_path}")
 
                 viz_dir = run_dir / "visualizations"
                 generate_all_visualizations(
