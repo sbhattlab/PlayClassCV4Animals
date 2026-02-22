@@ -18,6 +18,7 @@ tracker_chunk_seconds: 45
 
 prescan_only: false
 use_adaptive_chunking: false
+use_separation_chunking: false
 run_parameter_sensitivity: false
 
 # Full-video chunk boundaries (commented out — kept for reference)

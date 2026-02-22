@@ -199,6 +199,8 @@ def compute_yolo_per_frame_metrics(
     occlusion_iou_threshold: float = 0.15,
     clustering_distance_threshold: float = 0.15,  # normalized coordinates
     use_normalized_coords: bool = True,
+    separation_min_objects: int = 3,
+    separation_min_distance: float = 0.15,
 ) -> List[Dict[str, Any]]:
     """
     Compute per-frame spatial, overlap, and bbox quality metrics from YOLO tracking.
@@ -211,6 +213,8 @@ def compute_yolo_per_frame_metrics(
         occlusion_iou_threshold: bbox IoU above which a pair is "overlapping"
         clustering_distance_threshold: centroid distance for clustering coefficient
         use_normalized_coords: use cx_norm/cy_norm for distances (recommended)
+        separation_min_objects: minimum objects for a non-zero separation_score
+        separation_min_distance: minimum min_centroid_distance for separation_score
 
     Returns:
         List of dicts (sorted by frame), one per frame with metrics:
@@ -229,6 +233,7 @@ def compute_yolo_per_frame_metrics(
         - is_high_occlusion: flag (high IoU or high clustering)
         - is_object_count_change: object count changed from prev frame
         - mean_confidence: mean YOLO detection confidence
+        - separation_score: per-frame subject separation quality in [0, 1]
     """
     results: List[Dict[str, Any]] = []
     prev_num_objects: Optional[int] = None
@@ -260,6 +265,7 @@ def compute_yolo_per_frame_metrics(
                     "is_object_count_change": prev_num_objects is not None
                     and prev_num_objects != 0,
                     "mean_confidence": 0.0,
+                    "separation_score": 0.0,
                 }
             )
             prev_num_objects = 0
@@ -313,6 +319,15 @@ def compute_yolo_per_frame_metrics(
         is_high_occ = max_iou > occlusion_iou_threshold or clust_coef > 0.5
         is_count_change = prev_num_objects is not None and prev_num_objects != n
 
+        sep_score = compute_separation_score(
+            num_objects=n,
+            min_centroid_distance=min_dist,
+            clustering_coefficient=float(clust_coef),
+            num_overlapping_pairs=num_overlap,
+            min_objects=separation_min_objects,
+            min_separation_distance=separation_min_distance,
+        )
+
         results.append(
             {
                 "frame_idx": int(frame_idx),
@@ -331,11 +346,115 @@ def compute_yolo_per_frame_metrics(
                 "is_high_occlusion": is_high_occ,
                 "is_object_count_change": is_count_change,
                 "mean_confidence": mean_conf,
+                "separation_score": sep_score,
             }
         )
         prev_num_objects = n
 
     return results
+
+
+def compute_separation_score(
+    num_objects: int,
+    min_centroid_distance: float,
+    clustering_coefficient: float,
+    num_overlapping_pairs: int,
+    min_objects: int = 3,
+    min_separation_distance: float = 0.15,
+) -> float:
+    """
+    Per-frame separation quality score in [0, 1].
+
+    Returns 0 for frames that fail the hard gates (too few objects, any
+    overlap, or subjects too close). Otherwise:
+        min(min_centroid_distance, 1.0) * (1 - clustering_coefficient)
+
+    Args:
+        num_objects: Number of detected objects in the frame.
+        min_centroid_distance: Minimum pairwise centroid distance (normalised).
+        clustering_coefficient: Fraction of pairs within the clustering threshold.
+        num_overlapping_pairs: Count of bbox pairs with IoU above threshold.
+        min_objects: Minimum objects required to score above zero.
+        min_separation_distance: Minimum min_centroid_distance required.
+
+    Returns:
+        Float in [0, 1]. Higher = subjects more spread out and unambiguous.
+    """
+    if (
+        num_objects < min_objects
+        or num_overlapping_pairs > 0
+        or min_centroid_distance == float("inf")
+        or min_centroid_distance < min_separation_distance
+    ):
+        return 0.0
+    return min(min_centroid_distance, 1.0) * (1.0 - clustering_coefficient)
+
+
+def find_high_separation_windows(
+    per_frame_metrics: List[Dict[str, Any]],
+    min_objects: int = 3,
+    min_separation_distance: float = 0.15,
+    min_window_frames: int = 25,
+    gap_tolerance_frames: int = 5,
+) -> List[Tuple[int, int]]:
+    """
+    Find sustained periods of high subject separation.
+
+    A frame qualifies when its separation score > 0 (i.e. num_objects >=
+    min_objects, num_overlapping_pairs == 0, and min_centroid_distance >=
+    min_separation_distance).  Contiguous runs of qualifying frames — where
+    the gap to the next qualifying frame is <= gap_tolerance_frames — that
+    span >= min_window_frames total are returned as (start_frame, end_frame)
+    tuples.
+
+    Args:
+        per_frame_metrics: Output of compute_yolo_per_frame_metrics.
+        min_objects: Minimum detections required for a frame to qualify.
+        min_separation_distance: Normalised centroid distance threshold.
+        min_window_frames: Minimum span (in frames) for a window to be kept.
+        gap_tolerance_frames: Frames with no detections that can be bridged
+            within a run without breaking it.
+
+    Returns:
+        List of (start_frame, end_frame) tuples, sorted by start_frame.
+    """
+    if not per_frame_metrics:
+        return []
+
+    qualifying = [
+        m["frame_idx"]
+        for m in sorted(per_frame_metrics, key=lambda m: m["frame_idx"])
+        if compute_separation_score(
+            num_objects=m["num_objects"],
+            min_centroid_distance=m["min_centroid_distance"],
+            clustering_coefficient=m["clustering_coefficient"],
+            num_overlapping_pairs=m["num_overlapping_pairs"],
+            min_objects=min_objects,
+            min_separation_distance=min_separation_distance,
+        ) > 0.0
+    ]
+
+    if not qualifying:
+        return []
+
+    windows: List[Tuple[int, int]] = []
+    run_start = qualifying[0]
+    run_end = qualifying[0]
+
+    for frame in qualifying[1:]:
+        if frame - run_end <= gap_tolerance_frames:
+            run_end = frame
+        else:
+            if run_end - run_start + 1 >= min_window_frames:
+                windows.append((run_start, run_end))
+            run_start = frame
+            run_end = frame
+
+    # Flush trailing run
+    if run_end - run_start + 1 >= min_window_frames:
+        windows.append((run_start, run_end))
+
+    return windows
 
 
 def identify_occlusion_periods(
@@ -409,6 +528,10 @@ def run_yolo_prescan(
     high_occlusion_threshold: float = 0.3,
     occlusion_iou_threshold: float = 0.15,
     clustering_distance_threshold: float = 0.15,
+    separation_min_objects: int = 3,
+    separation_min_distance: float = 0.15,
+    separation_min_window_seconds: float = 1.0,
+    separation_gap_tolerance_frames: int = 5,
     output_video_path: str | Path | None = None,
 ) -> Dict[str, Any]:
     """
@@ -633,6 +756,10 @@ def run_yolo_prescan(
         high_occlusion_threshold=high_occlusion_threshold,
         occlusion_iou_threshold=occlusion_iou_threshold,
         clustering_distance_threshold=clustering_distance_threshold,
+        separation_min_objects=separation_min_objects,
+        separation_min_distance=separation_min_distance,
+        separation_min_window_seconds=separation_min_window_seconds,
+        separation_gap_tolerance_frames=separation_gap_tolerance_frames,
     )
 
     logger.info(
@@ -656,9 +783,13 @@ def compute_yolo_prescan_results(
     high_occlusion_threshold: float = 0.3,
     occlusion_iou_threshold: float = 0.15,
     clustering_distance_threshold: float = 0.15,
+    separation_min_objects: int = 3,
+    separation_min_distance: float = 0.15,
+    separation_min_window_seconds: float = 1.0,
+    separation_gap_tolerance_frames: int = 5,
 ) -> Dict[str, Any]:
     """
-    Run full YOLO-based pre-scan analysis to identify occlusion periods.
+    Run full YOLO-based pre-scan analysis: occlusion periods + separation windows.
 
     This is the main entry point that parallels the KMeans pre-scan but uses
     semantic object detection instead of pixel clustering.
@@ -670,24 +801,36 @@ def compute_yolo_prescan_results(
         high_occlusion_threshold: fraction of frames flagged in window
         occlusion_iou_threshold: bbox IoU threshold for overlap
         clustering_distance_threshold: normalized centroid distance threshold
+        separation_min_objects: minimum detections for a frame to qualify as
+            high-separation (used for both per-frame score and window detection)
+        separation_min_distance: minimum normalised centroid distance for
+            a frame to qualify as high-separation
+        separation_min_window_seconds: minimum duration (seconds) of a
+            sustained high-separation run to be returned as a window
+        separation_gap_tolerance_frames: frames with no qualifying detections
+            that can be bridged without breaking a separation run
 
     Returns:
         Dict containing:
-        - per_frame_metrics: List[Dict] with spatial metrics per frame
+        - per_frame_metrics: List[Dict] with spatial metrics + separation_score
         - occlusion_periods: List[(start_frame, end_frame)] high-occlusion periods
         - transition_frames: np.ndarray of frames where occlusion changes
+        - separation_windows: List[(start_frame, end_frame)] high-separation windows
         - total_frames: int, total frame count
         - video_duration_seconds: float
         - fps: float
     """
     window_frames = int(window_seconds * fps)
+    separation_min_window_frames = max(1, int(separation_min_window_seconds * fps))
 
-    # Compute per-frame metrics
+    # Compute per-frame metrics (includes separation_score)
     per_frame_metrics = compute_yolo_per_frame_metrics(
         yolo_df,
         occlusion_iou_threshold=occlusion_iou_threshold,
         clustering_distance_threshold=clustering_distance_threshold,
         use_normalized_coords=True,
+        separation_min_objects=separation_min_objects,
+        separation_min_distance=separation_min_distance,
     )
 
     # Identify occlusion periods
@@ -703,13 +846,28 @@ def compute_yolo_prescan_results(
         transition_frames.extend([start, end])
     transition_frames = np.array(sorted(set(transition_frames)))
 
+    # Identify high-separation windows
+    separation_windows = find_high_separation_windows(
+        per_frame_metrics,
+        min_objects=separation_min_objects,
+        min_separation_distance=separation_min_distance,
+        min_window_frames=separation_min_window_frames,
+        gap_tolerance_frames=separation_gap_tolerance_frames,
+    )
+
     total_frames = yolo_df["frame"].max()
     video_duration = total_frames / fps
+
+    logger.info(
+        f"YOLO prescan: {len(separation_windows)} high-separation windows found "
+        f"(min_distance={separation_min_distance}, min_objects={separation_min_objects})"
+    )
 
     return {
         "per_frame_metrics": per_frame_metrics,
         "occlusion_periods": occlusion_periods,
         "transition_frames": transition_frames,
+        "separation_windows": separation_windows,
         "total_frames": int(total_frames),
         "video_duration_seconds": float(video_duration),
         "fps": float(fps),

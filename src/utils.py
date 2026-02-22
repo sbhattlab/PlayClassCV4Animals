@@ -329,6 +329,129 @@ def chunk_video_frames_adaptive(
     return adjusted_chunks
 
 
+def chunk_video_frames_separation(
+    fixed_chunks: list[tuple[int, int, str]],
+    separation_windows: list[tuple[int, int]],
+    per_frame_metrics: list[dict],
+    fps: float,
+    search_window_seconds: float = 10.0,
+    min_chunk_seconds: float = 15.0,
+    max_chunk_seconds: float = 90.0,
+) -> list[tuple[int, int, str]]:
+    """
+    Adjust chunk boundaries to land inside high-separation windows.
+
+    For each tracker-chunk boundary (index 1+), searches within
+    ±search_window_seconds for separation windows.  Within any qualifying
+    window found, picks the frame with the highest separation_score.
+    Falls back to the original boundary if no window is found nearby or if
+    size constraints would be violated.
+
+    Args:
+        fixed_chunks: Output of chunk_video_frames_dual() or build_manual_chunks().
+        separation_windows: List of (start_frame, end_frame) tuples from
+            find_high_separation_windows().
+        per_frame_metrics: List of per-frame metric dicts (must contain
+            'frame_idx' and 'separation_score').
+        fps: Video frame rate.
+        search_window_seconds: Search radius around each boundary.
+        min_chunk_seconds: Minimum allowed chunk duration after adjustment.
+        max_chunk_seconds: Maximum allowed chunk duration after adjustment.
+
+    Returns:
+        Adjusted chunks in the same (start, end, model_type) format.
+    """
+    if len(fixed_chunks) <= 1 or not separation_windows:
+        return fixed_chunks
+
+    search_window_frames = int(search_window_seconds * fps)
+    min_frames = int(min_chunk_seconds * fps)
+    max_frames = int(max_chunk_seconds * fps)
+
+    # Build frame → separation_score lookup (only non-zero scores needed)
+    score_lookup: dict[int, float] = {
+        m["frame_idx"]: m["separation_score"]
+        for m in per_frame_metrics
+        if m.get("separation_score", 0.0) > 0.0
+    }
+
+    boundaries = [c[0] for c in fixed_chunks]
+    total_end = fixed_chunks[-1][1]
+    adjusted_boundaries = list(boundaries)
+
+    for i in range(1, len(adjusted_boundaries)):
+        original = adjusted_boundaries[i]
+        search_start = max(0, original - search_window_frames)
+        search_end = min(total_end, original + search_window_frames)
+
+        # Collect candidate frames: inside a separation window AND in search range
+        candidates: dict[int, float] = {}
+        for win_start, win_end in separation_windows:
+            overlap_start = max(win_start, search_start)
+            overlap_end = min(win_end, search_end)
+            if overlap_start > overlap_end:
+                continue
+            for frame, score in score_lookup.items():
+                if overlap_start <= frame <= overlap_end:
+                    candidates[frame] = score
+
+        if not candidates:
+            logger.debug(
+                f"Separation boundary {i}: frame {original} — no separation windows "
+                f"in ±{search_window_seconds}s, keeping original"
+            )
+            continue
+
+        # Pick frame with highest separation score
+        best_candidate = max(candidates, key=lambda f: candidates[f])
+        shift = best_candidate - original
+
+        # Validate chunk sizes
+        prev_start = adjusted_boundaries[i - 1]
+        next_end = (
+            adjusted_boundaries[i + 1]
+            if i + 1 < len(adjusted_boundaries)
+            else total_end
+        )
+        prev_chunk_len = best_candidate - prev_start
+        next_chunk_len = next_end - best_candidate
+
+        if prev_chunk_len < min_frames or prev_chunk_len > max_frames:
+            logger.debug(
+                f"Separation boundary {i}: frame {original} → {best_candidate} rejected "
+                f"(prev chunk {prev_chunk_len / fps:.1f}s outside "
+                f"[{min_chunk_seconds}-{max_chunk_seconds}]s)"
+            )
+            continue
+        if next_chunk_len < min_frames or next_chunk_len > max_frames:
+            logger.debug(
+                f"Separation boundary {i}: frame {original} → {best_candidate} rejected "
+                f"(next chunk {next_chunk_len / fps:.1f}s outside "
+                f"[{min_chunk_seconds}-{max_chunk_seconds}]s)"
+            )
+            continue
+
+        adjusted_boundaries[i] = best_candidate
+        logger.info(
+            f"Separation boundary {i}: frame {original} → {best_candidate} "
+            f"(shifted {shift:+d} frames, separation_score={candidates[best_candidate]:.3f})"
+        )
+
+    # Rebuild chunks from adjusted boundaries
+    adjusted_chunks = []
+    for i in range(len(adjusted_boundaries)):
+        start = adjusted_boundaries[i]
+        end = (
+            adjusted_boundaries[i + 1]
+            if i + 1 < len(adjusted_boundaries)
+            else total_end
+        )
+        model_type = fixed_chunks[i][2]
+        adjusted_chunks.append((start, end, model_type))
+
+    return adjusted_chunks
+
+
 def chunk_video_frames_dual(
     total_frames: int,
     fps: float,

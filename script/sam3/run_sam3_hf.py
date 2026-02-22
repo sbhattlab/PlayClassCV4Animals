@@ -72,6 +72,7 @@ from src.utils import (  # noqa: E402
     build_manual_chunks,
     chunk_video_frames_adaptive,
     chunk_video_frames_dual,
+    chunk_video_frames_separation,
     create_run_directory,
     extract_equidistant_points_from_masks,
     find_frame_with_enough_objects,
@@ -646,6 +647,7 @@ def _run_single_video(cfg, run_dir: Path, config_path: Path | None = None):
     # Read prescan/chunking flags early so manual chunking can override them
     prescan_only = cfg.get("prescan_only", False)
     use_adaptive_chunking = cfg.get("use_adaptive_chunking", False)
+    use_separation_chunking = cfg.get("use_separation_chunking", False)
 
     # Compute fixed chunks (baseline, may be overridden by manual chunking)
     chunks = chunk_video_frames_dual(
@@ -680,6 +682,11 @@ def _run_single_video(cfg, run_dir: Path, config_path: Path | None = None):
                 "use_adaptive_chunking is invalid with manual_chunk_frames — ignoring"
             )
             use_adaptive_chunking = False
+        if use_separation_chunking:
+            logger.warning(
+                "use_separation_chunking is invalid with manual_chunk_frames — ignoring"
+            )
+            use_separation_chunking = False
         if cfg.get("run_parameter_sensitivity", False):
             logger.warning(
                 "run_parameter_sensitivity is invalid with manual_chunk_frames — ignoring"
@@ -690,11 +697,12 @@ def _run_single_video(cfg, run_dir: Path, config_path: Path | None = None):
     # YOLO prescan data (populated when prescan or adaptive chunking is enabled)
     yolo_prescan_metrics_df = None
     yolo_occlusion_periods = None
+    yolo_separation_windows = []
 
     # -----------------------------------------------------------------------
     # Run YOLO prescan if requested (prescan_only or use_adaptive_chunking)
     # -----------------------------------------------------------------------
-    if prescan_only or use_adaptive_chunking:
+    if prescan_only or use_adaptive_chunking or use_separation_chunking:
         if prescan_only:
             logger.info("=" * 60)
             logger.info("PRESCAN-ONLY MODE — running YOLO pre-scan only")
@@ -723,6 +731,16 @@ def _run_single_video(cfg, run_dir: Path, config_path: Path | None = None):
             clustering_distance_threshold=yolo_cfg.get(
                 "clustering_distance_threshold", 0.15
             ),
+            separation_min_objects=yolo_cfg.get(
+                "separation_min_objects", cfg.get("min_objects_for_tracking", 3)
+            ),
+            separation_min_distance=yolo_cfg.get("separation_min_distance", 0.15),
+            separation_min_window_seconds=yolo_cfg.get(
+                "separation_min_window_seconds", 1.0
+            ),
+            separation_gap_tolerance_frames=yolo_cfg.get(
+                "separation_gap_tolerance_frames", 5
+            ),
             output_video_path=run_dir / "yolo_tracking.mp4",
         )
 
@@ -742,9 +760,10 @@ def _run_single_video(cfg, run_dir: Path, config_path: Path | None = None):
             prescan_metrics_df.to_parquet(prescan_metrics_path, index=False)
             logger.info(f"YOLO prescan metrics saved to: {prescan_metrics_path}")
 
-            # Store for visualization
+            # Store for visualization and chunking
             yolo_prescan_metrics_df = prescan_metrics_df
             yolo_occlusion_periods = prescan_results["occlusion_periods"]
+            yolo_separation_windows = prescan_results.get("separation_windows", [])
 
         # Save summary as single-row Parquet
         prescan_summary_df = pd.DataFrame(
@@ -826,6 +845,26 @@ def _run_single_video(cfg, run_dir: Path, config_path: Path | None = None):
                 min_chunk_seconds=cfg.get("adaptive_min_chunk_seconds", 15),
                 max_chunk_seconds=cfg.get("adaptive_max_chunk_seconds", 90),
             )
+
+        if use_separation_chunking and not yolo_df.empty:
+            if yolo_separation_windows:
+                yolo_cfg = cfg.get("yolo_prescan", {})
+                chunks = chunk_video_frames_separation(
+                    chunks,
+                    yolo_separation_windows,
+                    prescan_results["per_frame_metrics"],
+                    fps,
+                    search_window_seconds=cfg.get("adaptive_search_window_seconds", 10.0),
+                    min_chunk_seconds=cfg.get("adaptive_min_chunk_seconds", 15),
+                    max_chunk_seconds=cfg.get("adaptive_max_chunk_seconds", 90),
+                )
+                logger.info(
+                    f"Separation chunking applied: {len(yolo_separation_windows)} windows available"
+                )
+            else:
+                logger.warning(
+                    "use_separation_chunking: no separation windows found — keeping fixed chunks"
+                )
 
         # Exit early if prescan-only mode
         if prescan_only:
