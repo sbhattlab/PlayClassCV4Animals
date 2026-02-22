@@ -38,9 +38,11 @@ tracker_chunk_seconds: 45      # Duration of subsequent chunks (Sam3TrackerVideo
 prescan_only: true
 
 # Occlusion-aware adaptive chunking (YOLO-based pre-scan)
-use_adaptive_chunking: true          # Enable adaptive boundary placement via YOLO pre-scan
+use_adaptive_chunking: false          # Enable adaptive boundary placement via YOLO pre-scan
+use_separation_chunking: true       # Snap boundaries to high-separation windows (alternative to adaptive)
 adaptive_min_chunk_seconds: 15       # Minimum chunk duration after adjustment
 adaptive_max_chunk_seconds: 360       # Maximum chunk duration after adjustment
+adaptive_search_window_seconds: 10.0 # Search radius (seconds) around each boundary
 
 # YOLO-based pre-scan configuration (used when use_adaptive_chunking: true)
 yolo_prescan:
@@ -55,7 +57,12 @@ yolo_prescan:
   high_occlusion_threshold: 0.3
   occlusion_iou_threshold: 0.15
   clustering_distance_threshold: 0.15
+  # Separation window detection (used when use_separation_chunking: true)
+  separation_min_objects: 3          # Minimum detections for a frame to qualify
+  separation_min_distance: 0.15      # Minimum normalised centroid distance
+  separation_min_window_seconds: 1.0 # Minimum sustained duration of a window
+  separation_gap_tolerance_frames: 5 # No-detection frames that can bridge a run
 
 # Parameter sensitivity testing (only runs when prescan_only or use_adaptive_chunking is true)
-run_parameter_sensitivity: true  # Test multiple threshold combinations on prescan results
-generate_occlusion_overlays_video : true # Generate video output with occlusion periods highlighted
+run_parameter_sensitivity: false  # Test multiple threshold combinations on prescan results
+generate_occlusion_overlays_video : false # Generate video output with occlusion periods highlighted
