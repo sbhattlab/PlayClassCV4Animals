@@ -16,9 +16,8 @@ max_frames_to_track: 0
 video_model_chunk_seconds: 15
 tracker_chunk_seconds: 45
 
-prescan_only: false
+yolo_scan_only: false
 use_adaptive_chunking: false
-use_separation_chunking: false
 run_parameter_sensitivity: false
 
 manual_chunk_frames:
@@ -54,17 +53,17 @@ mid_chunk_reseed:
   cooldown_frames: 100      # minimum frames between reseeds (~4 s @ 25 fps)
 
 # =============================================================================
-# Text Prescreen Re-Grounding
+# Text Grounding Re-Grounding
 # Run Sam3VideoModel on first N frames of each tracker chunk for fresh
 # text-grounded detections, replacing drifted point prompts from prev chunk.
-# Cost: ~same as Chunk 0 per tracker chunk. Keep prescreen_frames small.
+# Cost: ~same as Chunk 0 per tracker chunk. Keep grounding_frames small.
 # =============================================================================
-text_prescreen:
+text_grounding:
   enabled: true                  # Off by default
-  prescreen_frames: 75            # Frames to prescreen (~3 s at 25 fps)
-  min_objects: 3                  # Min detections to accept prescreen result
+  grounding_frames: 75            # Frames to ground (~3 s at 25 fps)
+  min_objects: 3                  # Min detections to accept grounding result
   best_frame_method: "combined"   # "combined" | "min_occlusion" | "best_scores"
-  fallback_to_prev_chunk: true    # Fall back to prev-chunk points if prescreen fails
+  fallback_to_prev_chunk: true    # Fall back to prev-chunk points if grounding fails
   id_matching: true               # Remap fresh IDs to previous chunk IDs
   id_match_iou_threshold: 0.10    # Min mask IoU to accept an ID assignment
 
@@ -73,7 +72,6 @@ text_prescreen:
 # =============================================================================
 min_objects_for_tracking: 3 # Minimum objects to look for in previous chunk
 max_lookback_frames: 10 # Max frames to look back
-point_extraction_method: "equidistant"  # "equidistant" (deterministic, better coverage) or "random"
 
 # =============================================================================
 # Sam3VideoConfig Tracking Parameters

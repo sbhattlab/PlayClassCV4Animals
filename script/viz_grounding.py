@@ -1,12 +1,12 @@
 """
-Render prescreen_outputs.parquet onto the original video.
+Render grounding_outputs.parquet onto the original video.
 
-Each chunk's prescreen window is saved as a separate annotated clip inside
-<run_dir>/visualizations/prescreen_clips/.  A title card at the top of each
+Each chunk's grounding window is saved as a separate annotated clip inside
+<run_dir>/visualizations/grounding_clips/.  A title card at the top of each
 frame shows the chunk index and frame number.
 
 Usage (from project root):
-    pixi run -e sam3-hf python -m script.viz_prescreen \
+    pixi run -e sam3-hf python -m script.viz_grounding \
         --run-dir ext-data/output/results/sam3-hf/20260222_221702_sam3_hf
 
 Optional flags:
@@ -85,13 +85,13 @@ def _add_title(frame: np.ndarray, text: str) -> np.ndarray:
     return out
 
 
-def render_prescreen_clips(
+def render_grounding_clips(
     run_dir: Path,
     video_path: Path,
     chunks_to_render: list[int] | None = None,
 ):
     # ---- Load artefacts ---------------------------------------------------
-    df = pd.read_parquet(run_dir / "prescreen_outputs.parquet")
+    df = pd.read_parquet(run_dir / "grounding_outputs.parquet")
     with open(run_dir / "chunk_info.json") as f:
         chunk_info_raw = json.load(f)
     chunk_info = chunk_info_raw["chunks"]  # list of dicts
@@ -102,11 +102,11 @@ def render_prescreen_clips(
             print("No matching chunks found — check --chunks values.")
             return
 
-    # Group parquet by chunk using prescreen frame ranges
-    # Each prescreen window: [chunk_start, chunk_start + prescreen_length)
+    # Group parquet by chunk using grounding frame ranges
+    # Each grounding window: [chunk_start, chunk_start + grounding_length)
     # We reconstruct the window from the parquet frame indices per chunk.
 
-    out_dir = run_dir / "visualizations" / "prescreen_clips"
+    out_dir = run_dir / "visualizations" / "grounding_clips"
     out_dir.mkdir(parents=True, exist_ok=True)
 
     cap = cv2.VideoCapture(str(video_path))
@@ -119,39 +119,39 @@ def render_prescreen_clips(
     H = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     print(f"Video: {W}×{H} @ {fps:.1f} fps, {total_video_frames} frames")
 
-    # Frame index → parquet rows (only prescreen frames)
-    all_prescreen_frames = set(df.index.get_level_values("frame_idx").unique())
+    # Frame index → parquet rows (only grounding frames)
+    all_grounding_frames = set(df.index.get_level_values("frame_idx").unique())
 
     for ci in chunk_info:
         cidx = ci["chunk_idx"]
         chunk_start, chunk_end = ci["frame_range"]
 
-        # Identify which frames in this chunk have prescreen data
-        chunk_ps_frames = sorted(
-            f for f in all_prescreen_frames if chunk_start <= f < chunk_end
+        # Identify which frames in this chunk have grounding data
+        chunk_gs_frames = sorted(
+            f for f in all_grounding_frames if chunk_start <= f < chunk_end
         )
-        if not chunk_ps_frames:
-            print(f"  Chunk {cidx}: no prescreen frames found in parquet, skipping.")
+        if not chunk_gs_frames:
+            print(f"  Chunk {cidx}: no grounding frames found in parquet, skipping.")
             continue
 
-        ps_start = chunk_ps_frames[0]
-        ps_end = chunk_ps_frames[-1]
-        n_frames = len(chunk_ps_frames)
-        ps_source = ci.get("prescreen_source_frame_idx")
-        n_objects = ci.get("prescreen_num_objects", "?")
+        gs_start = chunk_gs_frames[0]
+        gs_end = chunk_gs_frames[-1]
+        n_frames = len(chunk_gs_frames)
+        gs_source = ci.get("grounding_source_frame_idx")
+        n_objects = ci.get("grounding_num_objects", "?")
 
-        print(f"  Chunk {cidx}: prescreen frames {ps_start}–{ps_end} "
-              f"({n_frames} frames, {n_objects} objects selected from frame {ps_source})")
+        print(f"  Chunk {cidx}: grounding frames {gs_start}–{gs_end} "
+              f"({n_frames} frames, {n_objects} objects selected from frame {gs_source})")
 
-        out_path = out_dir / f"prescreen_chunk{cidx:02d}.mp4"
+        out_path = out_dir / f"grounding_chunk{cidx:02d}.mp4"
         fourcc = cv2.VideoWriter_fourcc(*"mp4v")
         writer = cv2.VideoWriter(str(out_path), fourcc, fps, (W, H + 28))
 
-        # Seek to start of this prescreen window
-        cap.set(cv2.CAP_PROP_POS_FRAMES, ps_start)
-        current = ps_start
+        # Seek to start of this grounding window
+        cap.set(cv2.CAP_PROP_POS_FRAMES, gs_start)
+        current = gs_start
 
-        for fi in chunk_ps_frames:
+        for fi in chunk_gs_frames:
             # Advance to the correct frame (should be sequential, but handle gaps)
             if fi > current:
                 cap.set(cv2.CAP_PROP_POS_FRAMES, fi)
@@ -164,12 +164,12 @@ def render_prescreen_clips(
                 continue
             current += 1
 
-            # Get prescreen detections for this frame
+            # Get grounding detections for this frame
             if fi in df.index.get_level_values("frame_idx"):
                 frame_rows = df.loc[fi]
                 frame = _draw_frame(frame, frame_rows, cidx)
 
-            selected_marker = " ★" if fi == ps_source else ""
+            selected_marker = " ★" if fi == gs_source else ""
             title = (f"Chunk {cidx}  |  frame {fi}  |  "
                      f"chunk_start={chunk_start}{selected_marker}")
             frame = _add_title(frame, title)
@@ -183,7 +183,7 @@ def render_prescreen_clips(
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Render prescreen clips for a SAM3 run.")
+    parser = argparse.ArgumentParser(description="Render grounding clips for a SAM3 run.")
     parser.add_argument("--run-dir", required=True, type=Path)
     parser.add_argument("--video-path", type=Path, default=None,
                         help="Override video path (default: read from saved config)")
@@ -214,7 +214,7 @@ def main():
         print(f"Video not found: {video_path}", file=sys.stderr)
         sys.exit(1)
 
-    render_prescreen_clips(run_dir, video_path, chunks_to_render=args.chunks)
+    render_grounding_clips(run_dir, video_path, chunks_to_render=args.chunks)
 
 
 if __name__ == "__main__":

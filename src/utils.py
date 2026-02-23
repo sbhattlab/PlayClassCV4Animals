@@ -4,9 +4,11 @@ Utility functions for processing SAM3 tracking outputs.
 
 import gc
 import os
+import re
 import sys
 from datetime import datetime
 from pathlib import Path
+from typing import Callable
 
 import numpy as np
 import pandas as pd
@@ -90,66 +92,114 @@ def create_run_directory(base_output_dir: Path, job_type: str) -> Path:
 # ---------------------------------------------------------------------------
 # Chunking and model transition utilities
 # ---------------------------------------------------------------------------
+
+
 def chunk_video_frames_adaptive(
-    fixed_chunks: list[tuple[int, int, str]],
-    transition_frames: np.ndarray,
+    total_frames: int,
     fps: float,
+    video_model_seconds: int,
+    tracker_seconds: int,
+    separation_windows: list[tuple[int, int]] | None = None,
+    per_frame_metrics: list[dict] | None = None,
     occlusion_periods: list[tuple[int, int]] | None = None,
+    transition_frames: np.ndarray | None = None,
     search_window_seconds: float = 10.0,
     min_chunk_seconds: float = 15.0,
     max_chunk_seconds: float = 90.0,
     margin_seconds: float = 3.0,
 ) -> list[tuple[int, int, str]]:
     """
-    Adjust fixed chunk boundaries to avoid occlusion periods detected by pre-scan.
+    Split video into adaptive chunks, optionally refined by separation windows
+    or occlusion avoidance.
 
-    For each tracker-chunk boundary (skip chunk 0), searches within ±search_window
-    for frames that are OUTSIDE occlusion periods (with margin). Prefers frames
-    that are farthest from any occlusion period. Falls back to original boundary
-    if no good candidate is found or if constraints are violated.
+    Generates initial fixed chunks (chunk 0 → video model, remainder → tracker),
+    then for each tracker-chunk boundary refines in priority order:
+
+      1. Separation-first: if ``separation_windows`` and ``per_frame_metrics``
+         are provided, search ±search_window_seconds for frames inside a
+         separation window and pick the highest separation_score.
+      2. Occlusion avoidance: if ``occlusion_periods`` are provided, search for
+         frames outside occlusion periods (+margin_seconds buffer) and prefer
+         frames farthest from any occlusion.
+      3. No-op: keep original boundary if neither applies or constraints are
+         violated.
+
+    Validates against min_chunk_seconds / max_chunk_seconds and absorbs trailing
+    remainders < 10% of tracker chunk size.
 
     Args:
-        fixed_chunks: Output from chunk_video_frames_dual().
-        transition_frames: Array of frame indices where scene state changes
-            (e.g. from YOLO occlusion detection). Used for legacy compatibility
-            but DEPRECATED - occlusion_periods are preferred.
+        total_frames: Total number of frames in the video.
         fps: Video frame rate.
-        occlusion_periods: List of (start_frame, end_frame) tuples marking
-            high-occlusion periods that should be avoided. If None, falls back
-            to legacy transition-based logic.
+        video_model_seconds: Duration of the first (text-prompted) chunk in seconds.
+        tracker_seconds: Duration of subsequent (point-prompted) chunks in seconds.
+        separation_windows: List of (start_frame, end_frame) high-separation windows.
+            When provided together with per_frame_metrics, enables separation-first
+            boundary refinement.
+        per_frame_metrics: Per-frame metric dicts (must contain 'frame_idx' and
+            'separation_score'). Required for separation-first refinement.
+        occlusion_periods: List of (start_frame, end_frame) high-occlusion periods.
+            Used as a fallback when separation-first is unavailable.
+        transition_frames: Legacy parameter kept for backwards compatibility.
+            Ignored when occlusion_periods or separation_windows are provided.
         search_window_seconds: Search radius (seconds) around each boundary.
-        min_chunk_seconds: Minimum allowed chunk duration.
-        max_chunk_seconds: Maximum allowed chunk duration.
-        margin_seconds: Safety margin (seconds) to keep away from occlusion edges.
-            Default 3.0s (~75 frames at 25fps) provides strong separation.
+        min_chunk_seconds: Minimum allowed chunk duration after adjustment.
+        max_chunk_seconds: Maximum allowed chunk duration after adjustment.
+        margin_seconds: Safety buffer (seconds) around occlusion period edges.
 
     Returns:
-        Adjusted chunks in the same format as chunk_video_frames_dual().
+        List of (start_frame, end_frame, model_type) tuples where model_type is
+        "video" (first chunk) or "tracker" (all others).
     """
-    if len(fixed_chunks) <= 1:
-        return fixed_chunks
-
+    video_model_frames = int(fps * video_model_seconds)
+    tracker_frames = int(fps * tracker_seconds)
     search_window_frames = int(search_window_seconds * fps)
     min_frames = int(min_chunk_seconds * fps)
     max_frames = int(max_chunk_seconds * fps)
     margin_frames = int(margin_seconds * fps)
 
-    # Work with mutable list of boundaries
-    boundaries = [c[0] for c in fixed_chunks]  # start of each chunk
-    total_end = fixed_chunks[-1][1]  # final frame
+    # Step 1: Generate initial fixed chunks (same logic as old chunk_video_frames_dual)
+    fixed_chunks: list[tuple[int, int, str]] = []
+    end = min(video_model_frames, total_frames)
+    fixed_chunks.append((0, end, "video"))
+
+    start = end
+    while start < total_frames:
+        end = min(start + tracker_frames, total_frames)
+        remaining_after = total_frames - end
+        if 0 < remaining_after < tracker_frames * 0.1:
+            end = total_frames  # absorb small tail
+        fixed_chunks.append((start, end, "tracker"))
+        start = end
+
+    if len(fixed_chunks) <= 1:
+        return fixed_chunks
+
+    # Step 2: Collect refinement data
+    use_separation = bool(separation_windows and per_frame_metrics)
+    use_occlusion = bool(occlusion_periods)
+
+    score_lookup: dict[int, float] = {}
+    if use_separation and per_frame_metrics:
+        score_lookup = {
+            m["frame_idx"]: m["separation_score"]
+            for m in per_frame_metrics
+            if m.get("separation_score", 0.0) > 0.0
+        }
+
+    boundaries = [c[0] for c in fixed_chunks]
+    total_end = fixed_chunks[-1][1]
     adjusted_boundaries = list(boundaries)
 
-    def _is_in_occlusion_period(frame: int) -> bool:
+    def _is_in_occlusion(frame: int) -> bool:
         """Check if frame falls within any occlusion period (with margin)."""
         if not occlusion_periods:
             return False
-        for start, end in occlusion_periods:
-            # Add margin on both sides
-            if (start - margin_frames) <= frame <= (end + margin_frames):
+        for start_f, end_f in occlusion_periods:
+            if (start_f - margin_frames) <= frame <= (end_f + margin_frames):
                 return True
         return False
 
-    def _candidate_quality_score(frame: int) -> float:
+    def _occlusion_quality(frame: int) -> float:
         """
         Compute quality score for a candidate boundary (higher = better).
 
@@ -157,7 +207,6 @@ def chunk_video_frames_adaptive(
         1. Distance to nearest occlusion (farther = better)
         2. Strong penalty if occlusion is ahead (within next margin_frames)
         3. Moderate penalty if occlusion is behind (within prev margin_frames)
-        4. Prefer frames in the middle of safe zones
         """
         if not occlusion_periods:
             return 1000.0  # Arbitrary high score if no occlusions
@@ -166,49 +215,94 @@ def chunk_video_frames_adaptive(
         occlusion_ahead = False
         occlusion_behind = False
 
-        for start, end in occlusion_periods:
+        for start_f, end_f in occlusion_periods:
             # Check if occlusion is ahead (about to start)
-            if start > frame and (start - frame) <= margin_frames:
+            if start_f > frame and (start_f - frame) <= margin_frames:
                 occlusion_ahead = True
             # Check if occlusion just ended
-            if end < frame and (frame - end) <= margin_frames:
+            if end_f < frame and (frame - end_f) <= margin_frames:
                 occlusion_behind = True
 
             # Distance to nearest edge
-            dist = min(abs(frame - start), abs(frame - end))
+            dist = min(abs(frame - start_f), abs(frame - end_f))
             min_dist = min(min_dist, dist)
 
         # Base score is distance
         score = float(min_dist)
 
-        # Heavy penalty if occlusion is just ahead (boundary would feed bad frames to tracker)
+        # Heavy penalty if occlusion is just ahead
         if occlusion_ahead:
             score *= 0.1  # 90% penalty
 
-        # Moderate penalty if occlusion just ended (frames might still be messy)
+        # Moderate penalty if occlusion just ended
         if occlusion_behind:
             score *= 0.5  # 50% penalty
 
         return score
 
-    # Only adjust tracker chunk boundaries (indices 1+)
+    # Step 3: Refine tracker-chunk boundaries (indices 1+)
     for i in range(1, len(adjusted_boundaries)):
         original = adjusted_boundaries[i]
-
-        # Generate candidate frames within search window
         search_start = max(0, original - search_window_frames)
         search_end = min(total_end, original + search_window_frames)
-        candidates = list(range(search_start, search_end + 1))
+        best_candidate = None
 
-        if not candidates:
-            logger.debug(
-                f"Boundary {i}: frame {original} — no candidates, keeping original"
-            )
-            continue
+        if use_separation:
+            # Separation-first: find highest-score frame inside a separation window
+            sep_candidates: dict[int, float] = {}
+            for win_start, win_end in separation_windows:  # type: ignore[union-attr]
+                overlap_start = max(win_start, search_start)
+                overlap_end = min(win_end, search_end)
+                if overlap_start > overlap_end:
+                    continue
+                for frame, score in score_lookup.items():
+                    if overlap_start <= frame <= overlap_end:
+                        sep_candidates[frame] = score
 
-        # Filter out frames inside occlusion periods
-        if occlusion_periods:
-            safe_candidates = [f for f in candidates if not _is_in_occlusion_period(f)]
+            if sep_candidates:
+                best_candidate = max(sep_candidates, key=lambda f: sep_candidates[f])
+                shift = best_candidate - original
+                prev_start = adjusted_boundaries[i - 1]
+                next_end = (
+                    adjusted_boundaries[i + 1]
+                    if i + 1 < len(adjusted_boundaries)
+                    else total_end
+                )
+                prev_len = best_candidate - prev_start
+                next_len = next_end - best_candidate
+
+                if prev_len < min_frames or prev_len > max_frames:
+                    logger.debug(
+                        f"Separation boundary {i}: frame {original} → {best_candidate} rejected "
+                        f"(prev chunk {prev_len / fps:.1f}s outside "
+                        f"[{min_chunk_seconds}-{max_chunk_seconds}]s)"
+                    )
+                    best_candidate = None
+                elif next_len < min_frames or next_len > max_frames:
+                    logger.debug(
+                        f"Separation boundary {i}: frame {original} → {best_candidate} rejected "
+                        f"(next chunk {next_len / fps:.1f}s outside "
+                        f"[{min_chunk_seconds}-{max_chunk_seconds}]s)"
+                    )
+                    best_candidate = None
+                else:
+                    adjusted_boundaries[i] = best_candidate
+                    logger.info(
+                        f"Separation boundary {i}: frame {original} → {best_candidate} "
+                        f"(shifted {shift:+d} frames, "
+                        f"separation_score={sep_candidates[best_candidate]:.3f})"
+                    )
+                    continue  # Done with this boundary
+            else:
+                logger.debug(
+                    f"Separation boundary {i}: frame {original} — no separation windows "
+                    f"in ±{search_window_seconds}s, trying occlusion fallback"
+                )
+
+        if use_occlusion and best_candidate is None:
+            # Occlusion avoidance fallback
+            candidates_list = list(range(search_start, search_end + 1))
+            safe_candidates = [f for f in candidates_list if not _is_in_occlusion(f)]
 
             if not safe_candidates:
                 logger.warning(
@@ -217,103 +311,66 @@ def chunk_video_frames_adaptive(
                 )
                 continue
 
-            # Among safe candidates, pick the one with highest quality score
-            # (considers distance + directional penalties)
-            best_candidate = max(safe_candidates, key=_candidate_quality_score)
-        else:
-            # Legacy fallback: find nearest transition (old behavior)
-            transitions = transition_frames
-            trans_candidates = transitions[
-                (transitions >= search_start) & (transitions <= search_end)
-            ]
-            if len(trans_candidates) == 0:
+            best_candidate = max(safe_candidates, key=_occlusion_quality)
+            shift = int(best_candidate) - original
+            prev_start = adjusted_boundaries[i - 1]
+            next_end = (
+                adjusted_boundaries[i + 1]
+                if i + 1 < len(adjusted_boundaries)
+                else total_end
+            )
+            prev_len = int(best_candidate) - prev_start
+            next_len = next_end - int(best_candidate)
+
+            if prev_len < min_frames or prev_len > max_frames:
                 logger.debug(
-                    f"Boundary {i}: frame {original} — no transitions, keeping original"
+                    f"Boundary {i}: frame {original} → {best_candidate} rejected "
+                    f"(prev chunk would be {prev_len / fps:.1f}s, "
+                    f"limits: {min_chunk_seconds}-{max_chunk_seconds}s)"
                 )
                 continue
-            best_candidate = trans_candidates[
-                np.argmin(np.abs(trans_candidates - original))
-            ]
 
-        shift = int(best_candidate) - original
+            if next_len < min_frames or next_len > max_frames:
+                logger.debug(
+                    f"Boundary {i}: frame {original} → {best_candidate} rejected "
+                    f"(next chunk would be {next_len / fps:.1f}s, "
+                    f"limits: {min_chunk_seconds}-{max_chunk_seconds}s)"
+                )
+                continue
 
-        # Validate: check chunk sizes with this adjustment
-        prev_start = adjusted_boundaries[i - 1]
-        next_end = (
-            adjusted_boundaries[i + 1]
-            if i + 1 < len(adjusted_boundaries)
-            else total_end
-        )
-        prev_chunk_len = int(best_candidate) - prev_start
-        next_chunk_len = next_end - int(best_candidate)
-
-        if prev_chunk_len < min_frames or prev_chunk_len > max_frames:
-            logger.debug(
-                f"Boundary {i}: frame {original} → {best_candidate} rejected "
-                f"(prev chunk would be {prev_chunk_len / fps:.1f}s, "
-                f"limits: {min_chunk_seconds}-{max_chunk_seconds}s)"
-            )
-            continue
-
-        if next_chunk_len < min_frames or next_chunk_len > max_frames:
-            logger.debug(
-                f"Boundary {i}: frame {original} → {best_candidate} rejected "
-                f"(next chunk would be {next_chunk_len / fps:.1f}s, "
-                f"limits: {min_chunk_seconds}-{max_chunk_seconds}s)"
-            )
-            continue
-
-        adjusted_boundaries[i] = int(best_candidate)
-
-        if occlusion_periods:
-            quality = _candidate_quality_score(int(best_candidate))
+            adjusted_boundaries[i] = int(best_candidate)
+            quality = _occlusion_quality(int(best_candidate))
             logger.info(
                 f"Boundary {i}: frame {original} → {best_candidate} "
                 f"(shifted by {shift:+d} frames, quality score: {quality:.1f})"
             )
-        else:
-            logger.info(
-                f"Boundary {i}: frame {original} → {best_candidate} "
-                f"(shifted by {shift:+d} frames, nearest transition)"
-            )
 
-    # Rebuild chunks from adjusted boundaries
+    # Step 4: Rebuild chunks from adjusted boundaries
     adjusted_chunks = []
     for i in range(len(adjusted_boundaries)):
-        start = adjusted_boundaries[i]
-        end = (
+        s = adjusted_boundaries[i]
+        e = (
             adjusted_boundaries[i + 1]
             if i + 1 < len(adjusted_boundaries)
             else total_end
         )
-        model_type = fixed_chunks[i][2]  # preserve original model type
-        adjusted_chunks.append((start, end, model_type))
+        model_type = fixed_chunks[i][2]
+        adjusted_chunks.append((s, e, model_type))
 
-    # Absorb small trailing chunks (<10% of tracker chunk size) into last chunk
+    # Step 5: Absorb small trailing chunks (<10% of tracker chunk size)
     if len(adjusted_chunks) > 1:
-        last_start, last_end, last_type = adjusted_chunks[-1]
+        last_start, last_end, _ = adjusted_chunks[-1]
         last_len = last_end - last_start
-        prev_start, prev_end, prev_type = adjusted_chunks[-2]
-        prev_len = prev_end - prev_start
-        # Use the tracker chunk seconds from the original fixed chunks as reference
-        ref_tracker_frames = (
-            fixed_chunks[1][1] - fixed_chunks[1][0]
-            if len(fixed_chunks) > 1
-            else last_len
-        )
-
+        prev_start, _, prev_type = adjusted_chunks[-2]
         should_absorb = False
 
-        # Case 1: Last chunk is very small (<10% of reference)
-        if last_len < ref_tracker_frames * 0.1:
+        if last_len < tracker_frames * 0.1:
             should_absorb = True
             logger.info(
                 f"Absorbing small trailing chunk ({last_len} frames, "
                 f"{last_len / fps:.1f}s) into previous chunk"
             )
-
-        # Case 2: Last chunk boundary is too close to an occlusion period
-        elif occlusion_periods and _is_in_occlusion_period(last_start):
+        elif occlusion_periods and _is_in_occlusion(last_start):
             combined_len = last_end - prev_start
             if combined_len <= max_frames:
                 should_absorb = True
@@ -327,166 +384,6 @@ def chunk_video_frames_adaptive(
             adjusted_chunks.pop()
 
     return adjusted_chunks
-
-
-def chunk_video_frames_separation(
-    fixed_chunks: list[tuple[int, int, str]],
-    separation_windows: list[tuple[int, int]],
-    per_frame_metrics: list[dict],
-    fps: float,
-    search_window_seconds: float = 10.0,
-    min_chunk_seconds: float = 15.0,
-    max_chunk_seconds: float = 90.0,
-) -> list[tuple[int, int, str]]:
-    """
-    Adjust chunk boundaries to land inside high-separation windows.
-
-    For each tracker-chunk boundary (index 1+), searches within
-    ±search_window_seconds for separation windows.  Within any qualifying
-    window found, picks the frame with the highest separation_score.
-    Falls back to the original boundary if no window is found nearby or if
-    size constraints would be violated.
-
-    Args:
-        fixed_chunks: Output of chunk_video_frames_dual() or build_manual_chunks().
-        separation_windows: List of (start_frame, end_frame) tuples from
-            find_high_separation_windows().
-        per_frame_metrics: List of per-frame metric dicts (must contain
-            'frame_idx' and 'separation_score').
-        fps: Video frame rate.
-        search_window_seconds: Search radius around each boundary.
-        min_chunk_seconds: Minimum allowed chunk duration after adjustment.
-        max_chunk_seconds: Maximum allowed chunk duration after adjustment.
-
-    Returns:
-        Adjusted chunks in the same (start, end, model_type) format.
-    """
-    if len(fixed_chunks) <= 1 or not separation_windows:
-        return fixed_chunks
-
-    search_window_frames = int(search_window_seconds * fps)
-    min_frames = int(min_chunk_seconds * fps)
-    max_frames = int(max_chunk_seconds * fps)
-
-    # Build frame → separation_score lookup (only non-zero scores needed)
-    score_lookup: dict[int, float] = {
-        m["frame_idx"]: m["separation_score"]
-        for m in per_frame_metrics
-        if m.get("separation_score", 0.0) > 0.0
-    }
-
-    boundaries = [c[0] for c in fixed_chunks]
-    total_end = fixed_chunks[-1][1]
-    adjusted_boundaries = list(boundaries)
-
-    for i in range(1, len(adjusted_boundaries)):
-        original = adjusted_boundaries[i]
-        search_start = max(0, original - search_window_frames)
-        search_end = min(total_end, original + search_window_frames)
-
-        # Collect candidate frames: inside a separation window AND in search range
-        candidates: dict[int, float] = {}
-        for win_start, win_end in separation_windows:
-            overlap_start = max(win_start, search_start)
-            overlap_end = min(win_end, search_end)
-            if overlap_start > overlap_end:
-                continue
-            for frame, score in score_lookup.items():
-                if overlap_start <= frame <= overlap_end:
-                    candidates[frame] = score
-
-        if not candidates:
-            logger.debug(
-                f"Separation boundary {i}: frame {original} — no separation windows "
-                f"in ±{search_window_seconds}s, keeping original"
-            )
-            continue
-
-        # Pick frame with highest separation score
-        best_candidate = max(candidates, key=lambda f: candidates[f])
-        shift = best_candidate - original
-
-        # Validate chunk sizes
-        prev_start = adjusted_boundaries[i - 1]
-        next_end = (
-            adjusted_boundaries[i + 1]
-            if i + 1 < len(adjusted_boundaries)
-            else total_end
-        )
-        prev_chunk_len = best_candidate - prev_start
-        next_chunk_len = next_end - best_candidate
-
-        if prev_chunk_len < min_frames or prev_chunk_len > max_frames:
-            logger.debug(
-                f"Separation boundary {i}: frame {original} → {best_candidate} rejected "
-                f"(prev chunk {prev_chunk_len / fps:.1f}s outside "
-                f"[{min_chunk_seconds}-{max_chunk_seconds}]s)"
-            )
-            continue
-        if next_chunk_len < min_frames or next_chunk_len > max_frames:
-            logger.debug(
-                f"Separation boundary {i}: frame {original} → {best_candidate} rejected "
-                f"(next chunk {next_chunk_len / fps:.1f}s outside "
-                f"[{min_chunk_seconds}-{max_chunk_seconds}]s)"
-            )
-            continue
-
-        adjusted_boundaries[i] = best_candidate
-        logger.info(
-            f"Separation boundary {i}: frame {original} → {best_candidate} "
-            f"(shifted {shift:+d} frames, separation_score={candidates[best_candidate]:.3f})"
-        )
-
-    # Rebuild chunks from adjusted boundaries
-    adjusted_chunks = []
-    for i in range(len(adjusted_boundaries)):
-        start = adjusted_boundaries[i]
-        end = (
-            adjusted_boundaries[i + 1]
-            if i + 1 < len(adjusted_boundaries)
-            else total_end
-        )
-        model_type = fixed_chunks[i][2]
-        adjusted_chunks.append((start, end, model_type))
-
-    return adjusted_chunks
-
-
-def chunk_video_frames_dual(
-    total_frames: int,
-    fps: float,
-    video_model_seconds: int,
-    tracker_seconds: int,
-) -> list[tuple[int, int, str]]:
-    """
-    Split video into chunks with different durations for each model type.
-
-    The first chunk uses Sam3VideoModel (text-prompted, shorter duration) and
-    all subsequent chunks use Sam3TrackerVideoModel (point-prompted, longer).
-
-    Returns list of (start_idx, end_idx, model_type) tuples where
-    model_type is "video" (Sam3VideoModel) or "tracker" (Sam3TrackerVideoModel).
-    """
-    video_model_frames = int(fps * video_model_seconds)
-    tracker_frames = int(fps * tracker_seconds)
-
-    chunks = []
-    # Chunk 0: video model (short)
-    end = min(video_model_frames, total_frames)
-    chunks.append((0, end, "video"))
-
-    # Remaining chunks: tracker (longer)
-    # Absorb small trailing remainders (< 10% of chunk size) into the last chunk
-    start = end
-    while start < total_frames:
-        end = min(start + tracker_frames, total_frames)
-        remaining_after = total_frames - end
-        if 0 < remaining_after < tracker_frames * 0.1:
-            end = total_frames  # absorb small tail
-        chunks.append((start, end, "tracker"))
-        start = end
-
-    return chunks
 
 
 def build_manual_chunks(frame_pairs: list[list[int]]) -> list[tuple[int, int, str]]:
@@ -932,3 +829,216 @@ def annotate_video_with_sam3_outputs(
         callback=callback,
         show_progress=True,
     )
+
+
+# ---------------------------------------------------------------------------
+# Grounding / Tracker Utilities
+# ---------------------------------------------------------------------------
+
+
+def sanitize_filename(name: str) -> str:
+    """Sanitize a stem string for use as a directory name."""
+    sanitized = re.sub(r"[^\w\-]", "_", name)
+    sanitized = re.sub(r"_+", "_", sanitized)
+    return sanitized.strip("_") or "video"
+
+
+def compute_max_pairwise_iou(masks_np: np.ndarray) -> float:
+    """Return max pixel-IoU over all pairs of binary masks (N, H, W)."""
+    n = len(masks_np)
+    max_iou = 0.0
+    for i in range(n):
+        for j in range(i + 1, n):
+            inter = float((masks_np[i] & masks_np[j]).sum())
+            union = float((masks_np[i] | masks_np[j]).sum())
+            if union > 0:
+                max_iou = max(max_iou, inter / union)
+    return max_iou
+
+
+def find_best_grounding_frame(
+    grounding_outputs: dict,
+    min_objects: int = 3,
+    method: str = "combined",
+) -> tuple[int | None, list, list, list]:
+    """
+    Select best frame from grounding outputs by detection quality.
+
+    Filters frames with >= min_objects, then ranks by:
+      "min_occlusion"  — lowest max pairwise IoU
+      "best_scores"    — highest mean detection score
+      "combined"       — low-occlusion frames first (max_iou < 0.10),
+                         then by descending mean score within that tier
+
+    Returns:
+        (frame_idx, masks_list, boxes_list, object_ids_list) or
+        (None, [], [], []) if no frame qualifies.
+    """
+    candidates = []
+    for frame_idx, results in grounding_outputs.items():
+        masks_list, boxes_list, object_ids_list = get_all_objects_from_results(results)
+        if len(object_ids_list) < min_objects:
+            continue
+        masks_array = np.stack(
+            [m.squeeze(0) if m.ndim == 3 and m.shape[0] == 1 else m for m in masks_list]
+        ).astype(bool)
+        max_iou = compute_max_pairwise_iou(masks_array)
+
+        scores = results.get("scores")
+        if scores is not None:
+            scores_arr = scores if isinstance(scores, np.ndarray) else np.array(scores)
+            mean_score = float(scores_arr.mean()) if scores_arr.size > 0 else 0.0
+        else:
+            tracker_scores = results.get("obj_id_to_tracker_score", {})
+            if tracker_scores:
+                mean_score = float(np.mean(list(tracker_scores.values())))
+            else:
+                mean_score = 0.0
+
+        candidates.append(
+            (frame_idx, masks_list, boxes_list, object_ids_list, max_iou, mean_score)
+        )
+
+    if not candidates:
+        return None, [], [], []
+
+    if method == "min_occlusion":
+        candidates.sort(key=lambda x: x[4])
+    elif method == "best_scores":
+        candidates.sort(key=lambda x: -x[5])
+    else:  # "combined"
+        candidates.sort(key=lambda x: (x[4] >= 0.10, -x[5]))
+
+    best = candidates[0]
+    return best[0], best[1], best[2], best[3]
+
+
+def match_grounding_ids_to_previous(
+    grounding_masks: list,
+    grounding_ids: list,
+    prev_masks: list,
+    prev_ids: list,
+    iou_threshold: float = 0.10,
+) -> dict[int, int]:
+    """
+    Greedy IoU-based assignment of grounding IDs to previous-chunk IDs.
+
+    Builds P×Q IoU matrix, iteratively picks highest-IoU pair, removes both
+    from pool, stops when below iou_threshold. Unmatched grounding IDs keep
+    their original value if it does not collide with an already-mapped ID;
+    otherwise they are assigned a fresh ID to avoid silent key collisions in
+    grounding_prompt_points.
+    """
+    if not grounding_masks or not prev_masks:
+        return {int(pid): int(pid) for pid in grounding_ids}
+
+    def _to_bool(m):
+        arr = m.squeeze(0) if m.ndim == 3 and m.shape[0] == 1 else m
+        return arr.astype(bool)
+
+    gs_masks = [_to_bool(m) for m in grounding_masks]
+    pv_masks = [_to_bool(m) for m in prev_masks]
+
+    P, Q = len(gs_masks), len(pv_masks)
+    iou_matrix = np.zeros((P, Q), dtype=np.float32)
+    for i in range(P):
+        for j in range(Q):
+            inter = float((gs_masks[i] & pv_masks[j]).sum())
+            union = float((gs_masks[i] | pv_masks[j]).sum())
+            iou_matrix[i, j] = inter / union if union > 0 else 0.0
+
+    id_map: dict[int, int] = {}
+    assigned_gs = set()
+    assigned_pv = set()
+
+    flat_indices = np.argsort(iou_matrix.ravel())[::-1]
+    for flat_idx in flat_indices:
+        i, j = divmod(int(flat_idx), Q)
+        if iou_matrix[i, j] < iou_threshold:
+            break
+        if i in assigned_gs or j in assigned_pv:
+            continue
+        id_map[int(grounding_ids[i])] = int(prev_ids[j])
+        assigned_gs.add(i)
+        assigned_pv.add(j)
+
+    # Unmatched grounding IDs: pass through with original value, but remap to a
+    # fresh ID if that value is already claimed by a matched assignment to avoid
+    # silent dict-key collisions in grounding_prompt_points.
+    claimed = set(id_map.values())
+    next_fresh = max(claimed | {int(pid) for pid in grounding_ids}, default=-1) + 1
+    for i, pid in enumerate(grounding_ids):
+        if int(pid) not in id_map:
+            if int(pid) not in claimed:
+                id_map[int(pid)] = int(pid)
+                claimed.add(int(pid))
+            else:
+                id_map[int(pid)] = next_fresh
+                claimed.add(next_fresh)
+                next_fresh += 1
+
+    return id_map
+
+
+def reseed_tracker_memory(
+    model, inference_session, frame_idx: int, masks_np: np.ndarray, device
+):
+    """
+    Inject current binary masks as a fresh conditioning frame.
+
+    Removes frame_idx from frames_tracked so forward() treats it
+    as is_init_cond_frame=True, re-encoding the memory bank.
+
+    Args:
+        model: Sam3TrackerVideoModel instance.
+        inference_session: Active inference session.
+        frame_idx: Local frame index to reseed.
+        masks_np: (N, H, W) bool/float numpy array of current masks.
+        device: Torch device.
+    """
+    masks_tensor = torch.from_numpy(masks_np.astype(np.float32)).to(device)
+
+    obj_ids = list(inference_session.obj_ids)[: len(masks_np)]
+    for i, obj_id in enumerate(obj_ids):
+        obj_idx = inference_session.obj_id_to_idx(obj_id)
+        mask_t = masks_tensor[i].unsqueeze(0).unsqueeze(0)  # (1, 1, H, W)
+        inference_session.add_mask_inputs(obj_idx, frame_idx, mask_t)
+        # Clear tracked status so forward treats this as an init-cond frame
+        inference_session.frames_tracked_per_obj[obj_idx].pop(frame_idx, None)
+        if obj_id not in inference_session.obj_with_new_inputs:
+            inference_session.obj_with_new_inputs.append(obj_id)
+
+    # Re-run forward for this frame — encodes fresh memory anchor
+    model(inference_session, frame_idx=frame_idx, run_mem_encoder=True)
+
+
+def run_grounding(
+    chunk_frames: list,
+    global_start_idx: int,
+    grounding_frames: int,
+    process_video_chunk_fn: Callable,
+    cfg,
+    device,
+) -> dict:
+    """
+    Run Sam3VideoModel on chunk_frames[:grounding_frames] for fresh detections.
+
+    Clamps grounding_frames to len(chunk_frames). Frees GPU memory before
+    returning.
+
+    Args:
+        chunk_frames: List of RGB frames for the current chunk.
+        global_start_idx: Global frame index of the first frame in chunk_frames.
+        grounding_frames: Number of frames to run grounding on.
+        process_video_chunk_fn: Callable matching the signature of
+            _process_video_chunk(chunk_frames, start_idx, cfg, device).
+        cfg: OmegaConf config.
+        device: Torch device.
+
+    Returns:
+        Dict mapping global frame indices to processed output dicts.
+    """
+    n = min(grounding_frames, len(chunk_frames))
+    outputs = process_video_chunk_fn(chunk_frames[:n], global_start_idx, cfg, device)
+    free_gpu_memory()
+    return outputs

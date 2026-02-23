@@ -800,12 +800,12 @@ def plot_prompt_points(tracking_df, chunk_info, video_path, fps=None, output_dir
 
 
 # ---------------------------------------------------------------------------
-# Plot 6: YOLO prescan overview
+# Plot 6: YOLO scan overview
 # ---------------------------------------------------------------------------
 
 
-def plot_yolo_prescan_overview(
-    yolo_prescan_df,
+def plot_yolo_scan_overview(
+    yolo_scan_df,
     occlusion_periods=None,
     chunk_boundaries=None,
     fps=None,
@@ -813,14 +813,14 @@ def plot_yolo_prescan_overview(
     name_suffix=None,
 ):
     """
-    4-panel timeseries overview of YOLO-based prescan metrics.
+    4-panel timeseries overview of YOLO-based scan metrics.
 
     Panels: object count, max pairwise bbox IoU, clustering coefficient,
     high-occlusion flag. Occlusion periods are shaded in red across all panels.
     Chunk boundaries (re-initialization points) are shown as vertical lines.
 
     Args:
-        yolo_prescan_df: DataFrame from yolo_prescan_to_df() with columns
+        yolo_scan_df: DataFrame from yolo_scan_to_df() with columns
             frame_idx, num_objects, max_pairwise_bbox_iou,
             clustering_coefficient, is_high_occlusion, mean_confidence.
         occlusion_periods: List of (start_frame, end_frame) tuples. Optional.
@@ -828,7 +828,7 @@ def plot_yolo_prescan_overview(
         fps: Video FPS for MM:SS x-axis. None = frame index.
         save_path: Path to save PNG. None = plt.show().
     """
-    frames = yolo_prescan_df["frame_idx"].values
+    frames = yolo_scan_df["frame_idx"].values
     x = np.array([_frame_to_x(f, fps) for f in frames])
 
     fig, axes = plt.subplots(4, 1, sharex=True, figsize=(14, 10))
@@ -852,7 +852,7 @@ def plot_yolo_prescan_overview(
     ax = axes[0]
     ax.step(
         x,
-        yolo_prescan_df["num_objects"].values,
+        yolo_scan_df["num_objects"].values,
         where="mid",
         color="steelblue",
         linewidth=0.8,
@@ -861,10 +861,10 @@ def plot_yolo_prescan_overview(
     ax.set_ylabel("# Objects")
     ax.yaxis.set_major_locator(mticker.MaxNLocator(integer=True))
     if not name_suffix:
-        ax.set_title("YOLO Pre-scan Overview", fontsize=12, fontweight="bold")
+        ax.set_title("YOLO Scan Overview", fontsize=12, fontweight="bold")
     else:
         ax.set_title(
-            f"YOLO Pre-scan Overview ({name_suffix})", fontsize=12, fontweight="bold"
+            f"YOLO Scan Overview ({name_suffix})", fontsize=12, fontweight="bold"
         )
 
     ax.grid(True, alpha=0.3)
@@ -873,7 +873,7 @@ def plot_yolo_prescan_overview(
 
     # Panel 2: Max pairwise bbox IoU
     ax = axes[1]
-    iou_vals = yolo_prescan_df["max_pairwise_bbox_iou"].values
+    iou_vals = yolo_scan_df["max_pairwise_bbox_iou"].values
     ax.plot(x, iou_vals, linewidth=0.8, color="tomato", alpha=0.8)
     ax.axhline(
         0.15,
@@ -895,7 +895,7 @@ def plot_yolo_prescan_overview(
     ax = axes[2]
     ax.plot(
         x,
-        yolo_prescan_df["clustering_coefficient"].values,
+        yolo_scan_df["clustering_coefficient"].values,
         linewidth=0.8,
         color="mediumpurple",
         alpha=0.8,
@@ -917,7 +917,7 @@ def plot_yolo_prescan_overview(
 
     # Panel 4: High occlusion flag
     ax = axes[3]
-    occ_flags = yolo_prescan_df["is_high_occlusion"].astype(int).values
+    occ_flags = yolo_scan_df["is_high_occlusion"].astype(int).values
     ax.fill_between(x, 0, occ_flags, alpha=0.5, color="red", step="mid")
     ax.set_ylabel("High\nOcclusion")
     ax.set_ylim(-0.1, 1.1)
@@ -966,7 +966,7 @@ def generate_all_visualizations(
     fps=None,
     chunk_info=None,
     video_path=None,
-    yolo_prescan_df=None,
+    yolo_scan_df=None,
     yolo_occlusion_periods=None,
 ):
     """
@@ -979,7 +979,7 @@ def generate_all_visualizations(
         fps: Video FPS for MM:SS axis labels.
         chunk_info: Dict with 'chunks' key for diagnostic plots. Optional.
         video_path: Path to source video for diagnostic plots. Optional.
-        yolo_prescan_df: DataFrame from yolo_prescan_to_df. Optional.
+        yolo_scan_df: DataFrame from yolo_scan_to_df. Optional.
         yolo_occlusion_periods: List of (start, end) frame tuples. Optional.
     """
     output_dir = Path(output_dir)
@@ -1019,8 +1019,8 @@ def generate_all_visualizations(
             output_dir=output_dir,
         )
 
-    if yolo_prescan_df is not None and not yolo_prescan_df.empty:
-        # Extract chunk boundaries for overlay on YOLO prescan plot
+    if yolo_scan_df is not None and not yolo_scan_df.empty:
+        # Extract chunk boundaries for overlay on YOLO scan plot
         chunk_boundaries_list = None
         if chunk_info is not None and "chunks" in chunk_info:
             # Use start frame of each tracker chunk (skip chunk 0 which is text-prompted)
@@ -1029,10 +1029,10 @@ def generate_all_visualizations(
                 for c in chunk_info["chunks"]
                 if c["model_type"] == "Sam3TrackerVideoModel"
             ]
-        plot_yolo_prescan_overview(
-            yolo_prescan_df,
+        plot_yolo_scan_overview(
+            yolo_scan_df,
             occlusion_periods=yolo_occlusion_periods,
             chunk_boundaries=chunk_boundaries_list,
             fps=fps,
-            save_path=output_dir / "yolo_prescan_overview.png",
+            save_path=output_dir / "yolo_scan_overview.png",
         )

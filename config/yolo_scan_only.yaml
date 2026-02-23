@@ -4,7 +4,7 @@
 # =============================================================================
 # Job Configuration
 # =============================================================================
-job_type: "prescan_only"  # Type of job to run
+job_type: "yolo_scan"  # Type of job to run
 
 # =============================================================================
 # Environmental variables
@@ -34,16 +34,16 @@ max_frames_to_track: 0  # Maximum number of frames to propagate (0 = all)
 video_model_chunk_seconds: 15  # Duration of first chunk (Sam3VideoModel, text-prompted)
 tracker_chunk_seconds: 45      # Duration of subsequent chunks (Sam3TrackerVideoModel, point-prompted)
 
-# Prescan-only mode: run YOLO pre-scan and exit without loading SAM3 models
-prescan_only: true
+# YOLO-scan-only mode: run YOLO scan and exit without loading SAM3 models
+yolo_scan_only: true
 
-# Occlusion-aware adaptive chunking (YOLO-based pre-scan)
-use_adaptive_chunking: true          # Enable adaptive boundary placement via YOLO pre-scan
+# Occlusion-aware adaptive chunking (YOLO-based scan)
+use_adaptive_chunking: true          # Enable adaptive boundary placement via YOLO scan
 adaptive_min_chunk_seconds: 15       # Minimum chunk duration after adjustment
 adaptive_max_chunk_seconds: 360       # Maximum chunk duration after adjustment
 
-# YOLO-based pre-scan configuration (used when use_adaptive_chunking: true)
-yolo_prescan:
+# YOLO-based scan configuration (used when use_adaptive_chunking: true)
+yolo_scan:
   model: "model/yolo26x.pt"
   conf_thresh: 0.25
   iou_thresh: 0.45
@@ -56,6 +56,6 @@ yolo_prescan:
   occlusion_iou_threshold: 0.15
   clustering_distance_threshold: 0.15
 
-# Parameter sensitivity testing (only runs when prescan_only or use_adaptive_chunking is true)
-run_parameter_sensitivity: true  # Test multiple threshold combinations on prescan results
+# Parameter sensitivity testing (only runs when yolo_scan_only or use_adaptive_chunking is true)
+run_parameter_sensitivity: true  # Test multiple threshold combinations on scan results
 generate_occlusion_overlays_video : true # Generate video output with occlusion periods highlighted

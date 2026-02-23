@@ -1,12 +1,12 @@
 """
-YOLO-based occlusion period detection for adaptive chunking pre-scan.
+YOLO-based occlusion period detection for adaptive chunking scan.
 
 Computes per-frame spatial and overlap metrics from YOLO tracking outputs,
 providing a semantic alternative to pixel-clustering (KMeans) for identifying
 high-occlusion regions.
 
-The ``run_yolo_prescan`` function runs YOLO+ByteTrack inference inline on a
-video file, builds a tracking DataFrame, and calls ``compute_yolo_prescan_results``
+The ``run_yolo_scan`` function runs YOLO+ByteTrack inference inline on a
+video file, builds a tracking DataFrame, and calls ``compute_yolo_scan_results``
 to produce transition frames suitable for ``chunk_video_frames_adaptive``.
 """
 
@@ -514,7 +514,7 @@ def identify_occlusion_periods(
     return periods
 
 
-def run_yolo_prescan(
+def run_yolo_scan(
     video_path: str | Path,
     fps: float,
     total_frames: int,
@@ -535,11 +535,11 @@ def run_yolo_prescan(
     output_video_path: str | Path | None = None,
 ) -> Dict[str, Any]:
     """
-    Run YOLO+ByteTrack inference on a video and compute prescan results.
+    Run YOLO+ByteTrack inference on a video and compute scan results.
 
     Loads a YOLO model, runs tracking with ``model.track(stream=True)``,
     builds a per-detection DataFrame, then delegates to
-    ``compute_yolo_prescan_results`` for occlusion/transition analysis.
+    ``compute_yolo_scan_results`` for occlusion/transition analysis.
     The YOLO model and GPU memory are released before returning.
 
     Args:
@@ -565,14 +565,14 @@ def run_yolo_prescan(
     Returns:
         Dict with keys:
         - ``yolo_df``: Raw tracking DataFrame (one row per detection per frame).
-        - ``prescan_results``: Output of ``compute_yolo_prescan_results``.
+        - ``scan_results``: Output of ``compute_yolo_scan_results``.
         - ``model_name``, ``conf_thresh``, ``iou_thresh``: Echo of config.
     """
     try:
         from ultralytics import YOLO
     except ImportError as exc:
         raise ImportError(
-            "ultralytics is required for YOLO prescan. "
+            "ultralytics is required for YOLO scan. "
             "Install it with: pixi install -e sam3-hf"
         ) from exc
 
@@ -581,11 +581,9 @@ def run_yolo_prescan(
     video_path = str(video_path)
 
     logger.info(
-        f"YOLO prescan: model={model_name}, device={device}, tracker={tracker_config}"
-        # f"conf={conf_thresh}, iou={iou_thresh}, tracker={tracker_config}"
+        f"YOLO scan: model={model_name}, device={device}, tracker={tracker_config}"
     )
     logger.info("Tracker config:")
-    # logger.info(f"\n{OmegaConf.to_yaml(tracker_config, resolve=True)}")
     logger.info(OmegaConf.load(tracker_config))
 
     model = YOLO(model_name)
@@ -597,7 +595,7 @@ def run_yolo_prescan(
             cid for cid, name in model.names.items() if name in allowed_classes
         }
         logger.info(
-            f"YOLO prescan: filtering to classes {allowed_classes} "
+            f"YOLO scan: filtering to classes {allowed_classes} "
             f"(IDs: {allowed_class_ids})"
         )
 
@@ -619,7 +617,7 @@ def run_yolo_prescan(
             str(output_video_path), fourcc, video_fps, (width, height)
         )
         logger.info(
-            f"YOLO prescan: writing annotated video to {output_video_path} "
+            f"YOLO scan: writing annotated video to {output_video_path} "
             f"({width}x{height} @ {video_fps:.1f} FPS)"
         )
 
@@ -632,15 +630,13 @@ def run_yolo_prescan(
         stream=True,
         persist=True,
         tracker=tracker_config,
-        # conf=conf_thresh,
-        # iou=iou_thresh,
         device=device,
         verbose=False,
     )
 
     pbar = tqdm(
         total=total_frames,
-        desc="YOLO prescan",
+        desc="YOLO scan",
         unit="frames",
         dynamic_ncols=True,
     )
@@ -715,25 +711,25 @@ def run_yolo_prescan(
         pbar.update(1)
 
     pbar.close()
-    logger.info(f"YOLO prescan: processed {frame_count} frames, {len(rows)} detections")
+    logger.info(f"YOLO scan: processed {frame_count} frames, {len(rows)} detections")
 
     # Release video writer if it was used
     if video_writer is not None:
         video_writer.release()
-        logger.info(f"YOLO prescan: annotated video saved to {output_video_path}")
+        logger.info(f"YOLO scan: annotated video saved to {output_video_path}")
 
     # Clean up YOLO model and free GPU
     del model
     free_gpu_memory()
-    logger.info("YOLO prescan: model unloaded, GPU memory freed")
+    logger.info("YOLO scan: model unloaded, GPU memory freed")
 
     yolo_df = pd.DataFrame(rows)
 
     if yolo_df.empty:
-        logger.warning("YOLO prescan: no detections found")
+        logger.warning("YOLO scan: no detections found")
         return {
             "yolo_df": yolo_df,
-            "prescan_results": {
+            "scan_results": {
                 "per_frame_metrics": [],
                 "occlusion_periods": [],
                 "transition_frames": np.array([], dtype=int),
@@ -748,8 +744,8 @@ def run_yolo_prescan(
             "iou_thresh": iou_thresh,
         }
 
-    # Compute prescan results (per-frame metrics, occlusion periods, transitions)
-    prescan_results = compute_yolo_prescan_results(
+    # Compute scan results (per-frame metrics, occlusion periods, transitions)
+    scan_results = compute_yolo_scan_results(
         yolo_df,
         fps=fps,
         window_seconds=window_seconds,
@@ -763,20 +759,20 @@ def run_yolo_prescan(
     )
 
     logger.info(
-        f"YOLO prescan: {len(prescan_results['occlusion_periods'])} occlusion periods, "
-        f"{len(prescan_results['transition_frames'])} transition frames"
+        f"YOLO scan: {len(scan_results['occlusion_periods'])} occlusion periods, "
+        f"{len(scan_results['transition_frames'])} transition frames"
     )
 
     return {
         "yolo_df": yolo_df,
-        "prescan_results": prescan_results,
+        "scan_results": scan_results,
         "model_name": model_name,
         "conf_thresh": conf_thresh,
         "iou_thresh": iou_thresh,
     }
 
 
-def compute_yolo_prescan_results(
+def compute_yolo_scan_results(
     yolo_df: pd.DataFrame,
     fps: float = 25.0,
     window_seconds: float = 1.0,
@@ -789,10 +785,10 @@ def compute_yolo_prescan_results(
     separation_gap_tolerance_frames: int = 5,
 ) -> Dict[str, Any]:
     """
-    Run full YOLO-based pre-scan analysis: occlusion periods + separation windows.
+    Run full YOLO-based scan analysis: occlusion periods + separation windows.
 
-    This is the main entry point that parallels the KMeans pre-scan but uses
-    semantic object detection instead of pixel clustering.
+    This is the main entry point that uses semantic object detection to identify
+    high-occlusion regions and high-separation windows for adaptive chunking.
 
     Args:
         yolo_df: YOLO tracking DataFrame
@@ -859,7 +855,7 @@ def compute_yolo_prescan_results(
     video_duration = total_frames / fps
 
     logger.info(
-        f"YOLO prescan: {len(separation_windows)} high-separation windows found "
+        f"YOLO scan: {len(separation_windows)} high-separation windows found "
         f"(min_distance={separation_min_distance}, min_objects={separation_min_objects})"
     )
 
@@ -876,7 +872,7 @@ def compute_yolo_prescan_results(
     }
 
 
-def yolo_prescan_to_df(per_frame_metrics: List[Dict[str, Any]]) -> pd.DataFrame:
+def yolo_scan_to_df(per_frame_metrics: List[Dict[str, Any]]) -> pd.DataFrame:
     """
     Convert per-frame metrics list to a DataFrame for analysis/export.
 
