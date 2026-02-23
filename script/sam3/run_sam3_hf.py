@@ -874,7 +874,7 @@ def _run_single_video(cfg, run_dir: Path, config_path: Path | None = None):
     ).get("enabled", False)
     if _prescreen_on:
         logger.info(
-            f"Chunks: {len(chunks)} (all via video model text-prompt prescreen for {cfg.get('prescreen_frames')} frames -> video tracker model)"
+            f"Chunks: {len(chunks)} (all via video model text-prompt prescreen -> video tracker model)"
         )
     else:
         logger.info(
@@ -1079,7 +1079,9 @@ def _run_single_video(cfg, run_dir: Path, config_path: Path | None = None):
                 del ps_existing_df
             ps_chunk_df.to_parquet(prescreen_results_path)
             del ps_chunk_df
-            logger.info(f"Prescreen outputs saved to {prescreen_results_path} (chunk {chunk_idx})")
+            logger.info(
+                f"Prescreen outputs saved to {prescreen_results_path} (chunk {chunk_idx})"
+            )
 
             del prescreen_outputs
             free_gpu_memory()

@@ -20,30 +20,31 @@ prescan_only: false
 use_adaptive_chunking: false
 run_parameter_sensitivity: false
 
-# Full-video chunk boundaries (commented out — kept for reference)
 manual_chunk_frames:
+- [0, 383]
+- [383, 2698]
+- [2698, 3826]
+- [3826, 7318]
+- [7318, 8419]
+- [8419, 9446]
+- [9446, 10390]
+- [10390, 12339]
+- [12339, 14231]
+- [14231, 15780]
+- [15780, 17475]
+- [17475, 19509]
+- [19509, 21011]
+- [21011, 22529]
+
+# ---TEST: two small ultra-small 15 s chunks:
 # - [0, 375]
 # - [375, 750]
-# - [0, 383]
-# - [383, 2698]
-# - [2698, 3826]
-# - [3826, 7318]
-# - [7318, 8419]
-# - [8419, 9446]
-# - [9446, 10390]
-# - [10390, 12339]
-# - [12339, 14231]
-# - [14231, 15780]
-# - [15780, 17475]
-# - [17475, 19509]
-# - [19509, 21011]
-# - [21011, 22529]
 
 # --- TEST: mid-chunk reseed on hardest chunk (chunk 3 split + chunk 4) ---
 # manual_chunk_frames:
-  - [3826, 4076]    
-  - [4076, 7318]    
-  - [7318, 8419]    
+  # - [3826, 4076]    
+  # - [4076, 7318]    
+  # - [7318, 8419]    
 
 mid_chunk_reseed:
   enabled: false
