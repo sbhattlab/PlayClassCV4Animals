@@ -18,7 +18,6 @@ tracker_chunk_seconds: 45
 
 yolo_scan_only: false
 use_adaptive_chunking: false
-run_parameter_sensitivity: false
 
 manual_chunk_frames:
 # - [0, 383]

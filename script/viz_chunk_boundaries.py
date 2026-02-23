@@ -13,9 +13,7 @@ def parse_args():
         description="Visualize chunk boundary frames from a config file or prescan run directory"
     )
     group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument(
-        "--config", help="Path to YAML config with manual_chunk_frames"
-    )
+    group.add_argument("--config", help="Path to YAML config with manual_chunk_frames")
     group.add_argument(
         "--run-dir", help="Path to a prescan run directory containing chunk_info.json"
     )
@@ -30,9 +28,8 @@ def grab_frame(cap, frame_idx):
     ret, frame = cap.read()
     if not ret:
         return None
-    import cv2 as _cv2
 
-    return _cv2.cvtColor(frame, _cv2.COLOR_BGR2RGB)
+    return cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
 
 def fmt_timestamp(frame_idx, fps):

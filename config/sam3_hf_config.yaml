@@ -33,9 +33,6 @@ max_frames_to_track: 0  # Maximum number of frames to propagate (0 = all)
 # =============================================================================
 # Chunking Configuration
 # =============================================================================
-video_model_chunk_seconds: 15  # Duration of first chunk (Sam3VideoModel, text-prompted)
-tracker_chunk_seconds: 45      # Duration of subsequent chunks (Sam3TrackerVideoModel, point-prompted)
-
 # YOLO-scan-only mode: run YOLO scan and exit without loading SAM3 models
 yolo_scan_only: false
 
@@ -62,15 +59,6 @@ yolo_scan:
   separation_min_window_seconds: 1.0 # Minimum sustained duration of a window
   separation_gap_tolerance_frames: 5 # No-detection frames that can bridge a run
 
-# Parameter sensitivity testing (only runs when yolo_scan_only or use_adaptive_chunking is true)
-run_parameter_sensitivity: false  # Test multiple threshold combinations on scan results
-
-# Manual chunking: override fixed/adaptive chunking with explicit frame boundaries.
-# When set, prescan_only and run_parameter_sensitivity are invalid and will be ignored.
-# manual_chunk_frames:
-#   - [0, 375]      # [start_frame, end_frame] — first entry uses text-prompt model
-#   - [375, 1500]   # subsequent entries use point-prompt tracker model
-
 # =============================================================================
 # Multi-object Tracking Heuristics
 # =============================================================================
@@ -91,7 +79,7 @@ tracking:
   recondition_every_nth_frame: 8 # More frequent reconditioning (default: 16)
 
 # =============================================================================
-# Text Grounding Re-Grounding
+# Text Grounding 
 # Run Sam3VideoModel on first N frames of each tracker chunk for fresh
 # text-grounded detections, replacing drifted point prompts from prev chunk.
 # Cost: ~same as Chunk 0 per tracker chunk. Keep grounding_frames small.

@@ -20,7 +20,7 @@ text_prompt: "bird"
 
 # Output directory - results will be saved to a timestamped subdirectory
 # Format: {output_dir}/{YYYYMMDD_HHMMSS}_{job_type}/
-output_dir: "ext-data/output/results/sam3-hf"
+output_dir: "ext-data/output/results/yolo_scan"
 
 # =============================================================================
 # Model Configuration
@@ -55,7 +55,3 @@ yolo_scan:
   high_occlusion_threshold: 0.3
   occlusion_iou_threshold: 0.15
   clustering_distance_threshold: 0.15
-
-# Parameter sensitivity testing (only runs when yolo_scan_only or use_adaptive_chunking is true)
-run_parameter_sensitivity: true  # Test multiple threshold combinations on scan results
-generate_occlusion_overlays_video : true # Generate video output with occlusion periods highlighted

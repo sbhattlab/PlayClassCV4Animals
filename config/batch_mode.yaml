@@ -19,7 +19,6 @@ tracker_chunk_seconds: 45
 
 yolo_scan_only: false
 use_adaptive_chunking: false
-run_parameter_sensitivity: false
 
 # Per-video manual chunk boundaries, keyed by basename.
 # Videos not listed fall back to fixed chunking (video_model_chunk_seconds / tracker_chunk_seconds).

@@ -193,11 +193,11 @@ gs2 = [
 platforms = ["linux-64", "osx-arm64"]
 
 [tool.pixi.feature.sam3-hf-tasks.tasks]
-test-sam3-hf-image = "python -m test.sam3_hf_basic_image"
-test-sam3-hf-video = "python -m test.sam3_hf_basic_video"
-test-sam3-native-video = "python -m test.sam3_native_video"
-sam3-hf-tracker = "python -m script.sam3.run_sam3_hf"
-yolo-scan = "python -m script.sam3.run_sam3_hf --config config/yolo_scan_only.yaml"
+test-sam3-hf-image = "python -m src.test.sam3_hf_basic_image"
+test-sam3-hf-video = "python -m src.test.sam3_hf_basic_video"
+test-sam3-native-video = "python -m src.test.sam3_native_video"
+sam3-hf-tracker = "python -m src.script.sam3.run_sam3_hf"
+yolo-scan = "python -m src.script.sam3.run_sam3_hf --config config/yolo_scan_only.yaml"
 
 # =============================================================================
 # Tasks - SAM3 Native
@@ -207,7 +207,7 @@ yolo-scan = "python -m script.sam3.run_sam3_hf --config config/yolo_scan_only.ya
 platforms = ["linux-64", "osx-arm64"]
 
 [tool.pixi.feature.sam3-native-tasks.tasks]
-test-sam3-native-video = "python -m test.sam3_native_video"
+test-sam3-native-video = "python -m src.test.sam3_native_video"
 
 # =============================================================================
 # Tasks - Grounded-SAM-2
