@@ -95,8 +95,6 @@ def extract_equidistant_points_from_mask(
     and selecting evenly-spaced points using linspace. Provides better
     spatial coverage than random sampling and naturally avoids border pixels.
 
-    Originally from commit d5b4cda (the "magic run" with perfect tracking).
-
     Args:
         mask: Binary mask (H, W) with 1s indicating the object.
         num_points: Number of equidistant points to extract.

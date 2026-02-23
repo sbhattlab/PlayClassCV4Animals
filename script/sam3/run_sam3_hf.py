@@ -58,6 +58,8 @@ from transformers import (
     Sam3VideoProcessor,
 )
 
+from src.grounding import find_best_grounding_frame  # noqa: E402
+from src.grounding import match_grounding_ids_to_previous, run_grounding
 from src.metrics import compute_per_frame_metrics  # noqa: E402
 from src.metrics import (
     compute_per_run_metrics,
@@ -66,21 +68,16 @@ from src.metrics import (
     per_run_metrics_to_multiindex_df,
     summary_metrics_to_df,
 )
-from src.grounding import (  # noqa: E402
-    find_best_grounding_frame,
-    match_grounding_ids_to_previous,
-    run_grounding,
-)
-from src.processing import (  # noqa: E402
-    compute_max_pairwise_iou,
+from src.processing import compute_max_pairwise_iou  # noqa: E402
+from src.processing import (
     extract_equidistant_points_from_masks,
     find_frame_with_enough_objects,
     process_tracking_outputs,
     reseed_tracker_memory,
 )
-from src.utils import (  # noqa: E402
+from src.utils import create_run_directory  # noqa: E402
+from src.utils import (
     build_manual_chunks,
-    create_run_directory,
     free_gpu_memory,
     free_system_memory,
     get_video_metadata,
@@ -90,11 +87,8 @@ from src.utils import (  # noqa: E402
 )
 from src.viz import annotate_video_with_sam3_outputs  # noqa: E402
 from src.viz import generate_all_visualizations  # noqa: E402
-from src.yolo_scan import (  # noqa: E402
-    chunk_video_frames_adaptive,
-    run_yolo_scan,
-    yolo_scan_to_df,
-)
+from src.yolo_scan import chunk_video_frames_adaptive  # noqa: E402
+from src.yolo_scan import run_yolo_scan, yolo_scan_to_df
 
 # Import parameter sensitivity function for optional testing
 try:
@@ -613,48 +607,6 @@ def _run_single_video(cfg, run_dir: Path, config_path: Path | None = None):
         logger.info(f"YOLO scan summary saved to: {yolo_scan_summary_path}")
         logger.info(f"YOLO scan output directory: {run_dir}")
 
-        # Run parameter sensitivity testing if requested
-        if cfg.get("run_parameter_sensitivity", False) and not yolo_df.empty:
-            logger.info("")
-            logger.info("=" * 60)
-            logger.info("Running parameter sensitivity analysis...")
-            logger.info("=" * 60)
-
-            if run_parameter_sensitivity_analysis is not None:
-                try:
-                    video_path_for_sensitivity = (
-                        Path(video_path) if video_path else None
-                    )
-                    run_parameter_sensitivity_analysis(
-                        yolo_df=yolo_df,
-                        run_dir=run_dir,
-                        fps=fps,
-                        total_frames=total_frames,
-                        video_model_chunk_seconds=cfg.video_model_chunk_seconds,
-                        tracker_chunk_seconds=cfg.tracker_chunk_seconds,
-                        adaptive_min_chunk_seconds=cfg.get(
-                            "adaptive_min_chunk_seconds", 15
-                        ),
-                        adaptive_max_chunk_seconds=cfg.get(
-                            "adaptive_max_chunk_seconds", 90
-                        ),
-                        video_path=video_path_for_sensitivity,
-                        generate_occlusion_overlays_video=False,
-                    )
-                    logger.info("=" * 60)
-                    logger.info("Parameter sensitivity analysis complete")
-                    logger.info("=" * 60)
-                    logger.info("")
-                except Exception as e:
-                    logger.error(f"Parameter sensitivity analysis failed: {e}")
-                    logger.info("Continuing with main pipeline...")
-                    logger.info("")
-            else:
-                logger.warning(
-                    "Parameter sensitivity module not available (import failed)"
-                )
-                logger.info("")
-
     # Compute chunks (non-manual path): single call handles fixed, adaptive, and
     # separation-based refinement based on available scan data
     if not use_manual_chunking:
@@ -790,6 +742,7 @@ def _run_single_video(cfg, run_dir: Path, config_path: Path | None = None):
 
         use_tracker = False
         all_prompt_points = {}
+        grounding_frame_offset = 0  # local offset into chunk_frames for tracker init
 
         grounding_cfg = cfg.get("text_grounding", {})
         grounding_enabled = grounding_cfg.get("enabled", False)
@@ -804,15 +757,17 @@ def _run_single_video(cfg, run_dir: Path, config_path: Path | None = None):
                 cfg,
                 device,
             )
-            ps_frame_idx, ps_masks, ps_boxes, ps_ids = find_best_grounding_frame(
-                grounding_outputs,
-                min_objects=grounding_cfg.get(
-                    "min_objects", cfg.min_objects_for_tracking
-                ),
-                method=grounding_cfg.get("best_frame_method", "combined"),
+            gr_out_frame_idx, gr_out_masks, gr_out_boxes, gr_out_ids = (
+                find_best_grounding_frame(
+                    grounding_outputs,
+                    min_objects=grounding_cfg.get(
+                        "min_objects", cfg.min_objects_for_tracking
+                    ),
+                    method=grounding_cfg.get("best_frame_method", "combined"),
+                )
             )
 
-            if ps_frame_idx is not None:
+            if gr_out_frame_idx is not None:
                 # Remap fresh IDs to previous-chunk IDs (if a previous chunk exists)
                 if previous_chunk_outputs is not None and grounding_cfg.get(
                     "id_matching", True
@@ -827,8 +782,8 @@ def _run_single_video(cfg, run_dir: Path, config_path: Path | None = None):
                     )
                     if prev_masks_for_iou:
                         id_map = match_grounding_ids_to_previous(
-                            ps_masks,
-                            ps_ids,
+                            gr_out_masks,
+                            gr_out_ids,
                             prev_masks_for_iou,
                             prev_ids_for_iou,
                             iou_threshold=grounding_cfg.get(
@@ -836,22 +791,22 @@ def _run_single_video(cfg, run_dir: Path, config_path: Path | None = None):
                             ),
                         )
                     else:
-                        id_map = {int(pid): int(pid) for pid in ps_ids}
+                        id_map = {int(gid): int(gid) for gid in gr_out_ids}
                 else:
-                    id_map = {int(pid): int(pid) for pid in ps_ids}
+                    id_map = {int(gid): int(gid) for gid in gr_out_ids}
 
-                ps_masks_array = np.stack(
+                gr_out_masks_array = np.stack(
                     [
                         m.squeeze(0) if m.ndim == 3 and m.shape[0] == 1 else m
-                        for m in ps_masks
+                        for m in gr_out_masks
                     ]
                 )
                 sampled = extract_equidistant_points_from_masks(
-                    ps_masks_array, num_points=3
+                    gr_out_masks_array, num_points=3
                 )
                 grounding_prompt_points = {}
-                for i, ps_id in enumerate(ps_ids):
-                    mapped_id = id_map.get(int(ps_id), int(ps_id))
+                for i, gr_out_id in enumerate(gr_out_ids):
+                    mapped_id = id_map.get(int(gr_out_id), int(gr_out_id))
                     pts = sampled[i]
                     if pts.size > 0:
                         grounding_prompt_points[mapped_id] = pts.tolist()
@@ -859,16 +814,22 @@ def _run_single_video(cfg, run_dir: Path, config_path: Path | None = None):
                 if grounding_prompt_points:
                     all_prompt_points = grounding_prompt_points
                     use_tracker = True
+                    grounding_frame_offset = int(gr_out_frame_idx) - global_chunk_start
                     chunk_info["model_type"] = "Sam3TrackerVideoModel"
                     chunk_info["prompt_points"] = {
                         str(k): v for k, v in all_prompt_points.items()
                     }
                     chunk_info["num_objects_tracked"] = len(all_prompt_points)
                     chunk_info["grounding_used"] = True
-                    chunk_info["grounding_source_frame_idx"] = int(ps_frame_idx)
+                    chunk_info["grounding_source_frame_idx"] = int(gr_out_frame_idx)
                     chunk_info["grounding_num_objects"] = len(grounding_prompt_points)
+                    if grounding_frame_offset > 0:
+                        logger.info(
+                            f"  [grounding] trimming {grounding_frame_offset} frame(s) from chunk start "
+                            f"to align tracker init with best grounding frame {gr_out_frame_idx}"
+                        )
                     logger.info(
-                        f"  [grounding] fresh text-grounded points from frame {ps_frame_idx} "
+                        f"  [grounding] fresh text-grounded points from frame {gr_out_frame_idx} "
                         f"({len(grounding_prompt_points)} objects)"
                     )
                 else:
@@ -985,10 +946,10 @@ def _run_single_video(cfg, run_dir: Path, config_path: Path | None = None):
 
         # --- Process chunk with appropriate model ---
         # start_frame offset ensures global frame indices match original video positions
-        global_start_idx = global_chunk_start
+        global_start_idx = global_chunk_start + grounding_frame_offset
         if use_tracker:
             chunk_outputs = _process_tracker_chunk(
-                chunk_frames, global_start_idx, all_prompt_points, cfg, device
+                chunk_frames[grounding_frame_offset:], global_start_idx, all_prompt_points, cfg, device
             )
         else:
             chunk_outputs = _process_video_chunk(
@@ -1202,5 +1163,9 @@ def main():
         _run_single_video(cfg, run_dir, config_path=Path(_args.config))
 
 
+if __name__ == "__main__":
+    main()
+if __name__ == "__main__":
+    main()
 if __name__ == "__main__":
     main()
