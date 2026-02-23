@@ -178,7 +178,9 @@ def _match_prescreen_ids_to_previous(
     Greedy IoU-based assignment of prescreen IDs to previous-chunk IDs.
     Builds P×Q IoU matrix, iteratively picks highest-IoU pair, removes both
     from pool, stops when below iou_threshold. Unmatched prescreen IDs keep
-    their original value in the returned dict.
+    their original value if it does not collide with an already-mapped ID;
+    otherwise they are assigned a fresh ID to avoid silent key collisions in
+    prescreen_prompt_points.
     """
     if not prescreen_masks or not prev_masks:
         return {int(pid): int(pid) for pid in prescreen_ids}
@@ -213,10 +215,20 @@ def _match_prescreen_ids_to_previous(
         assigned_ps.add(i)
         assigned_pv.add(j)
 
-    # Unmatched prescreen IDs pass through unchanged
+    # Unmatched prescreen IDs: pass through with original value, but remap to a
+    # fresh ID if that value is already claimed by a matched assignment to avoid
+    # silent dict-key collisions in prescreen_prompt_points.
+    claimed = set(id_map.values())
+    next_fresh = max(claimed | {int(pid) for pid in prescreen_ids}, default=-1) + 1
     for i, pid in enumerate(prescreen_ids):
         if int(pid) not in id_map:
-            id_map[int(pid)] = int(pid)
+            if int(pid) not in claimed:
+                id_map[int(pid)] = int(pid)
+                claimed.add(int(pid))
+            else:
+                id_map[int(pid)] = next_fresh
+                claimed.add(next_fresh)
+                next_fresh += 1
 
     return id_map
 
