@@ -10,7 +10,7 @@ from omegaconf import OmegaConf
 
 def parse_args():
     parser = ArgumentParser(
-        description="Visualize chunk boundary frames from a config file or prescan run directory"
+        description="Visualize chunk boundary frames from a config file or yolo scan run directory"
     )
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--config", help="Path to YAML config with manual_chunk_frames")
@@ -41,12 +41,6 @@ def fmt_timestamp(frame_idx, fps):
 def main():
     args = parse_args()
 
-    if args.output_dir is None:
-        output_dir = Path("sandbox")
-    else:
-        output_dir = Path(args.output_dir)
-    output_dir.mkdir(exist_ok=True, parents=True)
-
     if args.config:
         cfg = OmegaConf.load(args.config)
         video_path = cfg.video_path
@@ -63,6 +57,12 @@ def main():
         cfg = OmegaConf.load(config_copies[0])
         video_path = cfg.video_path
         chunks = [c["frame_range"] for c in chunk_info["chunks"]]
+
+    if args.output_dir is None:
+        output_dir = run_dir / "visualizations"
+    else:
+        output_dir = Path(args.output_dir)
+    output_dir.mkdir(exist_ok=True, parents=True)
 
     cap = cv2.VideoCapture(video_path)
     assert cap.isOpened(), f"Could not open video: {video_path}"
@@ -105,8 +105,7 @@ def main():
     cap.release()
     fig.suptitle("Chunk boundary frames", fontsize=12, fontweight="bold")
     plt.savefig(
-        output_plot_path := output_dir
-        / f"chunk_boundaries_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png",
+        output_plot_path := output_dir / f"chunk_boundaries_{run_dir.stem}.png",
         dpi=300,
     )
     print(f"Saved chunk boundary visualization to: {output_plot_path}")

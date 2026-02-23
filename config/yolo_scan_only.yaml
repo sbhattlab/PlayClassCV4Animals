@@ -32,26 +32,31 @@ max_frames_to_track: 0  # Maximum number of frames to propagate (0 = all)
 # Chunking Configuration
 # =============================================================================
 video_model_chunk_seconds: 15  # Duration of first chunk (Sam3VideoModel, text-prompted)
-tracker_chunk_seconds: 45      # Duration of subsequent chunks (Sam3TrackerVideoModel, point-prompted)
+# tracker_chunk_seconds: 45      # Duration of subsequent chunks (Sam3TrackerVideoModel, point-prompted)
 
 # YOLO-scan-only mode: run YOLO scan and exit without loading SAM3 models
 yolo_scan_only: true
 
 # Occlusion-aware adaptive chunking (YOLO-based scan)
 use_adaptive_chunking: true          # Enable adaptive boundary placement via YOLO scan
-adaptive_min_chunk_seconds: 15       # Minimum chunk duration after adjustment
-adaptive_max_chunk_seconds: 360       # Maximum chunk duration after adjustment
+# Chunking base sizes — drives ~60s avg 
+tracker_chunk_seconds: 60          
+
+# Chunk length limits (as requested)
+adaptive_min_chunk_seconds: 45     
+adaptive_max_chunk_seconds: 120   
 
 # YOLO-based scan configuration (used when use_adaptive_chunking: true)
 yolo_scan:
   model: "model/yolo26x.pt"
   conf_thresh: 0.25
   iou_thresh: 0.45
-  # tracker_config: "data/yolo/bytetrack.yaml"
-  # tracker_config: "data/yolo/botsort.yaml"
   tracker_config: "data/yolo/botsort_alternative.yaml"
   allowed_classes: ["bird"]
   window_seconds: 1.0
   high_occlusion_threshold: 0.3
   occlusion_iou_threshold: 0.15
   clustering_distance_threshold: 0.15
+  separation_min_distance: 0.22    
+  separation_min_window_seconds: 2.0  
+  separation_gap_tolerance_frames: 3  

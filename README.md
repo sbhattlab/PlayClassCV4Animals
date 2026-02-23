@@ -64,8 +64,15 @@ python -m script.sam3.run_sam3_hf
 
 - *OR* check whether a dedicated pixi task has been created for it, e.g.:
 ```sh 
-pixi run sam3-hf-tracker
-pixi run yolo-scan
+pixi run sam3-hf-default
+pixi run sam3-hf-manual
+pixi run sam3-hf-yolo-scan
+```
+
+# Post-tracking pipelines
+```
+- `script/viz_chunk_boundaries.py` - Visualize chunk boundary frames from a config file or yolo scan run directory
+- `script/viz_grounding.py` - Render grounding phase outputs onto the original video
 ```
 
 # Overview of currently implemented test scripts

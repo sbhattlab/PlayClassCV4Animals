@@ -196,8 +196,9 @@ platforms = ["linux-64", "osx-arm64"]
 test-sam3-hf-image = "python -m src.test.sam3_hf_basic_image"
 test-sam3-hf-video = "python -m src.test.sam3_hf_basic_video"
 test-sam3-native-video = "python -m src.test.sam3_native_video"
-sam3-hf-tracker = "python -m src.script.sam3.run_sam3_hf"
-yolo-scan = "python -m src.script.sam3.run_sam3_hf --config config/yolo_scan_only.yaml"
+sam3-hf-default = "python -m script.sam3.run_sam3_hf"
+sam3-hf-manual = "python -m script.sam3.run_sam3_hf"
+sam3-hf-yolo-scan = "python -m script.sam3.run_sam3_hf --config config/yolo_scan_only.yaml"
 
 # =============================================================================
 # Tasks - SAM3 Native
