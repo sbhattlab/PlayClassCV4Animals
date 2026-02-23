@@ -59,7 +59,7 @@ mid_chunk_reseed:
 # =============================================================================
 text_grounding:
   enabled: true                  # Off by default
-  grounding_frames: 75            # Frames to ground (~3 s at 25 fps)
+  grounding_frames: 125            # Frames to ground (~5 s at 25 fps)
   min_objects: 3                  # Min detections to accept grounding result
   best_frame_method: "combined"   # "combined" | "min_occlusion" | "best_scores"
   fallback_to_prev_chunk: true    # Fall back to prev-chunk points if grounding fails
