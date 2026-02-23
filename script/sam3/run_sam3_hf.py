@@ -49,8 +49,8 @@ import torch  # noqa: E402
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
 from accelerate import Accelerator  # noqa: E402
+from transformers import Sam3TrackerVideoConfig  # noqa: E402
 from transformers import (
-    Sam3TrackerVideoConfig,  # noqa: E402
     Sam3TrackerVideoModel,
     Sam3TrackerVideoProcessor,
     Sam3VideoConfig,
@@ -58,36 +58,43 @@ from transformers import (
     Sam3VideoProcessor,
 )
 
+from src.metrics import compute_per_frame_metrics  # noqa: E402
 from src.metrics import (
-    compute_per_frame_metrics,  # noqa: E402
     compute_per_run_metrics,
     compute_summary_metrics,
     per_frame_metrics_to_df,
     per_run_metrics_to_multiindex_df,
     summary_metrics_to_df,
 )
-from src.utils import (
-    annotate_video_with_sam3_outputs,  # noqa: E402
-    build_manual_chunks,
-    chunk_video_frames_adaptive,
-    compute_max_pairwise_iou,
-    create_run_directory,
-    extract_equidistant_points_from_masks,
+from src.grounding import (  # noqa: E402
     find_best_grounding_frame,
+    match_grounding_ids_to_previous,
+    run_grounding,
+)
+from src.processing import (  # noqa: E402
+    compute_max_pairwise_iou,
+    extract_equidistant_points_from_masks,
     find_frame_with_enough_objects,
+    process_tracking_outputs,
+    reseed_tracker_memory,
+)
+from src.utils import (  # noqa: E402
+    build_manual_chunks,
+    create_run_directory,
     free_gpu_memory,
     free_system_memory,
     get_video_metadata,
     load_video_frames_range,
-    match_grounding_ids_to_previous,
-    process_tracking_outputs,
-    reseed_tracker_memory,
-    run_grounding,
     sanitize_filename,
     setup_logger,
 )
+from src.viz import annotate_video_with_sam3_outputs  # noqa: E402
 from src.viz import generate_all_visualizations  # noqa: E402
-from src.yolo_scan import run_yolo_scan, yolo_scan_to_df  # noqa: E402
+from src.yolo_scan import (  # noqa: E402
+    chunk_video_frames_adaptive,
+    run_yolo_scan,
+    yolo_scan_to_df,
+)
 
 # Import parameter sensitivity function for optional testing
 try:
@@ -813,7 +820,8 @@ def _run_single_video(cfg, run_dir: Path, config_path: Path | None = None):
                     _, prev_masks_for_iou, _, prev_ids_for_iou = (
                         find_frame_with_enough_objects(
                             previous_chunk_outputs,
-                            min_objects=1,
+                            # min_objects=3,
+                            min_objects=cfg.min_objects_for_tracking,
                             max_lookback=cfg.max_lookback_frames,
                         )
                     )

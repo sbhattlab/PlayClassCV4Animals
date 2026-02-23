@@ -1,9 +1,5 @@
 """
-YOLO-based occlusion period detection for adaptive chunking scan.
-
-Computes per-frame spatial and overlap metrics from YOLO tracking outputs,
-providing a semantic alternative to pixel-clustering (KMeans) for identifying
-high-occlusion regions.
+YOLO-based adaptive chunking scan.
 
 The ``run_yolo_scan`` function runs YOLO+ByteTrack inference inline on a
 video file, builds a tracking DataFrame, and calls ``compute_yolo_scan_results``
@@ -19,6 +15,12 @@ import pandas as pd
 from loguru import logger
 from omegaconf import OmegaConf
 from tqdm import tqdm
+
+from src.processing import (
+    compute_bbox_iou,
+    compute_clustering_coefficient,
+    compute_pairwise_centroid_distances,
+)
 
 
 def _draw_label(img: np.ndarray, label: str, x1: float, y1: float) -> None:
@@ -47,33 +49,6 @@ def _draw_label(img: np.ndarray, label: str, x1: float, y1: float) -> None:
         thickness,
         cv2.LINE_AA,
     )
-
-
-def compute_bbox_iou(boxA: np.ndarray, boxB: np.ndarray) -> float:
-    """
-    Compute IoU between two bounding boxes in [x1, y1, x2, y2] format.
-
-    Args:
-        boxA: (4,) array [x1, y1, x2, y2]
-        boxB: (4,) array [x1, y1, x2, y2]
-
-    Returns:
-        IoU in [0, 1]
-    """
-    xA = max(boxA[0], boxB[0])
-    yA = max(boxA[1], boxB[1])
-    xB = min(boxA[2], boxB[2])
-    yB = min(boxA[3], boxB[3])
-
-    interW = max(0, xB - xA)
-    interH = max(0, yB - yA)
-    inter = interW * interH
-
-    areaA = max(0, (boxA[2] - boxA[0]) * (boxA[3] - boxA[1]))
-    areaB = max(0, (boxB[2] - boxB[0]) * (boxB[3] - boxB[1]))
-    union = areaA + areaB - inter
-
-    return inter / union if union > 0 else 0.0
 
 
 def compute_pairwise_bbox_iou(boxes: np.ndarray) -> np.ndarray:
@@ -115,52 +90,6 @@ def compute_bbox_centroids(boxes: np.ndarray) -> np.ndarray:
     cx = (boxes[:, 0] + boxes[:, 2]) / 2
     cy = (boxes[:, 1] + boxes[:, 3]) / 2
     return np.column_stack([cx, cy])
-
-
-def compute_pairwise_centroid_distances(centroids: np.ndarray) -> np.ndarray:
-    """
-    Compute pairwise Euclidean distances between centroids.
-
-    Args:
-        centroids: (N, 2) array of [cx, cy] centroids
-
-    Returns:
-        (N, N) symmetric distance matrix
-    """
-    n = len(centroids)
-    if n == 0:
-        return np.array([])
-
-    dist_matrix = np.zeros((n, n))
-    for i in range(n):
-        for j in range(i + 1, n):
-            dist = np.linalg.norm(centroids[i] - centroids[j])
-            dist_matrix[i, j] = dist
-            dist_matrix[j, i] = dist
-    return dist_matrix
-
-
-def compute_clustering_coefficient(centroids: np.ndarray, threshold: float) -> float:
-    """
-    Fraction of centroid pairs within threshold distance.
-
-    Args:
-        centroids: (N, 2) array
-        threshold: distance in pixels (or normalized coordinates)
-
-    Returns:
-        Float in [0, 1]. 0.0 when fewer than 2 objects.
-    """
-    n = len(centroids)
-    if n < 2:
-        return 0.0
-
-    dists = compute_pairwise_centroid_distances(centroids)
-    upper = dists[np.triu_indices(n, k=1)]
-    if len(upper) == 0:
-        return 0.0
-
-    return float(np.sum(upper < threshold) / len(upper))
 
 
 def compute_bbox_area_stats(boxes: np.ndarray) -> Dict[str, Any]:
@@ -431,7 +360,8 @@ def find_high_separation_windows(
             num_overlapping_pairs=m["num_overlapping_pairs"],
             min_objects=min_objects,
             min_separation_distance=min_separation_distance,
-        ) > 0.0
+        )
+        > 0.0
     ]
 
     if not qualifying:
@@ -889,3 +819,295 @@ def yolo_scan_to_df(per_frame_metrics: List[Dict[str, Any]]) -> pd.DataFrame:
         rows.append(r)
 
     return pd.DataFrame(rows)
+
+
+def chunk_video_frames_adaptive(
+    total_frames: int,
+    fps: float,
+    video_model_seconds: int,
+    tracker_seconds: int,
+    separation_windows: list[tuple[int, int]] | None = None,
+    per_frame_metrics: list[dict] | None = None,
+    occlusion_periods: list[tuple[int, int]] | None = None,
+    transition_frames: np.ndarray | None = None,
+    search_window_seconds: float = 10.0,
+    min_chunk_seconds: float = 15.0,
+    max_chunk_seconds: float = 90.0,
+    margin_seconds: float = 3.0,
+) -> list[tuple[int, int, str]]:
+    """
+    Split video into adaptive chunks, optionally refined by separation windows
+    or occlusion avoidance.
+
+    Generates initial fixed chunks (chunk 0 → video model, remainder → tracker),
+    then for each tracker-chunk boundary refines in priority order:
+
+      1. Separation-first: if ``separation_windows`` and ``per_frame_metrics``
+         are provided, search ±search_window_seconds for frames inside a
+         separation window and pick the highest separation_score.
+      2. Occlusion avoidance: if ``occlusion_periods`` are provided, search for
+         frames outside occlusion periods (+margin_seconds buffer) and prefer
+         frames farthest from any occlusion.
+      3. No-op: keep original boundary if neither applies or constraints are
+         violated.
+
+    Validates against min_chunk_seconds / max_chunk_seconds and absorbs trailing
+    remainders < 10% of tracker chunk size.
+
+    Args:
+        total_frames: Total number of frames in the video.
+        fps: Video frame rate.
+        video_model_seconds: Duration of the first (text-prompted) chunk in seconds.
+        tracker_seconds: Duration of subsequent (point-prompted) chunks in seconds.
+        separation_windows: List of (start_frame, end_frame) high-separation windows.
+            When provided together with per_frame_metrics, enables separation-first
+            boundary refinement.
+        per_frame_metrics: Per-frame metric dicts (must contain 'frame_idx' and
+            'separation_score'). Required for separation-first refinement.
+        occlusion_periods: List of (start_frame, end_frame) high-occlusion periods.
+            Used as a fallback when separation-first is unavailable.
+        transition_frames: Legacy parameter kept for backwards compatibility.
+            Ignored when occlusion_periods or separation_windows are provided.
+        search_window_seconds: Search radius (seconds) around each boundary.
+        min_chunk_seconds: Minimum allowed chunk duration after adjustment.
+        max_chunk_seconds: Maximum allowed chunk duration after adjustment.
+        margin_seconds: Safety buffer (seconds) around occlusion period edges.
+
+    Returns:
+        List of (start_frame, end_frame, model_type) tuples where model_type is
+        "video" (first chunk) or "tracker" (all others).
+    """
+    video_model_frames = int(fps * video_model_seconds)
+    tracker_frames = int(fps * tracker_seconds)
+    search_window_frames = int(search_window_seconds * fps)
+    min_frames = int(min_chunk_seconds * fps)
+    max_frames = int(max_chunk_seconds * fps)
+    margin_frames = int(margin_seconds * fps)
+
+    # Step 1: Generate initial fixed chunks (same logic as old chunk_video_frames_dual)
+    fixed_chunks: list[tuple[int, int, str]] = []
+    end = min(video_model_frames, total_frames)
+    fixed_chunks.append((0, end, "video"))
+
+    start = end
+    while start < total_frames:
+        end = min(start + tracker_frames, total_frames)
+        remaining_after = total_frames - end
+        if 0 < remaining_after < tracker_frames * 0.1:
+            end = total_frames  # absorb small tail
+        fixed_chunks.append((start, end, "tracker"))
+        start = end
+
+    if len(fixed_chunks) <= 1:
+        return fixed_chunks
+
+    # Step 2: Collect refinement data
+    use_separation = bool(separation_windows and per_frame_metrics)
+    use_occlusion = bool(occlusion_periods)
+
+    score_lookup: dict[int, float] = {}
+    if use_separation and per_frame_metrics:
+        score_lookup = {
+            m["frame_idx"]: m["separation_score"]
+            for m in per_frame_metrics
+            if m.get("separation_score", 0.0) > 0.0
+        }
+
+    boundaries = [c[0] for c in fixed_chunks]
+    total_end = fixed_chunks[-1][1]
+    adjusted_boundaries = list(boundaries)
+
+    def _is_in_occlusion(frame: int) -> bool:
+        """Check if frame falls within any occlusion period (with margin)."""
+        if not occlusion_periods:
+            return False
+        for start_f, end_f in occlusion_periods:
+            if (start_f - margin_frames) <= frame <= (end_f + margin_frames):
+                return True
+        return False
+
+    def _occlusion_quality(frame: int) -> float:
+        """
+        Compute quality score for a candidate boundary (higher = better).
+
+        Scoring rules:
+        1. Distance to nearest occlusion (farther = better)
+        2. Strong penalty if occlusion is ahead (within next margin_frames)
+        3. Moderate penalty if occlusion is behind (within prev margin_frames)
+        """
+        if not occlusion_periods:
+            return 1000.0  # Arbitrary high score if no occlusions
+
+        min_dist = float("inf")
+        occlusion_ahead = False
+        occlusion_behind = False
+
+        for start_f, end_f in occlusion_periods:
+            # Check if occlusion is ahead (about to start)
+            if start_f > frame and (start_f - frame) <= margin_frames:
+                occlusion_ahead = True
+            # Check if occlusion just ended
+            if end_f < frame and (frame - end_f) <= margin_frames:
+                occlusion_behind = True
+
+            # Distance to nearest edge
+            dist = min(abs(frame - start_f), abs(frame - end_f))
+            min_dist = min(min_dist, dist)
+
+        # Base score is distance
+        score = float(min_dist)
+
+        # Heavy penalty if occlusion is just ahead
+        if occlusion_ahead:
+            score *= 0.1  # 90% penalty
+
+        # Moderate penalty if occlusion just ended
+        if occlusion_behind:
+            score *= 0.5  # 50% penalty
+
+        return score
+
+    # Step 3: Refine tracker-chunk boundaries (indices 1+)
+    for i in range(1, len(adjusted_boundaries)):
+        original = adjusted_boundaries[i]
+        search_start = max(0, original - search_window_frames)
+        search_end = min(total_end, original + search_window_frames)
+        best_candidate = None
+
+        if use_separation:
+            # Separation-first: find highest-score frame inside a separation window
+            sep_candidates: dict[int, float] = {}
+            for win_start, win_end in separation_windows:  # type: ignore[union-attr]
+                overlap_start = max(win_start, search_start)
+                overlap_end = min(win_end, search_end)
+                if overlap_start > overlap_end:
+                    continue
+                for frame, score in score_lookup.items():
+                    if overlap_start <= frame <= overlap_end:
+                        sep_candidates[frame] = score
+
+            if sep_candidates:
+                best_candidate = max(sep_candidates, key=lambda f: sep_candidates[f])
+                shift = best_candidate - original
+                prev_start = adjusted_boundaries[i - 1]
+                next_end = (
+                    adjusted_boundaries[i + 1]
+                    if i + 1 < len(adjusted_boundaries)
+                    else total_end
+                )
+                prev_len = best_candidate - prev_start
+                next_len = next_end - best_candidate
+
+                if prev_len < min_frames or prev_len > max_frames:
+                    logger.debug(
+                        f"Separation boundary {i}: frame {original} → {best_candidate} rejected "
+                        f"(prev chunk {prev_len / fps:.1f}s outside "
+                        f"[{min_chunk_seconds}-{max_chunk_seconds}]s)"
+                    )
+                    best_candidate = None
+                elif next_len < min_frames or next_len > max_frames:
+                    logger.debug(
+                        f"Separation boundary {i}: frame {original} → {best_candidate} rejected "
+                        f"(next chunk {next_len / fps:.1f}s outside "
+                        f"[{min_chunk_seconds}-{max_chunk_seconds}]s)"
+                    )
+                    best_candidate = None
+                else:
+                    adjusted_boundaries[i] = best_candidate
+                    logger.info(
+                        f"Separation boundary {i}: frame {original} → {best_candidate} "
+                        f"(shifted {shift:+d} frames, "
+                        f"separation_score={sep_candidates[best_candidate]:.3f})"
+                    )
+                    continue  # Done with this boundary
+            else:
+                logger.debug(
+                    f"Separation boundary {i}: frame {original} — no separation windows "
+                    f"in ±{search_window_seconds}s, trying occlusion fallback"
+                )
+
+        if use_occlusion and best_candidate is None:
+            # Occlusion avoidance fallback
+            candidates_list = list(range(search_start, search_end + 1))
+            safe_candidates = [f for f in candidates_list if not _is_in_occlusion(f)]
+
+            if not safe_candidates:
+                logger.warning(
+                    f"Boundary {i}: frame {original} — all candidates within occlusion periods "
+                    f"(±{search_window_seconds}s window), keeping original (RISKY)"
+                )
+                continue
+
+            best_candidate = max(safe_candidates, key=_occlusion_quality)
+            shift = int(best_candidate) - original
+            prev_start = adjusted_boundaries[i - 1]
+            next_end = (
+                adjusted_boundaries[i + 1]
+                if i + 1 < len(adjusted_boundaries)
+                else total_end
+            )
+            prev_len = int(best_candidate) - prev_start
+            next_len = next_end - int(best_candidate)
+
+            if prev_len < min_frames or prev_len > max_frames:
+                logger.debug(
+                    f"Boundary {i}: frame {original} → {best_candidate} rejected "
+                    f"(prev chunk would be {prev_len / fps:.1f}s, "
+                    f"limits: {min_chunk_seconds}-{max_chunk_seconds}s)"
+                )
+                continue
+
+            if next_len < min_frames or next_len > max_frames:
+                logger.debug(
+                    f"Boundary {i}: frame {original} → {best_candidate} rejected "
+                    f"(next chunk would be {next_len / fps:.1f}s, "
+                    f"limits: {min_chunk_seconds}-{max_chunk_seconds}s)"
+                )
+                continue
+
+            adjusted_boundaries[i] = int(best_candidate)
+            quality = _occlusion_quality(int(best_candidate))
+            logger.info(
+                f"Boundary {i}: frame {original} → {best_candidate} "
+                f"(shifted by {shift:+d} frames, quality score: {quality:.1f})"
+            )
+
+    # Step 4: Rebuild chunks from adjusted boundaries
+    adjusted_chunks = []
+    for i in range(len(adjusted_boundaries)):
+        s = adjusted_boundaries[i]
+        e = (
+            adjusted_boundaries[i + 1]
+            if i + 1 < len(adjusted_boundaries)
+            else total_end
+        )
+        model_type = fixed_chunks[i][2]
+        adjusted_chunks.append((s, e, model_type))
+
+    # Step 5: Absorb small trailing chunks (<10% of tracker chunk size)
+    if len(adjusted_chunks) > 1:
+        last_start, last_end, _ = adjusted_chunks[-1]
+        last_len = last_end - last_start
+        prev_start, _, prev_type = adjusted_chunks[-2]
+        should_absorb = False
+
+        if last_len < tracker_frames * 0.1:
+            should_absorb = True
+            logger.info(
+                f"Absorbing small trailing chunk ({last_len} frames, "
+                f"{last_len / fps:.1f}s) into previous chunk"
+            )
+        elif occlusion_periods and _is_in_occlusion(last_start):
+            combined_len = last_end - prev_start
+            if combined_len <= max_frames:
+                should_absorb = True
+                logger.info(
+                    f"Absorbing last chunk (boundary at {last_start} too close to occlusion) "
+                    f"into previous chunk (combined: {combined_len / fps:.1f}s)"
+                )
+
+        if should_absorb:
+            adjusted_chunks[-2] = (prev_start, last_end, prev_type)
+            adjusted_chunks.pop()
+
+    return adjusted_chunks

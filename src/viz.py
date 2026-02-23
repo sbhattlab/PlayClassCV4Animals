@@ -8,6 +8,8 @@ from typing import Optional, Sequence
 
 import cv2
 import matplotlib.lines as mlines
+import supervision as sv
+import torch
 import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
@@ -1036,3 +1038,112 @@ def generate_all_visualizations(
             fps=fps,
             save_path=output_dir / "yolo_scan_overview.png",
         )
+
+
+# ---------------------------------------------------------------------------
+# Video annotation
+# ---------------------------------------------------------------------------
+
+
+def _to_numpy(x):
+    if hasattr(x, "cpu"):
+        x = x.cpu()
+    if hasattr(x, "numpy"):
+        x = x.numpy()
+    return np.array(x)
+
+
+def create_annotation_callback(outputs_per_frame: dict):
+    """
+    Creates a callback function for sv.process_video that annotates frames
+    using pre-computed SAM3 tracking outputs.
+    """
+    mask_annotator = sv.MaskAnnotator()
+    box_annotator = sv.BoxAnnotator(thickness=2)
+    label_annotator = sv.LabelAnnotator()
+
+    def callback(frame: np.ndarray, frame_idx: int) -> np.ndarray:
+        # Get outputs for this frame (may be missing for some frames)
+        if frame_idx not in outputs_per_frame:
+            return frame  # return original frame if no detections
+
+        frame_out = outputs_per_frame[frame_idx]
+
+        # Convert to tensors (handles both torch tensor and numpy array inputs)
+        masks_raw = frame_out["masks"]
+        boxes_raw = frame_out["boxes"]
+        ids_raw = frame_out["object_ids"]
+        scores_raw = frame_out["scores"]
+
+        if isinstance(masks_raw, np.ndarray):
+            masks_t = torch.from_numpy(masks_raw)
+        else:
+            masks_t = masks_raw.detach().cpu()
+
+        if isinstance(boxes_raw, np.ndarray):
+            boxes_t = torch.from_numpy(boxes_raw)
+        else:
+            boxes_t = boxes_raw.detach().cpu()
+
+        if isinstance(ids_raw, np.ndarray):
+            ids_t = torch.from_numpy(ids_raw)
+        else:
+            ids_t = ids_raw.detach().cpu()
+
+        if isinstance(scores_raw, np.ndarray):
+            scores_t = torch.from_numpy(scores_raw)
+        else:
+            scores_t = scores_raw.detach().cpu()
+
+        # Prepare masks: ensure shape (N, 1, H, W)
+        if masks_t.ndim == 3:  # (N, H, W)
+            masks_t = masks_t.unsqueeze(1)  # -> (N, 1, H, W)
+        masks_t = masks_t.to(torch.uint8)
+
+        # Build transformers-style results
+        transformers_res = {
+            "boxes": boxes_t,
+            "masks": masks_t,
+            "labels": ids_t,
+            "scores": scores_t,
+        }
+
+        # Create id2label mapping
+        id2label = {int(i): f"id:{int(i)}" for i in _to_numpy(ids_t)}
+
+        # Build detections
+        detections = sv.Detections.from_transformers(
+            transformers_results=transformers_res, id2label=id2label
+        )
+
+        # Create labels with ID and confidence
+        labels = [
+            f"#{int(obj_id)} {confidence:.2f}"
+            for obj_id, confidence in zip(_to_numpy(ids_t), detections.confidence)
+        ]
+
+        # Apply annotations
+        annotated = mask_annotator.annotate(scene=frame.copy(), detections=detections)
+        annotated = box_annotator.annotate(scene=annotated, detections=detections)
+        annotated = label_annotator.annotate(
+            scene=annotated, detections=detections, labels=labels
+        )
+
+        return annotated
+
+    return callback
+
+
+def annotate_video_with_sam3_outputs(
+    source_path: str, target_path: str, outputs_per_frame: dict
+):
+    """
+    Process entire video with SAM3 tracking outputs and save annotated version.
+    """
+    callback = create_annotation_callback(outputs_per_frame)
+    sv.process_video(
+        source_path=source_path,
+        target_path=target_path,
+        callback=callback,
+        show_progress=True,
+    )

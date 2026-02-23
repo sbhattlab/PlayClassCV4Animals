@@ -8,21 +8,12 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
-
-def _tensor_to_numpy(x):
-    try:
-        import torch
-
-        if isinstance(x, torch.Tensor):
-            return x.detach().cpu().numpy()
-    except Exception:
-        pass
-    if isinstance(x, np.ndarray):
-        return x
-    try:
-        return np.array(x)
-    except Exception:
-        return np.array([])
+from src.processing import (
+    compute_bbox_iou,
+    compute_clustering_coefficient,
+    compute_pairwise_centroid_distances,
+    to_numpy,
+)
 
 
 def _normalize_frame_dict(
@@ -43,9 +34,9 @@ def _normalize_frame_dict(
                 frames.append(v["instances"] or [])
                 continue
             if "object_ids" in v and "boxes" in v:
-                obj_ids = _tensor_to_numpy(v["object_ids"])
-                boxes = _tensor_to_numpy(v["boxes"])
-                scores = _tensor_to_numpy(v.get("scores", np.zeros(len(obj_ids))))
+                obj_ids = to_numpy(v["object_ids"])
+                boxes = to_numpy(v["boxes"])
+                scores = to_numpy(v.get("scores", np.zeros(len(obj_ids))))
                 tracker_scores_dict = v.get("obj_id_to_tracker_score") or {}
                 dets = []
                 for j in range(len(obj_ids)):
@@ -82,26 +73,12 @@ def _normalize_frame_dict(
     return idxs, frames
 
 
-def _iou(boxA, boxB):
-    xA = max(boxA[0], boxB[0])
-    yA = max(boxA[1], boxB[1])
-    xB = min(boxA[2], boxB[2])
-    yB = min(boxA[3], boxB[3])
-    interW = max(0, xB - xA)
-    interH = max(0, yB - yA)
-    inter = interW * interH
-    areaA = max(0, (boxA[2] - boxA[0]) * (boxA[3] - boxA[1]))
-    areaB = max(0, (boxB[2] - boxB[0]) * (boxB[3] - boxB[1]))
-    union = areaA + areaB - inter
-    return inter / union if union > 0 else 0.0
-
-
 # ---------------------------------------------------------------------------
 # Mask-based spatial primitives
 # ---------------------------------------------------------------------------
 
 
-def compute_pairwise_mask_iou(masks: np.ndarray) -> np.ndarray:
+def compute_pairwise_maskcompute_bbox_iou(masks: np.ndarray) -> np.ndarray:
     """
     Compute pairwise pixel-level IoU for all masks.
 
@@ -111,7 +88,7 @@ def compute_pairwise_mask_iou(masks: np.ndarray) -> np.ndarray:
     Returns:
         (N, N) symmetric IoU matrix with zeros on diagonal.
     """
-    masks = _tensor_to_numpy(masks)
+    masks = to_numpy(masks)
     if masks.ndim == 2:
         masks = masks[None, ...]
     n = len(masks)
@@ -138,7 +115,7 @@ def compute_mask_centroids(masks: np.ndarray) -> np.ndarray:
     Returns:
         (N, 2) array of [x, y] centroids.  NaN for empty masks.
     """
-    masks = _tensor_to_numpy(masks)
+    masks = to_numpy(masks)
     if masks.ndim == 2:
         masks = masks[None, ...]
     centroids = []
@@ -151,28 +128,6 @@ def compute_mask_centroids(masks: np.ndarray) -> np.ndarray:
     return np.array(centroids)
 
 
-def compute_pairwise_centroid_distances(centroids: np.ndarray) -> np.ndarray:
-    """
-    Compute pairwise Euclidean distances between centroids.
-
-    Args:
-        centroids: (N, 2) array of [x, y] centroids.
-
-    Returns:
-        (N, N) symmetric distance matrix.
-    """
-    n = len(centroids)
-    if n == 0:
-        return np.array([])
-    dist_matrix = np.zeros((n, n))
-    for i in range(n):
-        for j in range(i + 1, n):
-            dist = np.linalg.norm(centroids[i] - centroids[j])
-            dist_matrix[i, j] = dist
-            dist_matrix[j, i] = dist
-    return dist_matrix
-
-
 def compute_mask_area_stats(masks: np.ndarray) -> Dict[str, Any]:
     """
     Compute mask area statistics.
@@ -183,7 +138,7 @@ def compute_mask_area_stats(masks: np.ndarray) -> Dict[str, Any]:
     Returns:
         Dict with keys: areas (N,), mean, min, max, variance.
     """
-    masks = _tensor_to_numpy(masks)
+    masks = to_numpy(masks)
     if masks.ndim == 2:
         masks = masks[None, ...]
     areas = np.array([m.sum() for m in masks], dtype=float)
@@ -196,27 +151,6 @@ def compute_mask_area_stats(masks: np.ndarray) -> Dict[str, Any]:
         "max": float(np.max(areas)),
         "variance": float(np.var(areas)),
     }
-
-
-def compute_clustering_coefficient(centroids: np.ndarray, threshold: float) -> float:
-    """
-    Fraction of centroid pairs within *threshold* distance.
-
-    Args:
-        centroids: (N, 2) array.
-        threshold: distance in pixels.
-
-    Returns:
-        Float in [0, 1].  0.0 when fewer than 2 objects.
-    """
-    n = len(centroids)
-    if n < 2:
-        return 0.0
-    dists = compute_pairwise_centroid_distances(centroids)
-    upper = dists[np.triu_indices(n, k=1)]
-    if len(upper) == 0:
-        return 0.0
-    return float(np.sum(upper < threshold) / len(upper))
 
 
 # ---------------------------------------------------------------------------
@@ -251,8 +185,8 @@ def compute_per_frame_metrics(
         v = outputs_per_frame[frame_idx]
 
         # Extract arrays
-        obj_ids = _tensor_to_numpy(v.get("object_ids", []))
-        masks = _tensor_to_numpy(v.get("masks", np.empty((0, 0, 0))))
+        obj_ids = to_numpy(v.get("object_ids", []))
+        masks = to_numpy(v.get("masks", np.empty((0, 0, 0))))
         if masks.ndim == 2:
             masks = masks[None, ...]
 
@@ -299,7 +233,7 @@ def compute_per_frame_metrics(
         clust_coef = compute_clustering_coefficient(centroids, clustering_distance_threshold)
 
         # Mask IoU
-        iou_matrix = compute_pairwise_mask_iou(masks)
+        iou_matrix = compute_pairwise_maskcompute_bbox_iou(masks)
         if n > 1:
             upper_iou = iou_matrix[np.triu_indices(n, k=1)]
             max_iou = float(np.max(upper_iou)) if len(upper_iou) else 0.0
@@ -470,7 +404,7 @@ def compute_per_id_metrics(
             for j, b in enumerate(B):
                 if j in used_b or not isinstance(b, dict) or "bbox" not in b:
                     continue
-                val = _iou(a["bbox"], b["bbox"])
+                val = compute_bbox_iou(a["bbox"], b["bbox"])
                 if val > best_iou:
                     best_iou, best_j = val, j
             if best_j is not None and best_iou >= iou_thresh:
@@ -491,7 +425,7 @@ def compute_per_id_metrics(
             da = frame_id_map.get(a, {}).get(uid)
             db = frame_id_map.get(b, {}).get(uid)
             if da and db and "bbox" in da and "bbox" in db:
-                id_self_ious[uid].append(_iou(da["bbox"], db["bbox"]))
+                id_self_ious[uid].append(compute_bbox_iou(da["bbox"], db["bbox"]))
 
     per_id = {}
     for uid, flist in id_to_frames.items():
@@ -623,7 +557,7 @@ def compute_summary_metrics(
             for j, b in enumerate(B):
                 if j in used_b or not isinstance(b, dict) or "bbox" not in b:
                     continue
-                val = _iou(a["bbox"], b["bbox"])
+                val = compute_bbox_iou(a["bbox"], b["bbox"])
                 if val > best_iou:
                     best_iou, best_j = val, j
             if best_j is not None and best_iou >= iou_match_thresh:
@@ -791,7 +725,7 @@ def compute_per_run_metrics(
                 da = frame_map.get(a, {}).get(uid)
                 db = frame_map.get(b, {}).get(uid)
                 if da and db and "bbox" in da and "bbox" in db:
-                    ious.append(_iou(da["bbox"], db["bbox"]))
+                    ious.append(compute_bbox_iou(da["bbox"], db["bbox"]))
             # gather area/score/tracker_score across run
             for fidx in run_frames:
                 d = frame_map.get(fidx, {}).get(uid)
