@@ -15,7 +15,7 @@ from src.viz import overlay_masks
 
 TEXT = "bird"
 START_IDX = 0
-START_IDX = 5096
+START_IDX = 6879
 N_GROUNDING_FRAMES = 125
 
 # Configure logging
@@ -78,21 +78,27 @@ for model_outputs in model.propagate_in_video_iterator(
     processed_outputs = processor.postprocess_outputs(inference_session, model_outputs)
     outputs_per_frame[model_outputs.frame_idx] = processed_outputs
 
-print(f"Processed {len(outputs_per_frame)} frames")
+logger.info(f"Processed {len(outputs_per_frame)} frames")
 
 # Access results for a specific frame
-logger.info("Accessing results for frame 0")
-frame_0_outputs = outputs_per_frame[0]
-print(f"Detected {len(frame_0_outputs['object_ids'])} objects")
-print(f"Object IDs: {frame_0_outputs['object_ids'].tolist()}")
-print(f"Scores: {frame_0_outputs['scores'].tolist()}")
-print(
-    f"Boxes shape (XYXY format, absolute coordinates): {frame_0_outputs['boxes'].shape}"
-)
-print(f"Masks shape: {frame_0_outputs['masks'].shape}")
+# logger.info("Accessing results for frame 0")
+# frame_0_outputs = outputs_per_frame[0]
+# logger.info(f"Detected {len(frame_0_outputs['object_ids'])} objects")
+# logger.info(f"Object IDs: {frame_0_outputs['object_ids'].tolist()}")
+# logger.info(f"Scores: {frame_0_outputs['scores'].tolist()}")
+# logger.info(
+#     f"Boxes shape (XYXY format, absolute coordinates): {frame_0_outputs['boxes'].shape}"
+# )
+# logger.info(f"Masks shape: {frame_0_outputs['masks'].shape}")
 
 # PIL_Image = Image.fromarray(video_frames[0]).convert("RGB")
 # overlay_masks(PIL_Image, frame_0_outputs["masks"])
+
+logger.info("Summary of detected objects per frame:")
+for frame_idx, outputs in outputs_per_frame.items():
+    logger.info(
+        f"Frame {frame_idx}: Detected {len(outputs['object_ids'])} objects, Detection confidence scores: {outputs['scores'].tolist()}, Object IDs: {outputs['object_ids'].tolist()}"
+    )
 
 # Convert numpy array to PIL Image
 output_dir = Path("sandbox/test/sam3-hf-video/")

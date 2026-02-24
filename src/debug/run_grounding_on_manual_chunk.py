@@ -6,6 +6,7 @@ cfg, video_info = load_inputs("config/sam3_hf_manual_chunking_c5g2.yaml")
 os.environ["CUDA_VISIBLE_DEVICES"] = cfg.get("CUDA_VISIBLE_DEVICES", "1")
 
 
+import logging
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -18,6 +19,12 @@ from src.grounding import find_best_grounding_frame, run_grounding
 from src.processing import extract_equidistant_points_from_masks
 from src.utils import load_video_frames_range
 from src.viz import draw_points_on_axes
+
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
+logger = logging.getLogger(__name__)
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 N_GROUNDING_FRAMES = 125
 
@@ -79,15 +86,16 @@ overlay = overlay_masks(frames[gr_out_frame_idx], gr_out_masks)
 gr_out_masks_np = np.array(gr_out_masks)
 points = extract_equidistant_points_from_masks(gr_out_masks_np)
 
-plt.figure(figsize=(8, 8))
+fig = plt.figure(figsize=(8, 8))
 plt.imshow(overlay)
 ax = plt.gca()
 artists = draw_points_on_axes(ax, points)
 plt.axis("off")
 plt.show()
 
-# out_dir = Path.cwd()  # current directory
-# out_dir.mkdir(exist_ok=True)
-# png_path = out_dir / "overlay_with_points.png"
-# fig.savefig(png_path, dpi=300, bbox_inches="tight")
-# plt.close(fig)
+out_dir = Path("sandbox/debug/grounding_debug/")
+out_dir.mkdir(exist_ok=True, parents=True)
+png_path = out_dir / "overlay_with_points.png"
+fig.savefig(png_path, dpi=300, bbox_inches="tight")
+logger.info
+plt.close(fig)
