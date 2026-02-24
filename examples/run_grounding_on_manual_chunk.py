@@ -2,10 +2,12 @@ import os
 
 from src.debug import load_inputs, load_outputs
 
-cfg, video_info = load_inputs("config/sam3_hf_manual_chunking.yaml")
+# cfg, video_info = load_inputs("config/sam3_hf_manual_chunking.yaml")
+cfg, video_info = load_inputs("config/sam3_hf_manual_chunking_c5g2.yaml")
 os.environ["CUDA_VISIBLE_DEVICES"] = cfg.get("CUDA_VISIBLE_DEVICES", "1")
 
 
+from pathlib import Path
 from typing import Iterable, List, Tuple, Union
 
 import matplotlib.pyplot as plt
@@ -172,3 +174,15 @@ ax = plt.gca()
 artists = draw_points_on_axes(ax, points)
 plt.axis("off")
 plt.show()
+
+fig = plt.figure(figsize=(8, 8))
+plt.imshow(overlay)
+ax = plt.gca()
+artists = draw_points_on_axes(ax, points)
+plt.axis("off")
+
+out_dir = Path.cwd()  # current directory
+out_dir.mkdir(exist_ok=True)
+png_path = out_dir / "overlay_with_points.png"
+fig.savefig(png_path, dpi=300, bbox_inches="tight")
+plt.close(fig)
