@@ -7,18 +7,136 @@ from pathlib import Path
 from typing import Optional, Sequence
 
 import cv2
+import matplotlib
 import matplotlib.lines as mlines
-import supervision as sv
-import torch
 import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
+from matplotlib.axes import Axes
 import numpy as np
 import pandas as pd
 import pycocotools.mask as mask_util
+import supervision as sv
+import torch
 from loguru import logger
 from matplotlib.cm import ScalarMappable
 from matplotlib.colors import Normalize
+from PIL import Image
+
+
+# Simple visualisation utilities
+def overlay_masks(image, masks):
+    """
+    From sam3-hugginface docs: https://huggingface.co/facebook/sam3#sam3---promptable-concept-segmentation-pcs-for-images
+    """
+    image = image.convert("RGBA")
+    masks = 255 * masks.cpu().numpy().astype(np.uint8)
+
+    n_masks = masks.shape[0]
+    cmap = matplotlib.colormaps.get_cmap("rainbow").resampled(n_masks)
+    colors = [tuple(int(c * 255) for c in cmap(i)[:3]) for i in range(n_masks)]
+
+    for mask, color in zip(masks, colors):
+        mask = Image.fromarray(mask)
+        # Resize mask to match image dimensions if needed
+        if mask.size != image.size:
+            mask = mask.resize(image.size, Image.Resampling.NEAREST)
+        overlay = Image.new("RGBA", image.size, color + (0,))
+        alpha = mask.point(lambda v: int(v * 0.5))
+        overlay.putalpha(alpha)
+        image = Image.alpha_composite(image, overlay)
+    return image
+
+
+def convert_numpy_to_pil(array):
+    return Image.fromarray(np.uint8(array)).convert("RGB")
+
+
+def draw_points_on_axes(
+    ax: Axes,
+    points,
+    colors=None,
+    marker: str = "o",
+    marker_size: int = 60,
+    marker_edgecolor: str = "white",
+    line: bool = True,
+    line_width: float = 1.0,
+    line_alpha: float = 0.9,
+    labels: bool = True,
+    label_offset=(4, -4),
+) -> dict:
+    """
+    Draw prompt points on a matplotlib image axis.
+
+    Args:
+        ax: Axes with an image already shown.
+        points: Array-like of shape (N_objects, N_points_per_object, 2) in (x, y) coords.
+        colors: List of (R, G, B[, A]) tuples, one per object. Defaults to tab10.
+        marker: Marker style.
+        marker_size: Scatter marker size.
+        marker_edgecolor: Edge colour of each marker.
+        line: Draw a line connecting points within each object.
+        line_width: Width of connecting lines.
+        line_alpha: Opacity of connecting lines.
+        labels: Annotate each point with "object:point" index.
+        label_offset: (dx, dy) pixel offset for label text.
+
+    Returns:
+        Dict with keys 'scatters', 'lines', and 'texts' listing the artists added.
+    """
+    pts = np.asarray(points, dtype=float)
+    if pts.ndim != 3 or pts.shape[2] != 2:
+        raise ValueError("points must have shape (N, M, 2)")
+
+    n = pts.shape[0]
+    if colors is None:
+        cmap = matplotlib.colormaps["tab10"]
+        colors = [cmap(i % cmap.N) for i in range(n)]
+    else:
+        colors = list(colors)
+
+    scatters, lines, texts = [], [], []
+
+    for i in range(n):
+        obj_pts = pts[i]
+        if obj_pts.size == 0:
+            continue
+        x, y = obj_pts[:, 0], obj_pts[:, 1]
+
+        if line:
+            (ln,) = ax.plot(
+                x, y, "-", color=colors[i], linewidth=line_width, alpha=line_alpha, zorder=9
+            )
+            lines.append(ln)
+
+        sc = ax.scatter(
+            x, y,
+            s=marker_size,
+            c=[colors[i]] * len(x),
+            marker=marker,
+            edgecolors=marker_edgecolor,
+            linewidths=0.6,
+            zorder=10,
+        )
+        scatters.append(sc)
+
+        if labels:
+            for j, (xx, yy) in enumerate(zip(x, y)):
+                t = ax.text(
+                    xx + label_offset[0],
+                    yy + label_offset[1],
+                    f"{i}:{j}",
+                    color="white",
+                    fontsize=8,
+                    ha="left",
+                    va="center",
+                    zorder=11,
+                    bbox=dict(boxstyle="round,pad=0.1", fc=colors[i], ec="none", alpha=0.6),
+                )
+                texts.append(t)
+
+    return {"scatters": scatters, "lines": lines, "texts": texts}
+
 
 # ---------------------------------------------------------------------------
 # Constants
