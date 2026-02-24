@@ -1,9 +1,14 @@
 """
-SAM3 HuggingFace Video Tracking Pipeline
+SAM3 HuggingFace Video Tracking and Segmentation Pipeline
 
 Processes video in chunks:
-- Chunk 0: Sam3VideoModel with text prompt (short, e.g. 15s)
-- Chunks 1+: Sam3TrackerVideoModel with point prompts (longer, e.g. 45s)
+- Grounding phase: Initialise text-prompt based multi-object detection with Sam3VideoModel for first N frames (e.g. 125 frames = 5s at 25fps) of each chunk
+- Transition phase: Sample points from masks in 'best' frame (i.e. frames with highest detection confidence score and/or lowest degree of occlusion), maintain object ID's between chunks
+- Tracking phase: Use sampled points and object ID's from transition phase to initialise point-based multi-object tracking with Sam3TrackerVideoModel
+
+The process is heavily inspired by the Grounded SAM 2 pipeline, the main difference being that both the grounding and tracking stages are run with a Sam3-based model from HuggingFace, rather two separate models (i.e. groundedDINO + SAM2).
+
+The pipeline is designed to be modular and extensible, with support for manual chunking, adaptive chunking based on YOLO scan results.
 
 Usage:
     python -m script.sam3.run_sam3_hf
@@ -49,8 +54,8 @@ import torch  # noqa: E402
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
 from accelerate import Accelerator  # noqa: E402
-from transformers import Sam3TrackerVideoConfig  # noqa: E402
 from transformers import (
+    Sam3TrackerVideoConfig,  # noqa: E402
     Sam3TrackerVideoModel,
     Sam3TrackerVideoProcessor,
     Sam3VideoConfig,
@@ -58,26 +63,29 @@ from transformers import (
     Sam3VideoProcessor,
 )
 
-from src.grounding import find_best_grounding_frame  # noqa: E402
-from src.grounding import match_grounding_ids_to_previous, run_grounding
-from src.metrics import compute_per_frame_metrics  # noqa: E402
+from src.grounding import (
+    find_best_grounding_frame,  # noqa: E402
+    match_grounding_ids_to_previous,
+    run_grounding,
+)
 from src.metrics import (
+    compute_max_pairwise_iou,  # noqa: E402
+    compute_per_frame_metrics,  # noqa: E402
     compute_per_run_metrics,
     compute_summary_metrics,
     per_frame_metrics_to_df,
     per_run_metrics_to_multiindex_df,
     summary_metrics_to_df,
 )
-from src.processing import compute_max_pairwise_iou  # noqa: E402
 from src.processing import (
     extract_equidistant_points_from_masks,
     find_frame_with_enough_objects,
     process_tracking_outputs,
     reseed_tracker_memory,
 )
-from src.utils import create_run_directory  # noqa: E402
 from src.utils import (
     build_manual_chunks,
+    create_run_directory,  # noqa: E402
     free_gpu_memory,
     free_system_memory,
     get_video_metadata,
@@ -85,10 +93,15 @@ from src.utils import (
     sanitize_filename,
     setup_logger,
 )
-from src.viz import annotate_video_with_sam3_outputs  # noqa: E402
-from src.viz import generate_all_visualizations  # noqa: E402
-from src.yolo_scan import chunk_video_frames_adaptive  # noqa: E402
-from src.yolo_scan import run_yolo_scan, yolo_scan_to_df
+from src.viz import (
+    annotate_video_with_sam3_outputs,  # noqa: E402
+    generate_all_visualizations,  # noqa: E402
+)
+from src.yolo_scan import (
+    chunk_video_frames_adaptive,  # noqa: E402
+    run_yolo_scan,
+    yolo_scan_to_df,
+)
 
 # Import parameter sensitivity function for optional testing
 try:
@@ -949,7 +962,11 @@ def _run_single_video(cfg, run_dir: Path, config_path: Path | None = None):
         global_start_idx = global_chunk_start + grounding_frame_offset
         if use_tracker:
             chunk_outputs = _process_tracker_chunk(
-                chunk_frames[grounding_frame_offset:], global_start_idx, all_prompt_points, cfg, device
+                chunk_frames[grounding_frame_offset:],
+                global_start_idx,
+                all_prompt_points,
+                cfg,
+                device,
             )
         else:
             chunk_outputs = _process_video_chunk(

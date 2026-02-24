@@ -20,6 +20,67 @@ def to_numpy(x):
     return np.array(x)
 
 
+def _normalize_frame_dict(
+    frame_dict,
+):
+    """
+    Normalize a frame_dict (frame_idx -> various formats) into parallel
+    (idxs, frames) lists where each frame is a list of detection dicts.
+    """
+    idxs = sorted(int(k) for k in frame_dict.keys())
+    frames = []
+    for i in idxs:
+        v = frame_dict[i]
+        if isinstance(v, list):
+            frames.append(v)
+            continue
+        if isinstance(v, dict):
+            if "detections" in v:
+                frames.append(v["detections"] or [])
+                continue
+            if "instances" in v:
+                frames.append(v["instances"] or [])
+                continue
+            if "object_ids" in v and "boxes" in v:
+                obj_ids = to_numpy(v["object_ids"])
+                boxes = to_numpy(v["boxes"])
+                scores = to_numpy(v.get("scores", np.zeros(len(obj_ids))))
+                tracker_scores_dict = v.get("obj_id_to_tracker_score") or {}
+                dets = []
+                for j in range(len(obj_ids)):
+                    try:
+                        oid = int(obj_ids[j])
+                    except Exception:
+                        oid = int(np.asarray(obj_ids)[j])
+                    bbox = (
+                        boxes[j].tolist()
+                        if hasattr(boxes[j], "tolist")
+                        else list(np.asarray(boxes[j]))
+                    )
+                    score = float(scores[j]) if len(scores) > j else None
+                    tracker_score = (
+                        float(tracker_scores_dict[oid])
+                        if tracker_scores_dict and oid in tracker_scores_dict
+                        else None
+                    )
+                    dets.append(
+                        {
+                            "id": oid,
+                            "bbox": bbox,
+                            "score": score,
+                            "tracker_score": tracker_score,
+                        }
+                    )
+                frames.append(dets)
+                continue
+            if all(isinstance(k, (int, np.integer)) for k in v.keys()):
+                vals = list(v.values())
+                frames.append(vals if vals and isinstance(vals[0], dict) else [])
+                continue
+        frames.append([])
+    return idxs, frames
+
+
 def get_all_objects_from_results(results: dict) -> tuple[list, list, list]:
     """
     Extract masks, boxes, and object_ids from a single frame's output dict.
@@ -182,85 +243,6 @@ def sample_points_from_masks(masks: np.ndarray, num_points: int = 3) -> np.ndarr
         points.append(sampled_points)
     points = np.array(points, dtype=np.float32)
     return points
-
-
-def compute_bbox_iou(boxA, boxB) -> float:
-    """
-    Compute IoU between two bounding boxes in [x1, y1, x2, y2] format.
-
-    Returns:
-        IoU in [0, 1]
-    """
-    xA = max(boxA[0], boxB[0])
-    yA = max(boxA[1], boxB[1])
-    xB = min(boxA[2], boxB[2])
-    yB = min(boxA[3], boxB[3])
-
-    interW = max(0, xB - xA)
-    interH = max(0, yB - yA)
-    inter = interW * interH
-
-    areaA = max(0, (boxA[2] - boxA[0]) * (boxA[3] - boxA[1]))
-    areaB = max(0, (boxB[2] - boxB[0]) * (boxB[3] - boxB[1]))
-    union = areaA + areaB - inter
-
-    return inter / union if union > 0 else 0.0
-
-
-def compute_pairwise_centroid_distances(centroids: np.ndarray) -> np.ndarray:
-    """
-    Compute pairwise Euclidean distances between centroids.
-
-    Args:
-        centroids: (N, 2) array of [x, y] or [cx, cy] centroids.
-
-    Returns:
-        (N, N) symmetric distance matrix.
-    """
-    n = len(centroids)
-    if n == 0:
-        return np.array([])
-    dist_matrix = np.zeros((n, n))
-    for i in range(n):
-        for j in range(i + 1, n):
-            dist = np.linalg.norm(centroids[i] - centroids[j])
-            dist_matrix[i, j] = dist
-            dist_matrix[j, i] = dist
-    return dist_matrix
-
-
-def compute_clustering_coefficient(centroids: np.ndarray, threshold: float) -> float:
-    """
-    Fraction of centroid pairs within *threshold* distance.
-
-    Args:
-        centroids: (N, 2) array.
-        threshold: distance (pixels or normalized coordinates).
-
-    Returns:
-        Float in [0, 1]. 0.0 when fewer than 2 objects.
-    """
-    n = len(centroids)
-    if n < 2:
-        return 0.0
-    dists = compute_pairwise_centroid_distances(centroids)
-    upper = dists[np.triu_indices(n, k=1)]
-    if len(upper) == 0:
-        return 0.0
-    return float(np.sum(upper < threshold) / len(upper))
-
-
-def compute_max_pairwise_iou(masks_np: np.ndarray) -> float:
-    """Return max pixel-IoU over all pairs of binary masks (N, H, W)."""
-    n = len(masks_np)
-    max_iou = 0.0
-    for i in range(n):
-        for j in range(i + 1, n):
-            inter = float((masks_np[i] & masks_np[j]).sum())
-            union = float((masks_np[i] | masks_np[j]).sum())
-            if union > 0:
-                max_iou = max(max_iou, inter / union)
-    return max_iou
 
 
 def reseed_tracker_memory(

@@ -10,7 +10,8 @@ from typing import Callable
 import numpy as np
 from loguru import logger
 
-from src.processing import compute_max_pairwise_iou, get_all_objects_from_results
+from src.metrics import compute_max_pairwise_iou
+from src.processing import get_all_objects_from_results
 from src.utils import free_gpu_memory
 
 

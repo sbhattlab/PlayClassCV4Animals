@@ -16,9 +16,11 @@ from loguru import logger
 from omegaconf import OmegaConf
 from tqdm import tqdm
 
-from src.processing import (
-    compute_bbox_iou,
+from src.metrics import (
+    compute_bbox_centroids,
+    compute_bbox_area_stats,
     compute_clustering_coefficient,
+    compute_pairwise_bbox_iou,
     compute_pairwise_centroid_distances,
 )
 
@@ -49,78 +51,6 @@ def _draw_label(img: np.ndarray, label: str, x1: float, y1: float) -> None:
         thickness,
         cv2.LINE_AA,
     )
-
-
-def compute_pairwise_bbox_iou(boxes: np.ndarray) -> np.ndarray:
-    """
-    Compute pairwise IoU matrix for all bounding boxes.
-
-    Args:
-        boxes: (N, 4) array of [x1, y1, x2, y2] boxes
-
-    Returns:
-        (N, N) symmetric IoU matrix with zeros on diagonal
-    """
-    n = len(boxes)
-    if n == 0:
-        return np.array([])
-
-    iou_matrix = np.zeros((n, n))
-    for i in range(n):
-        for j in range(i + 1, n):
-            iou = compute_bbox_iou(boxes[i], boxes[j])
-            iou_matrix[i, j] = iou
-            iou_matrix[j, i] = iou
-    return iou_matrix
-
-
-def compute_bbox_centroids(boxes: np.ndarray) -> np.ndarray:
-    """
-    Compute centroids from bounding boxes.
-
-    Args:
-        boxes: (N, 4) array of [x1, y1, x2, y2] boxes
-
-    Returns:
-        (N, 2) array of [cx, cy] centroids
-    """
-    if len(boxes) == 0:
-        return np.array([])
-
-    cx = (boxes[:, 0] + boxes[:, 2]) / 2
-    cy = (boxes[:, 1] + boxes[:, 3]) / 2
-    return np.column_stack([cx, cy])
-
-
-def compute_bbox_area_stats(boxes: np.ndarray) -> Dict[str, Any]:
-    """
-    Compute bounding box area statistics.
-
-    Args:
-        boxes: (N, 4) array of [x1, y1, x2, y2] boxes
-
-    Returns:
-        Dict with keys: areas (N,), mean, min, max, variance
-    """
-    if len(boxes) == 0:
-        return {
-            "areas": np.array([]),
-            "mean": 0.0,
-            "min": 0.0,
-            "max": 0.0,
-            "variance": 0.0,
-        }
-
-    areas = (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])
-    areas = np.maximum(areas, 0.0)
-
-    return {
-        "areas": areas,
-        "mean": float(np.mean(areas)),
-        "min": float(np.min(areas)),
-        "max": float(np.max(areas)),
-        "variance": float(np.var(areas)),
-    }
 
 
 def compute_yolo_per_frame_metrics(
