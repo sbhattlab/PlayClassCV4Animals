@@ -9,13 +9,11 @@ from accelerate import Accelerator
 from PIL import Image
 from transformers import Sam3VideoConfig, Sam3VideoModel, Sam3VideoProcessor
 
-# from transformers.video_utils import load_video
 from src.utils import load_video_frames_range
 from src.viz import overlay_masks
 
 TEXT = "bird"
 START_IDX = 0
-START_IDX = 6879
 N_GROUNDING_FRAMES = 125
 
 # Configure logging
