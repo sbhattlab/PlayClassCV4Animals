@@ -41,6 +41,7 @@ def fmt_timestamp(frame_idx, fps):
 def main():
     args = parse_args()
 
+    run_dir = None
     if args.config:
         cfg = OmegaConf.load(args.config)
         video_path = cfg.video_path
@@ -59,7 +60,8 @@ def main():
         chunks = [c["frame_range"] for c in chunk_info["chunks"]]
 
     if args.output_dir is None:
-        output_dir = run_dir / "visualizations"
+        # output_dir = run_dir / "visualizations"
+        output_dir = Path("sandbox/visualizations/chunk_boundaries")
     else:
         output_dir = Path(args.output_dir)
     output_dir.mkdir(exist_ok=True, parents=True)
@@ -77,6 +79,14 @@ def main():
     )
     if n_chunks == 1:
         axes = [axes]
+
+    if run_dir is not None:
+        output_plot_path = output_dir / f"chunk_boundaries_{run_dir.stem}.png"
+    else:
+        output_plot_path = (
+            output_dir
+            / f"chunk_boundaries_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+        )
 
     for i, (start, end) in enumerate(chunks):
         for j, (frame_idx, label) in enumerate([(start, "start"), (end, "end")]):
@@ -105,7 +115,7 @@ def main():
     cap.release()
     fig.suptitle("Chunk boundary frames", fontsize=12, fontweight="bold")
     plt.savefig(
-        output_plot_path := output_dir / f"chunk_boundaries_{run_dir.stem}.png",
+        output_plot_path,
         dpi=300,
     )
     print(f"Saved chunk boundary visualization to: {output_plot_path}")

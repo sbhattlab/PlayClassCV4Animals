@@ -1,5 +1,8 @@
-import logging
 import os
+
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+
+import logging
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -7,13 +10,16 @@ import numpy as np
 import torch
 from accelerate import Accelerator
 from PIL import Image
+
+# from torch._inductor.autotune_process import CUDA_VISIBLE_DEVICES
 from transformers import Sam3VideoConfig, Sam3VideoModel, Sam3VideoProcessor
 
 from src.utils import load_video_frames_range
 from src.viz import overlay_masks
 
 TEXT = "bird"
-START_IDX = 0
+# START_IDX = 0
+START_IDX = 21574
 N_GROUNDING_FRAMES = 125
 
 # Configure logging
@@ -40,7 +46,7 @@ video_frames = load_video_frames_range(
 
 if video_frames is None or len(video_frames) == 0:
     raise ValueError("No frames in video.")
-logger.info(f"Loaded video with {len(video_frames)} frames")
+logger.info("Frames successfully loaded")
 
 logger.info("Loading SAM3-HF Video and Processor Model...")
 config = Sam3VideoConfig.from_pretrained("facebook/sam3")
@@ -101,7 +107,7 @@ for frame_idx, outputs in outputs_per_frame.items():
 # Convert numpy array to PIL Image
 output_dir = Path("sandbox/test/sam3-hf-video/")
 output_dir.mkdir(parents=True, exist_ok=True)
-for i in range(0, len(video_frames), 25):
+for i in range(0, len(video_frames), 10):
     frame_image = Image.fromarray(video_frames[i]).convert("RGB")
     frame_image_with_masks = overlay_masks(frame_image, outputs_per_frame[i]["masks"])
     output_img_path = output_dir / f"sam3-hf-video-frame-{i}-masks.png"
