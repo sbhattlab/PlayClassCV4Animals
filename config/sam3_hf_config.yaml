@@ -102,7 +102,7 @@ max_lookback_frames: 10 # Max frames to look back
 # =============================================================================
 text_grounding:
   enabled: true
-  grounding_frames: 25 # Frames to ground (~1 s at 25 fps)
+  grounding_frames: 125 # Frames to ground (~5 s at 25 fps)
   min_objects: 3 # Min detections to accept grounding result
   best_frame_method: "combined" # "combined" | "min_occlusion" | "best_scores"
   fallback_to_prev_chunk: true # Fall back to prev-chunk points if grounding fails
