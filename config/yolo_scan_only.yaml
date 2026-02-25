@@ -16,7 +16,7 @@ PYTORCH_ALLOC_CONF: "expandable_segments:True,garbage_collection_threshold:0.6"
 # =============================================================================
 # Video/IO Configuration
 # =============================================================================
-video_path: "ext-data/raw/C1G1_Test_1_day_28_1_Camera_4_2025_02_04_10_59_56_1.mp4"
+video_path: "ext-data/raw/C5G2_Test_1_day_28_1_Camera_5_2025_02_04_11_35_00_2.mp4"
 text_prompt: "bird"
 
 # Output directory - results will be saved to a timestamped subdirectory
@@ -26,8 +26,8 @@ output_dir: "ext-data/output/results/yolo_scan"
 # =============================================================================
 # Model Configuration
 # =============================================================================
-start_frame: 0          # Frame index to start processing from (0 = beginning)
-max_frames_to_track: 0  # Maximum number of frames to propagate (0 = all)
+start_frame: 0 # Frame index to start processing from (0 = beginning)
+max_frames_to_track: 0 # Maximum number of frames to propagate (0 = all)
 
 # =============================================================================
 # Chunking Configuration
@@ -40,12 +40,12 @@ yolo_scan_only: true
 use_adaptive_chunking: true
 
 # Base chunk sizes
-video_model_chunk_seconds: 15   # Duration of first chunk (Sam3VideoModel, text-prompted)
-tracker_chunk_seconds: 60       # Duration of subsequent chunks (Sam3TrackerVideoModel)
+video_model_chunk_seconds: 15 # Duration of first chunk (Sam3VideoModel, text-prompted)
+tracker_chunk_seconds: 60 # Duration of subsequent chunks (Sam3TrackerVideoModel)
 
 # Chunk length limits
-adaptive_max_chunk_seconds: 120       # Hard VRAM cap — never exceed this
-adaptive_search_window_seconds: 10.0  # Search radius (±s) when refining each boundary
+adaptive_max_chunk_seconds: 120 # Hard VRAM cap — never exceed this
+adaptive_search_window_seconds: 10.0 # Search radius (±s) when refining each boundary
 
 # =============================================================================
 # YOLO scan configuration

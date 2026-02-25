@@ -667,6 +667,7 @@ def _run_single_video(cfg, run_dir: Path, config_path: Path | None = None):
                 output_dir=viz_dir,
                 fps=fps,
                 chunk_info=chunk_info_for_viz,
+                video_path=video_path,
                 yolo_scan_df=yolo_scan_metrics_df,
                 yolo_occlusion_periods=yolo_occlusion_periods,
             )

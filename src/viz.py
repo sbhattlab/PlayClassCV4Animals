@@ -1157,6 +1157,113 @@ def generate_all_visualizations(
             save_path=output_dir / "yolo_scan_overview.png",
         )
 
+    if chunk_info is not None and video_path is not None:
+        plot_chunk_boundary_frames(
+            chunk_info=chunk_info,
+            video_path=video_path,
+            fps=fps,
+            yolo_scan_df=yolo_scan_df,
+            save_path=output_dir / "chunk_boundaries.png",
+        )
+
+
+# ---------------------------------------------------------------------------
+# Plot 7: Chunk boundary frame screengrab grid
+# ---------------------------------------------------------------------------
+
+
+def plot_chunk_boundary_frames(
+    chunk_info,
+    video_path,
+    fps=None,
+    yolo_scan_df=None,
+    save_path=None,
+):
+    """
+    N-row × 2-col grid of start and end frames for each chunk.
+
+    Each cell is annotated with chunk index, model type, frame number,
+    timestamp, and n_obj (from yolo_scan_df when available).
+
+    Args:
+        chunk_info: Dict with 'chunks' key (same format as chunk_info.json).
+        video_path: Path to the source video file.
+        fps: Video frame rate for timestamp formatting. Defaults to 25.
+        yolo_scan_df: DataFrame from yolo_scan_to_df — used for n_obj labels.
+            Optional; cells show '?' when not provided.
+        save_path: Path to save the PNG. If None the plot is shown interactively.
+    """
+    import cv2
+
+    video_path = Path(video_path)
+    if not video_path.exists():
+        logger.warning(f"plot_chunk_boundary_frames: video not found ({video_path}), skipping")
+        return
+
+    cap = cv2.VideoCapture(str(video_path))
+    if not cap.isOpened():
+        logger.warning(f"plot_chunk_boundary_frames: could not open video ({video_path}), skipping")
+        return
+
+    _fps = fps or 25.0
+    chunks = chunk_info.get("chunks", [])
+    if not chunks:
+        cap.release()
+        return
+
+    # Build n_obj lookup from yolo_scan_df if available
+    n_obj_lookup: dict[int, int] = {}
+    if yolo_scan_df is not None and not yolo_scan_df.empty and "frame_idx" in yolo_scan_df.columns:
+        n_obj_lookup = dict(zip(yolo_scan_df["frame_idx"], yolo_scan_df["num_objects"]))
+
+    def _grab(frame_idx: int):
+        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+        ret, frame = cap.read()
+        return cv2.cvtColor(frame, cv2.COLOR_BGR2RGB) if ret else None
+
+    def _ts(frame_idx: int) -> str:
+        total_s = frame_idx / _fps
+        m, s = divmod(total_s, 60)
+        return f"{int(m):02d}:{s:05.2f}"
+
+    n_chunks = len(chunks)
+    fig, axes = plt.subplots(
+        n_chunks, 2,
+        figsize=(14, n_chunks * 2.5),
+        constrained_layout=True,
+    )
+    if n_chunks == 1:
+        axes = [axes]
+
+    for i, c in enumerate(chunks):
+        start, end = c["frame_range"]
+        mtype = c.get("model_type", "")
+        model_short = "video" if mtype == "Sam3VideoModel" else "tracker"
+        for j, (frame_idx, label) in enumerate([(start, "start"), (end - 1, "end")]):
+            img = _grab(frame_idx)
+            ax = axes[i][j]
+            if img is not None:
+                ax.imshow(img)
+            else:
+                ax.set_facecolor("black")
+                ax.text(0.5, 0.5, "read error", color="white",
+                        ha="center", va="center", transform=ax.transAxes)
+            n_obj = n_obj_lookup.get(frame_idx, "?")
+            ax.set_title(
+                f"Chunk {i} [{model_short}] — {label}\n"
+                f"frame {frame_idx}  ({_ts(frame_idx)})  n_obj={n_obj}",
+                fontsize=8,
+            )
+            ax.axis("off")
+
+    cap.release()
+
+    stem = Path(save_path).stem if save_path else "chunk_boundaries"
+    fig.suptitle(f"Chunk boundary frames — {stem}", fontsize=12, fontweight="bold")
+    _save_or_show(fig, save_path)
+    if save_path:
+        logger.info(f"Saved chunk boundary frames: {save_path}")
+
 
 # ---------------------------------------------------------------------------
 # Video annotation

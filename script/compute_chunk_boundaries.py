@@ -31,7 +31,6 @@ from argparse import ArgumentParser
 from pathlib import Path
 
 import cv2
-import matplotlib.pyplot as plt
 import pandas as pd
 from loguru import logger
 from omegaconf import OmegaConf
@@ -41,7 +40,7 @@ from src.chunk_boundaries import (
     compute_yolo_per_frame_metrics,
     yolo_scan_to_df,
 )
-from src.viz import plot_yolo_scan_overview
+from src.viz import plot_chunk_boundary_frames, plot_yolo_scan_overview
 
 
 def parse_args():
@@ -59,20 +58,6 @@ def parse_args():
         help="Override YAML config; defaults to the .yaml found in --run-dir",
     )
     return parser.parse_args()
-
-
-def fmt_timestamp(frame_idx: int, fps: float) -> str:
-    total_s = frame_idx / fps
-    m, s = divmod(total_s, 60)
-    return f"{int(m):02d}:{s:05.2f}"
-
-
-def grab_frame(cap: cv2.VideoCapture, frame_idx: int):
-    cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
-    ret, frame = cap.read()
-    if not ret:
-        return None
-    return cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
 
 def main():
@@ -238,63 +223,13 @@ def main():
     # 11. Generate chunk_boundaries_<run>.png (N rows × 2 cols: start + end)
     # -------------------------------------------------------------------------
     video_path = cfg.get("video_path")
-    if not video_path or not Path(str(video_path)).exists():
-        logger.warning(
-            f"video_path not accessible ({video_path!r}); skipping frame screengrab grid"
-        )
-        return
-
-    cap = cv2.VideoCapture(str(video_path))
-    if not cap.isOpened():
-        logger.warning(f"Could not open video: {video_path}; skipping frame grid")
-        return
-
-    n_obj_lookup: dict[int, int] = {
-        m["frame_idx"]: m["num_objects"] for m in per_frame_metrics
-    }
-
-    n_chunks = len(chunks)
-    fig, axes = plt.subplots(
-        n_chunks,
-        2,
-        figsize=(14, n_chunks * 2.5),
-        constrained_layout=True,
+    plot_chunk_boundary_frames(
+        chunk_info=chunk_info,
+        video_path=video_path,
+        fps=fps,
+        yolo_scan_df=yolo_scan_metrics_df,
+        save_path=viz_dir / f"chunk_boundaries_{run_dir.stem}.png",
     )
-    if n_chunks == 1:
-        axes = [axes]
-
-    for i, (start, end, mtype) in enumerate(chunks):
-        for j, (frame_idx, label) in enumerate([(start, "start"), (end - 1, "end")]):
-            frame = grab_frame(cap, frame_idx)
-            ax = axes[i][j]
-            if frame is not None:
-                ax.imshow(frame)
-            else:
-                ax.set_facecolor("black")
-                ax.text(
-                    0.5, 0.5, "read error",
-                    color="white", ha="center", va="center",
-                    transform=ax.transAxes,
-                )
-            ts = fmt_timestamp(frame_idx, fps)
-            n_obj = n_obj_lookup.get(frame_idx, "?")
-            model_short = "video" if mtype == "video" else "tracker"
-            ax.set_title(
-                f"Chunk {i} [{model_short}] — {label}\n"
-                f"frame {frame_idx}  ({ts})  n_obj={n_obj}",
-                fontsize=8,
-            )
-            ax.axis("off")
-
-    cap.release()
-
-    fig.suptitle(
-        f"Chunk boundary frames — {run_dir.stem}", fontsize=12, fontweight="bold"
-    )
-    output_plot_path = viz_dir / f"chunk_boundaries_{run_dir.stem}.png"
-    plt.savefig(output_plot_path, dpi=150)
-    plt.close(fig)
-    logger.info(f"Saved: {output_plot_path}")
 
 
 if __name__ == "__main__":
