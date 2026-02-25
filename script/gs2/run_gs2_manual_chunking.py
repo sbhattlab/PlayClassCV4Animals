@@ -58,12 +58,12 @@ from transformers import (  # noqa: E402
 
 import supervision as sv  # noqa: E402
 
+from src.processing import process_tracking_outputs  # noqa: E402
 from src.utils import (  # noqa: E402
     build_manual_chunks,
     create_run_directory,
     get_video_metadata,
     load_video_frames_range,
-    process_tracking_outputs,
     setup_logger,
 )
 

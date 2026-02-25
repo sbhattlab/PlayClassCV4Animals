@@ -1,18 +1,15 @@
 """
-Utility functions for processing SAM3 tracking outputs.
+Config, environment, logging, output directory, and IO utilities.
 """
 
 import gc
 import os
+import re
 import sys
 from datetime import datetime
 from pathlib import Path
 
-import numpy as np
-import pandas as pd
 import psutil
-import pycocotools.mask as mask_util
-import supervision as sv
 import torch
 from loguru import logger
 from omegaconf import DictConfig, OmegaConf
@@ -86,289 +83,16 @@ def create_run_directory(base_output_dir: Path, job_type: str) -> Path:
     run_dir.mkdir(parents=True, exist_ok=True)
     return run_dir
 
-
-# ---------------------------------------------------------------------------
-# Chunking and model transition utilities
-# ---------------------------------------------------------------------------
-def chunk_video_frames_adaptive(
-    fixed_chunks: list[tuple[int, int, str]],
-    transition_frames: np.ndarray,
-    fps: float,
-    occlusion_periods: list[tuple[int, int]] | None = None,
-    search_window_seconds: float = 10.0,
-    min_chunk_seconds: float = 15.0,
-    max_chunk_seconds: float = 90.0,
-    margin_seconds: float = 3.0,
-) -> list[tuple[int, int, str]]:
-    """
-    Adjust fixed chunk boundaries to avoid occlusion periods detected by pre-scan.
-
-    For each tracker-chunk boundary (skip chunk 0), searches within ±search_window
-    for frames that are OUTSIDE occlusion periods (with margin). Prefers frames
-    that are farthest from any occlusion period. Falls back to original boundary
-    if no good candidate is found or if constraints are violated.
-
-    Args:
-        fixed_chunks: Output from chunk_video_frames_dual().
-        transition_frames: Array of frame indices where scene state changes
-            (e.g. from YOLO occlusion detection). Used for legacy compatibility
-            but DEPRECATED - occlusion_periods are preferred.
-        fps: Video frame rate.
-        occlusion_periods: List of (start_frame, end_frame) tuples marking
-            high-occlusion periods that should be avoided. If None, falls back
-            to legacy transition-based logic.
-        search_window_seconds: Search radius (seconds) around each boundary.
-        min_chunk_seconds: Minimum allowed chunk duration.
-        max_chunk_seconds: Maximum allowed chunk duration.
-        margin_seconds: Safety margin (seconds) to keep away from occlusion edges.
-            Default 3.0s (~75 frames at 25fps) provides strong separation.
-
-    Returns:
-        Adjusted chunks in the same format as chunk_video_frames_dual().
-    """
-    if len(fixed_chunks) <= 1:
-        return fixed_chunks
-
-    search_window_frames = int(search_window_seconds * fps)
-    min_frames = int(min_chunk_seconds * fps)
-    max_frames = int(max_chunk_seconds * fps)
-    margin_frames = int(margin_seconds * fps)
-
-    # Work with mutable list of boundaries
-    boundaries = [c[0] for c in fixed_chunks]  # start of each chunk
-    total_end = fixed_chunks[-1][1]  # final frame
-    adjusted_boundaries = list(boundaries)
-
-    def _is_in_occlusion_period(frame: int) -> bool:
-        """Check if frame falls within any occlusion period (with margin)."""
-        if not occlusion_periods:
-            return False
-        for start, end in occlusion_periods:
-            # Add margin on both sides
-            if (start - margin_frames) <= frame <= (end + margin_frames):
-                return True
-        return False
-
-    def _candidate_quality_score(frame: int) -> float:
-        """
-        Compute quality score for a candidate boundary (higher = better).
-
-        Scoring rules:
-        1. Distance to nearest occlusion (farther = better)
-        2. Strong penalty if occlusion is ahead (within next margin_frames)
-        3. Moderate penalty if occlusion is behind (within prev margin_frames)
-        4. Prefer frames in the middle of safe zones
-        """
-        if not occlusion_periods:
-            return 1000.0  # Arbitrary high score if no occlusions
-
-        min_dist = float("inf")
-        occlusion_ahead = False
-        occlusion_behind = False
-
-        for start, end in occlusion_periods:
-            # Check if occlusion is ahead (about to start)
-            if start > frame and (start - frame) <= margin_frames:
-                occlusion_ahead = True
-            # Check if occlusion just ended
-            if end < frame and (frame - end) <= margin_frames:
-                occlusion_behind = True
-
-            # Distance to nearest edge
-            dist = min(abs(frame - start), abs(frame - end))
-            min_dist = min(min_dist, dist)
-
-        # Base score is distance
-        score = float(min_dist)
-
-        # Heavy penalty if occlusion is just ahead (boundary would feed bad frames to tracker)
-        if occlusion_ahead:
-            score *= 0.1  # 90% penalty
-
-        # Moderate penalty if occlusion just ended (frames might still be messy)
-        if occlusion_behind:
-            score *= 0.5  # 50% penalty
-
-        return score
-
-    # Only adjust tracker chunk boundaries (indices 1+)
-    for i in range(1, len(adjusted_boundaries)):
-        original = adjusted_boundaries[i]
-
-        # Generate candidate frames within search window
-        search_start = max(0, original - search_window_frames)
-        search_end = min(total_end, original + search_window_frames)
-        candidates = list(range(search_start, search_end + 1))
-
-        if not candidates:
-            logger.debug(
-                f"Boundary {i}: frame {original} — no candidates, keeping original"
-            )
-            continue
-
-        # Filter out frames inside occlusion periods
-        if occlusion_periods:
-            safe_candidates = [f for f in candidates if not _is_in_occlusion_period(f)]
-
-            if not safe_candidates:
-                logger.warning(
-                    f"Boundary {i}: frame {original} — all candidates within occlusion periods "
-                    f"(±{search_window_seconds}s window), keeping original (RISKY)"
-                )
-                continue
-
-            # Among safe candidates, pick the one with highest quality score
-            # (considers distance + directional penalties)
-            best_candidate = max(safe_candidates, key=_candidate_quality_score)
-        else:
-            # Legacy fallback: find nearest transition (old behavior)
-            transitions = transition_frames
-            trans_candidates = transitions[
-                (transitions >= search_start) & (transitions <= search_end)
-            ]
-            if len(trans_candidates) == 0:
-                logger.debug(
-                    f"Boundary {i}: frame {original} — no transitions, keeping original"
-                )
-                continue
-            best_candidate = trans_candidates[
-                np.argmin(np.abs(trans_candidates - original))
-            ]
-
-        shift = int(best_candidate) - original
-
-        # Validate: check chunk sizes with this adjustment
-        prev_start = adjusted_boundaries[i - 1]
-        next_end = (
-            adjusted_boundaries[i + 1]
-            if i + 1 < len(adjusted_boundaries)
-            else total_end
-        )
-        prev_chunk_len = int(best_candidate) - prev_start
-        next_chunk_len = next_end - int(best_candidate)
-
-        if prev_chunk_len < min_frames or prev_chunk_len > max_frames:
-            logger.debug(
-                f"Boundary {i}: frame {original} → {best_candidate} rejected "
-                f"(prev chunk would be {prev_chunk_len / fps:.1f}s, "
-                f"limits: {min_chunk_seconds}-{max_chunk_seconds}s)"
-            )
-            continue
-
-        if next_chunk_len < min_frames or next_chunk_len > max_frames:
-            logger.debug(
-                f"Boundary {i}: frame {original} → {best_candidate} rejected "
-                f"(next chunk would be {next_chunk_len / fps:.1f}s, "
-                f"limits: {min_chunk_seconds}-{max_chunk_seconds}s)"
-            )
-            continue
-
-        adjusted_boundaries[i] = int(best_candidate)
-
-        if occlusion_periods:
-            quality = _candidate_quality_score(int(best_candidate))
-            logger.info(
-                f"Boundary {i}: frame {original} → {best_candidate} "
-                f"(shifted by {shift:+d} frames, quality score: {quality:.1f})"
-            )
-        else:
-            logger.info(
-                f"Boundary {i}: frame {original} → {best_candidate} "
-                f"(shifted by {shift:+d} frames, nearest transition)"
-            )
-
-    # Rebuild chunks from adjusted boundaries
-    adjusted_chunks = []
-    for i in range(len(adjusted_boundaries)):
-        start = adjusted_boundaries[i]
-        end = (
-            adjusted_boundaries[i + 1]
-            if i + 1 < len(adjusted_boundaries)
-            else total_end
-        )
-        model_type = fixed_chunks[i][2]  # preserve original model type
-        adjusted_chunks.append((start, end, model_type))
-
-    # Absorb small trailing chunks (<10% of tracker chunk size) into last chunk
-    if len(adjusted_chunks) > 1:
-        last_start, last_end, last_type = adjusted_chunks[-1]
-        last_len = last_end - last_start
-        prev_start, prev_end, prev_type = adjusted_chunks[-2]
-        prev_len = prev_end - prev_start
-        # Use the tracker chunk seconds from the original fixed chunks as reference
-        ref_tracker_frames = (
-            fixed_chunks[1][1] - fixed_chunks[1][0]
-            if len(fixed_chunks) > 1
-            else last_len
-        )
-
-        should_absorb = False
-
-        # Case 1: Last chunk is very small (<10% of reference)
-        if last_len < ref_tracker_frames * 0.1:
-            should_absorb = True
-            logger.info(
-                f"Absorbing small trailing chunk ({last_len} frames, "
-                f"{last_len / fps:.1f}s) into previous chunk"
-            )
-
-        # Case 2: Last chunk boundary is too close to an occlusion period
-        elif occlusion_periods and _is_in_occlusion_period(last_start):
-            combined_len = last_end - prev_start
-            if combined_len <= max_frames:
-                should_absorb = True
-                logger.info(
-                    f"Absorbing last chunk (boundary at {last_start} too close to occlusion) "
-                    f"into previous chunk (combined: {combined_len / fps:.1f}s)"
-                )
-
-        if should_absorb:
-            adjusted_chunks[-2] = (prev_start, last_end, prev_type)
-            adjusted_chunks.pop()
-
-    return adjusted_chunks
-
-
-def chunk_video_frames_dual(
-    total_frames: int,
-    fps: float,
-    video_model_seconds: int,
-    tracker_seconds: int,
-) -> list[tuple[int, int, str]]:
-    """
-    Split video into chunks with different durations for each model type.
-
-    The first chunk uses Sam3VideoModel (text-prompted, shorter duration) and
-    all subsequent chunks use Sam3TrackerVideoModel (point-prompted, longer).
-
-    Returns list of (start_idx, end_idx, model_type) tuples where
-    model_type is "video" (Sam3VideoModel) or "tracker" (Sam3TrackerVideoModel).
-    """
-    video_model_frames = int(fps * video_model_seconds)
-    tracker_frames = int(fps * tracker_seconds)
-
-    chunks = []
-    # Chunk 0: video model (short)
-    end = min(video_model_frames, total_frames)
-    chunks.append((0, end, "video"))
-
-    # Remaining chunks: tracker (longer)
-    # Absorb small trailing remainders (< 10% of chunk size) into the last chunk
-    start = end
-    while start < total_frames:
-        end = min(start + tracker_frames, total_frames)
-        remaining_after = total_frames - end
-        if 0 < remaining_after < tracker_frames * 0.1:
-            end = total_frames  # absorb small tail
-        chunks.append((start, end, "tracker"))
-        start = end
-
-    return chunks
+def sanitize_filename(name: str) -> str:
+    """Sanitize a stem string for use as a directory name."""
+    sanitized = re.sub(r"[^\w\-]", "_", name)
+    sanitized = re.sub(r"_+", "_", sanitized)
+    return sanitized.strip("_") or "video"
 
 
 def build_manual_chunks(frame_pairs: list[list[int]]) -> list[tuple[int, int, str]]:
-    """Build chunk list from user-supplied (start_frame, end_frame) pairs.
-    First chunk → "video" model; all subsequent → "tracker" model.
+    """
+    Build chunk list from user-supplied (start_frame, end_frame) pairs
     """
     chunks = []
     for i, (start, end) in enumerate(frame_pairs):
@@ -377,168 +101,9 @@ def build_manual_chunks(frame_pairs: list[list[int]]) -> list[tuple[int, int, st
     return chunks
 
 
-def get_all_objects_from_results(results: dict) -> tuple[list, list, list]:
-    """
-    Extract masks, boxes, and object_ids from a single frame's output dict.
-
-    Handles both torch tensors and numpy arrays.
-
-    Returns:
-        (masks_list, boxes_list, object_ids_list) where each is a list of
-        per-object arrays.
-    """
-    masks = results.get("masks")
-    boxes = results.get("boxes")
-    object_ids = results.get("object_ids")
-
-    if masks is None or object_ids is None:
-        return [], [], []
-
-    masks_np = to_numpy(masks)
-    boxes_np = to_numpy(boxes) if boxes is not None else None
-    ids_np = to_numpy(object_ids)
-
-    masks_list = [masks_np[i] for i in range(len(ids_np))]
-    boxes_list = (
-        [boxes_np[i] for i in range(len(ids_np))] if boxes_np is not None else []
-    )
-    object_ids_list = ids_np.tolist()
-
-    return masks_list, boxes_list, object_ids_list
-
-
-def find_frame_with_enough_objects(
-    outputs_per_frame: dict,
-    min_objects: int = 3,
-    max_lookback: int = 10,
-) -> tuple[int | None, list, list, list]:
-    """
-    Search backwards through frame outputs to find a frame with enough objects.
-
-    Args:
-        outputs_per_frame: Dict mapping frame_idx -> processed output dict.
-        min_objects: Minimum number of objects required.
-        max_lookback: Maximum number of frames to search backwards from the end.
-
-    Returns:
-        (frame_idx, masks_list, boxes_list, object_ids_list) or
-        (None, [], [], []) if no suitable frame found.
-    """
-    sorted_frames = sorted(outputs_per_frame.keys(), reverse=True)
-
-    for frame_idx in sorted_frames[:max_lookback]:
-        masks_list, boxes_list, object_ids_list = get_all_objects_from_results(
-            outputs_per_frame[frame_idx]
-        )
-        if len(object_ids_list) >= min_objects:
-            logger.debug(f"Found {len(object_ids_list)} objects at frame {frame_idx}")
-            return frame_idx, masks_list, boxes_list, object_ids_list
-
-    logger.warning(
-        f"No frame with >= {min_objects} objects found in last {max_lookback} frames"
-    )
-    return None, [], [], []
-
-
-def extract_equidistant_points_from_mask(
-    mask: np.ndarray, num_points: int = 3
-) -> list[list[int]] | None:
-    """
-    Extract equidistant points along the mask's major axis (x-axis).
-
-    Samples points deterministically by sorting pixels by x-coordinate
-    and selecting evenly-spaced points using linspace. Provides better
-    spatial coverage than random sampling and naturally avoids border pixels.
-
-    Originally from commit d5b4cda (the "magic run" with perfect tracking).
-
-    Args:
-        mask: Binary mask (H, W) with 1s indicating the object.
-        num_points: Number of equidistant points to extract.
-
-    Returns:
-        List of [x, y] points, or None if mask is empty.
-    """
-    y_coords, x_coords = np.where(mask > 0)
-    if len(y_coords) == 0:
-        return None
-
-    center_x = int(np.mean(x_coords))
-    center_y = int(np.mean(y_coords))
-
-    if num_points == 1:
-        return [[center_x, center_y]]
-
-    sorted_indices = np.argsort(x_coords)
-    n_pixels = len(sorted_indices)
-
-    indices = np.linspace(0, n_pixels - 1, num_points, dtype=int)
-
-    points = []
-    for idx in indices:
-        sorted_idx = sorted_indices[idx]
-        x = int(x_coords[sorted_idx])
-        y = int(y_coords[sorted_idx])
-        points.append([x, y])
-
-    return points
-
-
-def extract_equidistant_points_from_masks(
-    masks: np.ndarray, num_points: int = 3
-) -> np.ndarray:
-    """
-    Batch wrapper for extract_equidistant_points_from_mask().
-
-    Args:
-        masks: np.array with shape (N, H, W), binary masks.
-        num_points: Number of points to extract per mask.
-
-    Returns:
-        points: np.array with shape (N, num_points, 2) in (x, y) format.
-    """
-    n = masks.shape[0]
-    points = []
-    for i in range(n):
-        pts = extract_equidistant_points_from_mask(masks[i], num_points)
-        if pts is None:
-            points.append(np.zeros((num_points, 2)))
-        else:
-            points.append(np.array(pts))
-    return np.array(points, dtype=np.float32)
-
-
-def sample_points_from_masks(masks: np.ndarray, num_points: int = 3) -> np.ndarray:
-    """
-    Sample random points from mask-positive pixels and return absolute coordinates.
-
-    Adapted from: IDEA-Research/Grounded-SAM-2
-    Source: https://github.com/IDEA-Research/Grounded-SAM-2/blob/main/utils/track_utils.py
-    Also available locally: Grounded-SAM-2-fork/utils/track_utils.py
-
-    Args:
-        masks: np.array with shape (N, H, W), binary masks.
-        num_points: Number of points to sample per mask.
-
-    Returns:
-        points: np.array with shape (N, num_points, 2) in (x, y) format.
-    """
-    n, h, w = masks.shape
-    points = []
-    for i in range(n):
-        indices = np.argwhere(masks[i] == 1)
-        indices = indices[:, ::-1]  # (y, x) to (x, y)
-        if len(indices) == 0:
-            points.append(np.zeros((num_points, 2)))
-            continue
-        if len(indices) < num_points:
-            sampled_indices = np.random.choice(len(indices), num_points, replace=True)
-        else:
-            sampled_indices = np.random.choice(len(indices), num_points, replace=False)
-        sampled_points = indices[sampled_indices]
-        points.append(sampled_points)
-    points = np.array(points, dtype=np.float32)
-    return points
+# ---------------------------------------------------------------------------
+# GPU and system memory utilities
+# ---------------------------------------------------------------------------
 
 
 def free_gpu_memory(log_stats: bool = False):
@@ -575,7 +140,9 @@ def free_system_memory(label: str = ""):
     vm = psutil.virtual_memory()
     before_gb = vm.used / 1024**3
     available_gb = vm.available / 1024**3
-    logger.info(f"RAM before gc ({prefix}{before_gb:.1f} GB used, {available_gb:.1f} GB available)")
+    logger.info(
+        f"RAM before gc ({prefix}{before_gb:.1f} GB used, {available_gb:.1f} GB available)"
+    )
 
     gc.collect()
 
@@ -588,9 +155,15 @@ def free_system_memory(label: str = ""):
     )
 
 
+# ---------------------------------------------------------------------------
+# IO utilities
+# ---------------------------------------------------------------------------
+
+
 def get_video_metadata(video_path: str | Path) -> tuple[float, int]:
     """Return (fps, total_frames) for a video without loading all frames into RAM."""
     import cv2
+
     cap = cv2.VideoCapture(str(video_path))
     fps = cap.get(cv2.CAP_PROP_FPS)
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -598,9 +171,12 @@ def get_video_metadata(video_path: str | Path) -> tuple[float, int]:
     return fps, total_frames
 
 
-def load_video_frames_range(video_path: str | Path, start_frame: int, end_frame: int) -> list:
+def load_video_frames_range(
+    video_path: str | Path, start_frame: int, end_frame: int
+) -> list:
     """Load frames [start_frame, end_frame) from a video file as a list of RGB numpy arrays."""
     import cv2
+
     cap = cv2.VideoCapture(str(video_path))
     cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
     frames = []
@@ -611,201 +187,3 @@ def load_video_frames_range(video_path: str | Path, start_frame: int, end_frame:
         frames.append(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
     cap.release()
     return frames
-
-
-# ---------------------------------------------------------------------------
-# Data processing and annotation utilities
-# ---------------------------------------------------------------------------
-
-
-def to_numpy(x):
-    if hasattr(x, "cpu"):
-        x = x.cpu()
-    if hasattr(x, "numpy"):
-        x = x.numpy()
-    return np.array(x)
-
-
-def process_tracking_outputs(outputs_per_frame):
-    index_tuples = []
-    bboxes = []
-    counts_list = []
-    sizes = []
-    scores_list = []
-    tracker_scores_list = []
-    chunk_idx_list = []
-    model_type_list = []
-    is_chunk_start_list = []
-
-    for frame_idx, proc in outputs_per_frame.items():
-        object_ids = to_numpy(proc["object_ids"])
-        boxes = to_numpy(proc["boxes"])
-        masks = proc["masks"]  # keep lazy until conversion per-item
-        scores = to_numpy(proc.get("scores", np.zeros(len(object_ids))))
-        tracker_scores_dict = proc.get("obj_id_to_tracker_score") or {}
-
-        # Chunk metadata (stamped by chunked pipeline, None for single-pass)
-        chunk_idx = proc.get("_chunk_idx")
-        model_type = proc.get("_model_type")
-        is_chunk_start = proc.get("_is_chunk_start")
-
-        for i, oid in enumerate(object_ids):
-            # bbox -> list (x1,y1,x2,y2)
-            bbox = boxes[i].tolist()
-
-            # mask -> RLE
-            mask_item = masks[i]
-            # if mask already RLE-like (dict with 'counts'/'size'), use it
-            if (
-                isinstance(mask_item, dict)
-                and "counts" in mask_item
-                and "size" in mask_item
-            ):
-                rle = mask_item
-                counts = rle["counts"]
-                try:
-                    counts = counts.decode("utf-8")
-                except Exception:
-                    pass
-                size = rle["size"]
-            else:
-                m = to_numpy(mask_item).astype(np.uint8)
-                # squeeze singleton channel dimension if present
-                if m.ndim == 3 and m.shape[0] in (1,):
-                    m = m.squeeze(0)
-                # ensure Fortran order required by pycocotools
-                rle = mask_util.encode(np.asfortranarray(m))
-                counts = rle["counts"]
-                try:
-                    counts = counts.decode("ascii")
-                except Exception:
-                    pass
-                size = rle["size"]
-
-            score = float(scores[i])
-            tracker_score = (
-                float(tracker_scores_dict[int(oid)])
-                if tracker_scores_dict and int(oid) in tracker_scores_dict
-                else None
-            )
-            index_tuples.append((int(frame_idx), int(oid)))
-            bboxes.append(bbox)
-            counts_list.append(counts)
-            sizes.append(size)
-            scores_list.append(score)
-            tracker_scores_list.append(tracker_score)
-            chunk_idx_list.append(chunk_idx)
-            model_type_list.append(model_type)
-            is_chunk_start_list.append(is_chunk_start)
-
-    mi = pd.MultiIndex.from_tuples(index_tuples, names=["frame_idx", "object_id"])
-    df_results = pd.DataFrame(
-        {
-            "bbox": bboxes,
-            "counts": counts_list,
-            "size": sizes,
-            "scores": scores_list,
-            "tracker_score": tracker_scores_list,
-            "chunk_idx": chunk_idx_list,
-            "model_type": model_type_list,
-            "is_chunk_start": is_chunk_start_list,
-        },
-        index=mi,
-    )
-    return df_results
-
-
-def create_annotation_callback(outputs_per_frame: dict):
-    """
-    Creates a callback function for sv.process_video that annotates frames
-    using pre-computed SAM3 tracking outputs.
-    """
-    mask_annotator = sv.MaskAnnotator()
-    box_annotator = sv.BoxAnnotator(thickness=2)
-    label_annotator = sv.LabelAnnotator()
-
-    def callback(frame: np.ndarray, frame_idx: int) -> np.ndarray:
-        # Get outputs for this frame (may be missing for some frames)
-        if frame_idx not in outputs_per_frame:
-            return frame  # return original frame if no detections
-
-        frame_out = outputs_per_frame[frame_idx]
-
-        # Convert to tensors (handles both torch tensor and numpy array inputs)
-        masks_raw = frame_out["masks"]
-        boxes_raw = frame_out["boxes"]
-        ids_raw = frame_out["object_ids"]
-        scores_raw = frame_out["scores"]
-
-        if isinstance(masks_raw, np.ndarray):
-            masks_t = torch.from_numpy(masks_raw)
-        else:
-            masks_t = masks_raw.detach().cpu()
-
-        if isinstance(boxes_raw, np.ndarray):
-            boxes_t = torch.from_numpy(boxes_raw)
-        else:
-            boxes_t = boxes_raw.detach().cpu()
-
-        if isinstance(ids_raw, np.ndarray):
-            ids_t = torch.from_numpy(ids_raw)
-        else:
-            ids_t = ids_raw.detach().cpu()
-
-        if isinstance(scores_raw, np.ndarray):
-            scores_t = torch.from_numpy(scores_raw)
-        else:
-            scores_t = scores_raw.detach().cpu()
-
-        # Prepare masks: ensure shape (N, 1, H, W)
-        if masks_t.ndim == 3:  # (N, H, W)
-            masks_t = masks_t.unsqueeze(1)  # -> (N, 1, H, W)
-        masks_t = masks_t.to(torch.uint8)
-
-        # Build transformers-style results
-        transformers_res = {
-            "boxes": boxes_t,
-            "masks": masks_t,
-            "labels": ids_t,
-            "scores": scores_t,
-        }
-
-        # Create id2label mapping
-        id2label = {int(i): f"id:{int(i)}" for i in to_numpy(ids_t)}
-
-        # Build detections
-        detections = sv.Detections.from_transformers(
-            transformers_results=transformers_res, id2label=id2label
-        )
-
-        # Create labels with ID and confidence
-        labels = [
-            f"#{int(obj_id)} {confidence:.2f}"
-            for obj_id, confidence in zip(to_numpy(ids_t), detections.confidence)
-        ]
-
-        # Apply annotations
-        annotated = mask_annotator.annotate(scene=frame.copy(), detections=detections)
-        annotated = box_annotator.annotate(scene=annotated, detections=detections)
-        annotated = label_annotator.annotate(
-            scene=annotated, detections=detections, labels=labels
-        )
-
-        return annotated
-
-    return callback
-
-
-def annotate_video_with_sam3_outputs(
-    source_path: str, target_path: str, outputs_per_frame: dict
-):
-    """
-    Process entire video with SAM3 tracking outputs and save annotated version.
-    """
-    callback = create_annotation_callback(outputs_per_frame)
-    sv.process_video(
-        source_path=source_path,
-        target_path=target_path,
-        callback=callback,
-        show_progress=True,
-    )

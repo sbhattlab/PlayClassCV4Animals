@@ -1,9 +1,14 @@
 """
-SAM3 HuggingFace Video Tracking Pipeline
+SAM3 HuggingFace Video Tracking and Segmentation Pipeline
 
 Processes video in chunks:
-- Chunk 0: Sam3VideoModel with text prompt (short, e.g. 15s)
-- Chunks 1+: Sam3TrackerVideoModel with point prompts (longer, e.g. 45s)
+- Grounding phase: Initialise text-prompt based multi-object detection with Sam3VideoModel for first N frames (e.g. 125 frames = 5s at 25fps) of each chunk
+- Transition phase: Sample points from masks in 'best' frame (i.e. frames with highest detection confidence score and/or lowest degree of occlusion), maintain object ID's between chunks
+- Tracking phase: Use sampled points and object ID's from transition phase to initialise point-based multi-object tracking with Sam3TrackerVideoModel
+
+The process is heavily inspired by the Grounded SAM 2 pipeline, the main difference being that both the grounding and tracking stages are run with a Sam3-based model from HuggingFace, rather two separate models (i.e. groundedDINO + SAM2).
+
+The pipeline is designed to be modular and extensible, with support for manual chunking, adaptive chunking based on YOLO scan results.
 
 Usage:
     python -m script.sam3.run_sam3_hf
@@ -11,7 +16,6 @@ Usage:
 
 import argparse
 import json
-import re
 import shutil
 from collections import deque
 from pathlib import Path
@@ -44,13 +48,13 @@ def _early_init():
 # Call early init BEFORE importing torch/transformers
 _args, _cfg = _early_init()
 
-import torch  # noqa: E402
+import torch
 
 # Allow TF32 on Ampere+ GPUs — ~2x faster matmul with negligible precision loss
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
-from accelerate import Accelerator  # noqa: E402
-from transformers import (  # noqa: E402
+from accelerate import Accelerator
+from transformers import (
     Sam3TrackerVideoConfig,
     Sam3TrackerVideoModel,
     Sam3TrackerVideoProcessor,
@@ -59,7 +63,13 @@ from transformers import (  # noqa: E402
     Sam3VideoProcessor,
 )
 
-from src.metrics import (  # noqa: E402
+from src.grounding import (
+    find_best_grounding_frame,
+    match_grounding_ids_to_previous,
+    run_grounding,
+)
+from src.metrics import (
+    compute_max_pairwise_iou,
     compute_per_frame_metrics,
     compute_per_run_metrics,
     compute_summary_metrics,
@@ -67,199 +77,35 @@ from src.metrics import (  # noqa: E402
     per_run_metrics_to_multiindex_df,
     summary_metrics_to_df,
 )
-from src.utils import (  # noqa: E402
-    annotate_video_with_sam3_outputs,
-    build_manual_chunks,
-    chunk_video_frames_adaptive,
-    chunk_video_frames_dual,
-    create_run_directory,
+from src.processing import (
     extract_equidistant_points_from_masks,
     find_frame_with_enough_objects,
+    process_tracking_outputs,
+    reseed_tracker_memory,
+)
+from src.utils import (
+    build_manual_chunks,
+    create_run_directory,
     free_gpu_memory,
     free_system_memory,
     get_video_metadata,
     load_video_frames_range,
-    process_tracking_outputs,
-    sample_points_from_masks,
+    sanitize_filename,
     setup_logger,
 )
-from src.viz import generate_all_visualizations  # noqa: E402
-from src.yolo_prescan import run_yolo_prescan, yolo_prescan_to_df  # noqa: E402
-
-# Import parameter sensitivity function for optional testing
-try:
-    from script.sam3.parameter_sensitivity import run_parameter_sensitivity_analysis
-except ImportError:
-    run_parameter_sensitivity_analysis = None  # noqa: E402
+from src.viz import (
+    annotate_video_with_sam3_outputs,
+    generate_all_visualizations,
+)
+from src.yolo_scan import (
+    chunk_video_frames_adaptive,
+    run_yolo_scan,
+    yolo_scan_to_df,
+)
 
 # ---------------------------------------------------------------------------
 # Per-chunk processing helpers
 # ---------------------------------------------------------------------------
-
-
-def _compute_max_pairwise_iou(masks_np: np.ndarray) -> float:
-    """Return max pixel-IoU over all pairs of binary masks (N, H, W)."""
-    n = len(masks_np)
-    max_iou = 0.0
-    for i in range(n):
-        for j in range(i + 1, n):
-            inter = float((masks_np[i] & masks_np[j]).sum())
-            union = float((masks_np[i] | masks_np[j]).sum())
-            if union > 0:
-                max_iou = max(max_iou, inter / union)
-    return max_iou
-
-
-def _find_best_prescreen_frame(
-    prescreen_outputs: dict,
-    min_objects: int = 3,
-    method: str = "combined",
-) -> tuple[int | None, list, list, list]:
-    """
-    Select best frame from prescreen outputs by detection quality.
-    Filters frames with >= min_objects, then ranks by:
-      "min_occlusion"  — lowest max pairwise IoU
-      "best_scores"    — highest mean detection score
-      "combined"       — low-occlusion frames first (max_iou < 0.10),
-                         then by descending mean score within that tier
-    Returns (frame_idx, masks_list, boxes_list, object_ids_list)
-    or (None, [], [], []) if no frame qualifies.
-    """
-    from src.utils import get_all_objects_from_results
-
-    candidates = []
-    for frame_idx, results in prescreen_outputs.items():
-        masks_list, boxes_list, object_ids_list = get_all_objects_from_results(results)
-        if len(object_ids_list) < min_objects:
-            continue
-        masks_array = np.stack(
-            [m.squeeze(0) if m.ndim == 3 and m.shape[0] == 1 else m for m in masks_list]
-        ).astype(bool)
-        max_iou = _compute_max_pairwise_iou(masks_array)
-
-        scores = results.get("scores")
-        if scores is not None:
-            scores_arr = scores if isinstance(scores, np.ndarray) else np.array(scores)
-            mean_score = float(scores_arr.mean()) if scores_arr.size > 0 else 0.0
-        else:
-            tracker_scores = results.get("obj_id_to_tracker_score", {})
-            if tracker_scores:
-                mean_score = float(np.mean(list(tracker_scores.values())))
-            else:
-                mean_score = 0.0
-
-        candidates.append(
-            (frame_idx, masks_list, boxes_list, object_ids_list, max_iou, mean_score)
-        )
-
-    if not candidates:
-        return None, [], [], []
-
-    if method == "min_occlusion":
-        candidates.sort(key=lambda x: x[4])
-    elif method == "best_scores":
-        candidates.sort(key=lambda x: -x[5])
-    else:  # "combined"
-        candidates.sort(key=lambda x: (x[4] >= 0.10, -x[5]))
-
-    best = candidates[0]
-    return best[0], best[1], best[2], best[3]
-
-
-def _match_prescreen_ids_to_previous(
-    prescreen_masks: list,
-    prescreen_ids: list,
-    prev_masks: list,
-    prev_ids: list,
-    iou_threshold: float = 0.10,
-) -> dict[int, int]:
-    """
-    Greedy IoU-based assignment of prescreen IDs to previous-chunk IDs.
-    Builds P×Q IoU matrix, iteratively picks highest-IoU pair, removes both
-    from pool, stops when below iou_threshold. Unmatched prescreen IDs keep
-    their original value in the returned dict.
-    """
-    if not prescreen_masks or not prev_masks:
-        return {int(pid): int(pid) for pid in prescreen_ids}
-
-    def _to_bool(m):
-        arr = m.squeeze(0) if m.ndim == 3 and m.shape[0] == 1 else m
-        return arr.astype(bool)
-
-    ps_masks = [_to_bool(m) for m in prescreen_masks]
-    pv_masks = [_to_bool(m) for m in prev_masks]
-
-    P, Q = len(ps_masks), len(pv_masks)
-    iou_matrix = np.zeros((P, Q), dtype=np.float32)
-    for i in range(P):
-        for j in range(Q):
-            inter = float((ps_masks[i] & pv_masks[j]).sum())
-            union = float((ps_masks[i] | pv_masks[j]).sum())
-            iou_matrix[i, j] = inter / union if union > 0 else 0.0
-
-    id_map: dict[int, int] = {}
-    assigned_ps = set()
-    assigned_pv = set()
-
-    flat_indices = np.argsort(iou_matrix.ravel())[::-1]
-    for flat_idx in flat_indices:
-        i, j = divmod(int(flat_idx), Q)
-        if iou_matrix[i, j] < iou_threshold:
-            break
-        if i in assigned_ps or j in assigned_pv:
-            continue
-        id_map[int(prescreen_ids[i])] = int(prev_ids[j])
-        assigned_ps.add(i)
-        assigned_pv.add(j)
-
-    # Unmatched prescreen IDs pass through unchanged
-    for i, pid in enumerate(prescreen_ids):
-        if int(pid) not in id_map:
-            id_map[int(pid)] = int(pid)
-
-    return id_map
-
-
-def _run_text_prescreen(
-    chunk_frames: list,
-    global_start_idx: int,
-    prescreen_frames: int,
-    cfg,
-    device,
-) -> dict:
-    """
-    Run Sam3VideoModel on chunk_frames[:prescreen_frames] for fresh detections.
-    Clamps prescreen_frames to len(chunk_frames). Frees GPU memory before returning.
-    """
-    n = min(prescreen_frames, len(chunk_frames))
-    outputs = _process_video_chunk(chunk_frames[:n], global_start_idx, cfg, device)
-    free_gpu_memory()
-    return outputs
-
-
-def _reseed_tracker_memory(
-    model, inference_session, frame_idx: int, masks_np: np.ndarray, device
-):
-    """
-    Inject current binary masks as a fresh conditioning frame.
-    Removes frame_idx from frames_tracked so forward() treats it
-    as is_init_cond_frame=True, re-encoding the memory bank.
-    masks_np: (N, H, W) bool/float numpy array.
-    """
-    masks_tensor = torch.from_numpy(masks_np.astype(np.float32)).to(device)
-
-    obj_ids = list(inference_session.obj_ids)[: len(masks_np)]
-    for i, obj_id in enumerate(obj_ids):
-        obj_idx = inference_session.obj_id_to_idx(obj_id)
-        mask_t = masks_tensor[i].unsqueeze(0).unsqueeze(0)  # (1, 1, H, W)
-        inference_session.add_mask_inputs(obj_idx, frame_idx, mask_t)
-        # Clear tracked status so forward treats this as an init-cond frame
-        inference_session.frames_tracked_per_obj[obj_idx].pop(frame_idx, None)
-        if obj_id not in inference_session.obj_with_new_inputs:
-            inference_session.obj_with_new_inputs.append(obj_id)
-
-    # Re-run forward for this frame — encodes fresh memory anchor
-    model(inference_session, frame_idx=frame_idx, run_mem_encoder=True)
 
 
 def _process_video_chunk(chunk_frames, start_idx, cfg, device):
@@ -481,7 +327,7 @@ def _process_tracker_chunk(chunk_frames, start_idx, all_prompt_points, cfg, devi
 
             # --- mid-chunk re-seeding ---
             if reseed_enabled and masks_np.shape[0] >= 2:
-                current_max_iou = _compute_max_pairwise_iou(masks_np)
+                current_max_iou = compute_max_pairwise_iou(masks_np)
                 iou_window.append(current_max_iou)
                 frames_since_reseed += 1
 
@@ -493,7 +339,7 @@ def _process_tracker_chunk(chunk_frames, start_idx, all_prompt_points, cfg, devi
                 not_occluded = current_max_iou < reseed_max_iou
 
                 if window_stable and cooldown_ok and not_occluded:
-                    _reseed_tracker_memory(
+                    reseed_tracker_memory(
                         model, inference_session, local_frame_idx, masks_np, device
                     )
                     frames_since_reseed = 0
@@ -571,18 +417,6 @@ def _process_tracker_chunk(chunk_frames, start_idx, all_prompt_points, cfg, devi
 
 
 # ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-def _sanitize_filename(name: str) -> str:
-    """Sanitize a stem string for use as a directory name."""
-    sanitized = re.sub(r"[^\w\-]", "_", name)
-    sanitized = re.sub(r"_+", "_", sanitized)
-    return sanitized.strip("_") or "video"
-
-
-# ---------------------------------------------------------------------------
 # Single-video pipeline
 # ---------------------------------------------------------------------------
 
@@ -643,17 +477,9 @@ def _run_single_video(cfg, run_dir: Path, config_path: Path | None = None):
             f"Capped to {total_frames} frames (max_frames_to_track={max_frames})"
         )
 
-    # Read prescan/chunking flags early so manual chunking can override them
-    prescan_only = cfg.get("prescan_only", False)
+    # Read scan/chunking flags early so manual chunking can override them
+    yolo_scan_only = cfg.get("yolo_scan_only", False)
     use_adaptive_chunking = cfg.get("use_adaptive_chunking", False)
-
-    # Compute fixed chunks (baseline, may be overridden by manual chunking)
-    chunks = chunk_video_frames_dual(
-        total_frames,
-        fps,
-        cfg.video_model_chunk_seconds,
-        cfg.tracker_chunk_seconds,
-    )
 
     # Manual chunking override — supports both a flat list (all videos) and
     # a dict keyed by basename (per-video, e.g. {"video1.mp4": [[0,375],...], ...})
@@ -670,11 +496,11 @@ def _run_single_video(cfg, run_dir: Path, config_path: Path | None = None):
     use_manual_chunking = manual_chunk_frames is not None
 
     if use_manual_chunking:
-        if prescan_only:
+        if yolo_scan_only:
             logger.warning(
-                "prescan_only is invalid with manual_chunk_frames — ignoring"
+                "yolo_scan_only is invalid with manual_chunk_frames — ignoring"
             )
-            prescan_only = False
+            yolo_scan_only = False
         if use_adaptive_chunking:
             logger.warning(
                 "use_adaptive_chunking is invalid with manual_chunk_frames — ignoring"
@@ -687,23 +513,25 @@ def _run_single_video(cfg, run_dir: Path, config_path: Path | None = None):
         chunks = build_manual_chunks(manual_chunk_frames)
         logger.info(f"Manual chunking: {len(chunks)} chunks from config")
 
-    # YOLO prescan data (populated when prescan or adaptive chunking is enabled)
-    yolo_prescan_metrics_df = None
+    # YOLO scan data (populated when scan or adaptive chunking is enabled)
+    yolo_scan_metrics_df = None
     yolo_occlusion_periods = None
+    yolo_separation_windows = []
+    yolo_scan_results = None
 
     # -----------------------------------------------------------------------
-    # Run YOLO prescan if requested (prescan_only or use_adaptive_chunking)
+    # Run YOLO scan if requested (yolo_scan_only or use_adaptive_chunking)
     # -----------------------------------------------------------------------
-    if prescan_only or use_adaptive_chunking:
-        if prescan_only:
+    if not use_manual_chunking and (yolo_scan_only or use_adaptive_chunking):
+        if yolo_scan_only:
             logger.info("=" * 60)
-            logger.info("PRESCAN-ONLY MODE — running YOLO pre-scan only")
+            logger.info("YOLO-SCAN-ONLY MODE — running YOLO scan only")
             logger.info("=" * 60)
         else:
-            logger.info("Running YOLO pre-scan for adaptive chunking...")
+            logger.info("Running YOLO scan for adaptive chunking...")
 
-        yolo_cfg = cfg.get("yolo_prescan", {})
-        yolo_result = run_yolo_prescan(
+        yolo_cfg = cfg.get("yolo_scan", {})
+        yolo_result = run_yolo_scan(
             video_path=video_path,
             fps=fps,
             total_frames=total_frames,
@@ -723,41 +551,55 @@ def _run_single_video(cfg, run_dir: Path, config_path: Path | None = None):
             clustering_distance_threshold=yolo_cfg.get(
                 "clustering_distance_threshold", 0.15
             ),
+            separation_min_objects=yolo_cfg.get(
+                "separation_min_objects", cfg.get("min_objects_for_tracking", 3)
+            ),
+            separation_min_distance=yolo_cfg.get("separation_min_distance", 0.15),
+            separation_min_window_seconds=yolo_cfg.get(
+                "separation_min_window_seconds", 1.0
+            ),
+            separation_gap_tolerance_frames=yolo_cfg.get(
+                "separation_gap_tolerance_frames", 5
+            ),
             output_video_path=run_dir / "yolo_tracking.mp4",
         )
 
-        # Save YOLO prescan artifacts
+        # Save YOLO scan artifacts
         yolo_df = yolo_result["yolo_df"]
-        prescan_results = yolo_result["prescan_results"]
+        yolo_scan_results = yolo_result["scan_results"]
 
         if not yolo_df.empty:
             yolo_tracking_path = run_dir / "yolo_tracking.parquet"
             yolo_df.to_parquet(yolo_tracking_path, index=False)
             logger.info(f"YOLO tracking saved to: {yolo_tracking_path}")
 
-            prescan_metrics_df = yolo_prescan_to_df(
-                prescan_results["per_frame_metrics"]
+            yolo_scan_metrics_df = yolo_scan_to_df(
+                yolo_scan_results["per_frame_metrics"]
             )
-            prescan_metrics_path = metrics_dir / "yolo_prescan_metrics.parquet"
-            prescan_metrics_df.to_parquet(prescan_metrics_path, index=False)
-            logger.info(f"YOLO prescan metrics saved to: {prescan_metrics_path}")
+            yolo_scan_metrics_path = metrics_dir / "yolo_scan_metrics.parquet"
+            yolo_scan_metrics_df.to_parquet(yolo_scan_metrics_path, index=False)
+            logger.info(f"YOLO scan metrics saved to: {yolo_scan_metrics_path}")
 
-            # Store for visualization
-            yolo_prescan_metrics_df = prescan_metrics_df
-            yolo_occlusion_periods = prescan_results["occlusion_periods"]
+            # Store for visualization and chunking
+            yolo_occlusion_periods = yolo_scan_results["occlusion_periods"]
+            yolo_separation_windows = yolo_scan_results.get("separation_windows", [])
 
         # Save summary as single-row Parquet
-        prescan_summary_df = pd.DataFrame(
+        yolo_scan_summary_df = pd.DataFrame(
             [
                 {
-                    "occlusion_periods": str(prescan_results["occlusion_periods"]),
+                    "occlusion_periods": str(yolo_scan_results["occlusion_periods"]),
                     "transition_frames": str(
-                        prescan_results["transition_frames"].tolist()
+                        yolo_scan_results["transition_frames"].tolist()
                     ),
-                    "num_occlusion_periods": len(prescan_results["occlusion_periods"]),
-                    "num_transition_frames": len(prescan_results["transition_frames"]),
-                    "total_frames": prescan_results.get("total_frames", total_frames),
-                    "video_duration_seconds": prescan_results.get(
+                    "num_occlusion_periods": len(
+                        yolo_scan_results["occlusion_periods"]
+                    ),
+                    "num_transition_frames": len(
+                        yolo_scan_results["transition_frames"]
+                    ),
+                    "total_frames": yolo_scan_results.get("total_frames", total_frames),
+                    "video_duration_seconds": yolo_scan_results.get(
                         "video_duration_seconds", total_frames / fps
                     ),
                     "fps": fps,
@@ -767,121 +609,93 @@ def _run_single_video(cfg, run_dir: Path, config_path: Path | None = None):
                 }
             ]
         )
-        prescan_summary_path = metrics_dir / "yolo_prescan_summary.parquet"
-        prescan_summary_df.to_parquet(prescan_summary_path, index=False)
-        logger.info(f"YOLO prescan summary saved to: {prescan_summary_path}")
-        logger.info(f"YOLO prescan output directory: {run_dir}")
+        yolo_scan_summary_path = metrics_dir / "yolo_scan_summary.parquet"
+        yolo_scan_summary_df.to_parquet(yolo_scan_summary_path, index=False)
+        logger.info(f"YOLO scan summary saved to: {yolo_scan_summary_path}")
+        logger.info(f"YOLO scan output directory: {run_dir}")
 
-        # Run parameter sensitivity testing if requested
-        if cfg.get("run_parameter_sensitivity", False) and not yolo_df.empty:
-            logger.info("")
-            logger.info("=" * 60)
-            logger.info("Running parameter sensitivity analysis...")
-            logger.info("=" * 60)
+    # Compute chunks (non-manual path): single call handles fixed, adaptive, and
+    # separation-based refinement based on available scan data
+    if not use_manual_chunking:
+        chunks = chunk_video_frames_adaptive(
+            total_frames,
+            fps,
+            cfg.video_model_chunk_seconds,
+            cfg.tracker_chunk_seconds,
+            separation_windows=yolo_separation_windows or None,
+            per_frame_metrics=yolo_scan_results.get("per_frame_metrics")
+            if yolo_scan_results
+            else None,
+            occlusion_periods=yolo_scan_results.get("occlusion_periods")
+            if yolo_scan_results
+            else None,
+            transition_frames=yolo_scan_results.get("transition_frames")
+            if yolo_scan_results
+            else None,
+            search_window_seconds=cfg.get("adaptive_search_window_seconds", 10.0),
+            max_chunk_seconds=cfg.get("adaptive_max_chunk_seconds", 150),
+        )
 
-            if run_parameter_sensitivity_analysis is not None:
-                try:
-                    video_path_for_sensitivity = (
-                        Path(video_path) if video_path else None
-                    )
-                    run_parameter_sensitivity_analysis(
-                        yolo_df=yolo_df,
-                        run_dir=run_dir,
-                        fps=fps,
-                        total_frames=total_frames,
-                        video_model_chunk_seconds=cfg.video_model_chunk_seconds,
-                        tracker_chunk_seconds=cfg.tracker_chunk_seconds,
-                        adaptive_min_chunk_seconds=cfg.get(
-                            "adaptive_min_chunk_seconds", 15
+    # Exit early if yolo-scan-only mode
+    if yolo_scan_only:
+        if not yolo_df.empty:
+            # Build chunk_info for visualization
+            chunk_info_for_viz = {
+                "chunks": [
+                    {
+                        "chunk_idx": i,
+                        "frame_range": [s, e],
+                        "model_type": (
+                            "Sam3VideoModel"
+                            if mtype == "video"
+                            else "Sam3TrackerVideoModel"
                         ),
-                        adaptive_max_chunk_seconds=cfg.get(
-                            "adaptive_max_chunk_seconds", 90
-                        ),
-                        video_path=video_path_for_sensitivity,
-                        generate_video=False,
-                    )
-                    logger.info("=" * 60)
-                    logger.info("Parameter sensitivity analysis complete")
-                    logger.info("=" * 60)
-                    logger.info("")
-                except Exception as e:
-                    logger.error(f"Parameter sensitivity analysis failed: {e}")
-                    logger.info("Continuing with main pipeline...")
-                    logger.info("")
-            else:
-                logger.warning(
-                    "Parameter sensitivity module not available (import failed)"
-                )
-                logger.info("")
+                    }
+                    for i, (s, e, mtype) in enumerate(chunks)
+                ]
+            }
 
-        # Adjust chunk boundaries if adaptive chunking is enabled
-        if use_adaptive_chunking and not yolo_df.empty:
-            transition_frames = prescan_results["transition_frames"]
-            occlusion_periods = prescan_results["occlusion_periods"]
-            chunks = chunk_video_frames_adaptive(
-                chunks,
-                transition_frames,
-                fps,
-                occlusion_periods=occlusion_periods,
-                min_chunk_seconds=cfg.get("adaptive_min_chunk_seconds", 15),
-                max_chunk_seconds=cfg.get("adaptive_max_chunk_seconds", 90),
+            chunk_info_path = run_dir / "chunk_info.json"
+            with open(chunk_info_path, "w") as f:
+                json.dump(chunk_info_for_viz, f, indent=2)
+            logger.info(f"Chunk info saved to: {chunk_info_path}")
+
+            viz_dir = run_dir / "visualizations"
+            generate_all_visualizations(
+                tracking_df=None,
+                per_frame_df=None,
+                output_dir=viz_dir,
+                fps=fps,
+                chunk_info=chunk_info_for_viz,
+                yolo_scan_df=yolo_scan_metrics_df,
+                yolo_occlusion_periods=yolo_occlusion_periods,
             )
+            logger.info(f"Visualizations saved to: {viz_dir}")
+        else:
+            logger.warning("YOLO scan returned no detections!")
 
-        # Exit early if prescan-only mode
-        if prescan_only:
-            if not yolo_df.empty:
-                # Build chunk_info for visualization
-                chunk_info_for_viz = {
-                    "chunks": [
-                        {
-                            "chunk_idx": i,
-                            "frame_range": [s, e],
-                            "model_type": (
-                                "Sam3VideoModel"
-                                if mtype == "video"
-                                else "Sam3TrackerVideoModel"
-                            ),
-                        }
-                        for i, (s, e, mtype) in enumerate(chunks)
-                    ]
-                }
+        free_gpu_memory()
+        total_timer.end()
+        logger.info(f"Total scan time: {total_timer.timestamp()}")
+        logger.info("YOLO-scan-only mode complete. Exiting.")
+        return
 
-                viz_dir = run_dir / "visualizations"
-                generate_all_visualizations(
-                    tracking_df=None,
-                    per_frame_df=None,
-                    output_dir=viz_dir,
-                    fps=fps,
-                    chunk_info=chunk_info_for_viz,
-                    yolo_prescan_df=yolo_prescan_metrics_df,
-                    yolo_occlusion_periods=yolo_occlusion_periods,
-                )
-                logger.info(f"Visualizations saved to: {viz_dir}")
-            else:
-                logger.warning("YOLO prescan returned no detections!")
-
-            free_gpu_memory()
-            total_timer.end()
-            logger.info(f"Total prescan time: {total_timer.timestamp()}")
-            logger.info("Prescan-only mode complete. Exiting.")
-            return
-
-    # Continue with SAM3 pipeline (only reached if not prescan_only)
+    # Continue with SAM3 pipeline (only reached if not yolo_scan_only)
 
     logger.info(f"Video: {total_frames} frames at {fps:.1f} FPS")
-    _prescreen_on = OmegaConf.to_container(
-        cfg.get("text_prescreen", {}), resolve=True
+    _grounding_on = OmegaConf.to_container(
+        cfg.get("text_grounding", {}), resolve=True
     ).get("enabled", False)
-    if _prescreen_on:
+    if _grounding_on:
         logger.info(
-            f"Chunks: {len(chunks)} (all via video model text-prompt prescreen -> video tracker model)"
+            f"Chunks: {len(chunks)} (all via video model text-prompt grounding for {cfg.get('grounding_frames')} frames -> video tracker model)"
         )
     else:
         logger.info(
             f"Chunks: {len(chunks)} ({chunks[0][2]} + {len(chunks) - 1} tracker)"
         )
     for i, (s, e, mtype) in enumerate(chunks):
-        display_type = "prescreen→tracker" if _prescreen_on else mtype
+        display_type = "grounding→tracker" if _grounding_on else mtype
         logger.info(
             f"  Chunk {i}: frames {s}-{e} ({display_type}, {(e - s) / fps:.1f}s)"
         )
@@ -893,7 +707,7 @@ def _run_single_video(cfg, run_dir: Path, config_path: Path | None = None):
     chunk_info_list = []
     previous_chunk_outputs = None
     results_path = run_dir / "tracking_outputs.parquet"
-    prescreen_results_path = run_dir / "prescreen_outputs.parquet"
+    grounding_results_path = run_dir / "grounding_outputs.parquet"
 
     for chunk_idx, (start_idx, end_idx, chunk_type) in enumerate(chunks):
         # Load only this chunk's frames from disk — avoids holding the full video in RAM
@@ -926,104 +740,115 @@ def _run_single_video(cfg, run_dir: Path, config_path: Path | None = None):
             "num_objects_tracked": 0,
             "source_frame_idx": None,
             "fallback_reason": None,
-            "prescreen_used": False,
-            "prescreen_source_frame_idx": None,
-            "prescreen_num_objects": 0,
-            "prescreen_fallback_reason": None,
+            "grounding_used": False,
+            "grounding_source_frame_idx": None,
+            "grounding_num_objects": 0,
+            "grounding_fallback_reason": None,
         }
 
         use_tracker = False
         all_prompt_points = {}
+        grounding_frame_offset = 0  # local offset into chunk_frames for tracker init
 
-        prescreen_cfg = cfg.get("text_prescreen", {})
-        prescreen_enabled = prescreen_cfg.get("enabled", False)
+        grounding_cfg = cfg.get("text_grounding", {})
+        grounding_enabled = grounding_cfg.get("enabled", False)
 
-        if prescreen_enabled:
-            # --- Text prescreen drives EVERY chunk: prescreen → tracker ---
-            prescreen_outputs = _run_text_prescreen(
+        if grounding_enabled:
+            # --- Text grounding drives EVERY chunk: grounding → tracker ---
+            grounding_outputs = run_grounding(
                 chunk_frames,
                 global_chunk_start,
-                prescreen_cfg.get("prescreen_frames", 25),
+                grounding_cfg.get("grounding_frames", 25),
+                _process_video_chunk,
                 cfg,
                 device,
             )
-            ps_frame_idx, ps_masks, ps_boxes, ps_ids = _find_best_prescreen_frame(
-                prescreen_outputs,
-                min_objects=prescreen_cfg.get(
-                    "min_objects", cfg.min_objects_for_tracking
-                ),
-                method=prescreen_cfg.get("best_frame_method", "combined"),
+            gr_out_frame_idx, gr_out_masks, gr_out_boxes, gr_out_ids = (
+                find_best_grounding_frame(
+                    grounding_outputs,
+                    min_objects=grounding_cfg.get(
+                        "min_objects", cfg.min_objects_for_tracking
+                    ),
+                    method=grounding_cfg.get("best_frame_method", "combined"),
+                )
             )
 
-            if ps_frame_idx is not None:
+            if gr_out_frame_idx is not None:
                 # Remap fresh IDs to previous-chunk IDs (if a previous chunk exists)
-                if previous_chunk_outputs is not None and prescreen_cfg.get(
+                if previous_chunk_outputs is not None and grounding_cfg.get(
                     "id_matching", True
                 ):
                     _, prev_masks_for_iou, _, prev_ids_for_iou = (
                         find_frame_with_enough_objects(
                             previous_chunk_outputs,
-                            min_objects=1,
+                            # min_objects=3,
+                            min_objects=cfg.min_objects_for_tracking,
                             max_lookback=cfg.max_lookback_frames,
                         )
                     )
                     if prev_masks_for_iou:
-                        id_map = _match_prescreen_ids_to_previous(
-                            ps_masks,
-                            ps_ids,
+                        id_map = match_grounding_ids_to_previous(
+                            gr_out_masks,
+                            gr_out_ids,
                             prev_masks_for_iou,
                             prev_ids_for_iou,
-                            iou_threshold=prescreen_cfg.get(
+                            iou_threshold=grounding_cfg.get(
                                 "id_match_iou_threshold", 0.10
                             ),
                         )
                     else:
-                        id_map = {int(pid): int(pid) for pid in ps_ids}
+                        id_map = {int(gid): int(gid) for gid in gr_out_ids}
                 else:
-                    id_map = {int(pid): int(pid) for pid in ps_ids}
+                    id_map = {int(gid): int(gid) for gid in gr_out_ids}
 
-                ps_masks_array = np.stack(
+                gr_out_masks_array = np.stack(
                     [
                         m.squeeze(0) if m.ndim == 3 and m.shape[0] == 1 else m
-                        for m in ps_masks
+                        for m in gr_out_masks
                     ]
                 )
                 sampled = extract_equidistant_points_from_masks(
-                    ps_masks_array, num_points=3
+                    gr_out_masks_array, num_points=3
                 )
-                prescreen_prompt_points = {}
-                for i, ps_id in enumerate(ps_ids):
-                    mapped_id = id_map.get(int(ps_id), int(ps_id))
+                grounding_prompt_points = {}
+                for i, gr_out_id in enumerate(gr_out_ids):
+                    mapped_id = id_map.get(int(gr_out_id), int(gr_out_id))
                     pts = sampled[i]
                     if pts.size > 0:
-                        prescreen_prompt_points[mapped_id] = pts.tolist()
+                        grounding_prompt_points[mapped_id] = pts.tolist()
 
-                if prescreen_prompt_points:
-                    all_prompt_points = prescreen_prompt_points
+                if grounding_prompt_points:
+                    all_prompt_points = grounding_prompt_points
                     use_tracker = True
+                    grounding_frame_offset = int(gr_out_frame_idx) - global_chunk_start
                     chunk_info["model_type"] = "Sam3TrackerVideoModel"
                     chunk_info["prompt_points"] = {
                         str(k): v for k, v in all_prompt_points.items()
                     }
                     chunk_info["num_objects_tracked"] = len(all_prompt_points)
-                    chunk_info["prescreen_used"] = True
-                    chunk_info["prescreen_source_frame_idx"] = int(ps_frame_idx)
-                    chunk_info["prescreen_num_objects"] = len(prescreen_prompt_points)
+                    chunk_info["grounding_used"] = True
+                    chunk_info["grounding_source_frame_idx"] = int(gr_out_frame_idx)
+                    chunk_info["grounding_num_objects"] = len(grounding_prompt_points)
+                    if grounding_frame_offset > 0:
+                        logger.info(
+                            f"  [grounding] trimming {grounding_frame_offset} frame(s) from chunk start "
+                            f"to align tracker init with best grounding frame {gr_out_frame_idx}"
+                        )
                     logger.info(
-                        f"  [prescreen] fresh text-grounded points from frame {ps_frame_idx} "
-                        f"({len(prescreen_prompt_points)} objects)"
+                        f"  [grounding] fresh text-grounded points from frame {gr_out_frame_idx} "
+                        f"({len(grounding_prompt_points)} objects)"
                     )
                 else:
-                    chunk_info["prescreen_fallback_reason"] = "no_points_extracted"
-                    logger.warning("[prescreen] point extraction failed")
+                    chunk_info["grounding_fallback_reason"] = "no_points_extracted"
+                    logger.warning("[grounding] point extraction failed")
 
             else:
-                # No qualifying frame in prescreen — try prev-chunk fallback
-                chunk_info["prescreen_fallback_reason"] = "insufficient_objects"
-                logger.warning("[prescreen] no qualifying frame found")
+                # No qualifying frame in grounding — try prev-chunk fallback
+                chunk_info["grounding_fallback_reason"] = "insufficient_objects"
+                logger.warning("[grounding] no qualifying frame found")
 
                 if (
-                    prescreen_cfg.get("fallback_to_prev_chunk", True)
+                    grounding_cfg.get("fallback_to_prev_chunk", True)
                     and previous_chunk_outputs is not None
                 ):
                     source_frame_idx, masks_list, boxes_list, object_ids_list = (
@@ -1040,15 +865,9 @@ def _run_single_video(cfg, run_dir: Path, config_path: Path | None = None):
                                 for m in masks_list
                             ]
                         )
-                        point_method = cfg.get("point_extraction_method", "equidistant")
-                        if point_method == "equidistant":
-                            sampled = extract_equidistant_points_from_masks(
-                                masks_array, num_points=3
-                            )
-                        else:
-                            sampled = sample_points_from_masks(
-                                masks_array, num_points=3
-                            )
+                        sampled = extract_equidistant_points_from_masks(
+                            masks_array, num_points=3
+                        )
                         for i, obj_id in enumerate(object_ids_list):
                             pts = sampled[i]
                             if pts.size > 0:
@@ -1063,31 +882,31 @@ def _run_single_video(cfg, run_dir: Path, config_path: Path | None = None):
                             chunk_info["num_objects_tracked"] = len(all_prompt_points)
                             chunk_info["source_frame_idx"] = int(source_frame_idx)
                             logger.warning(
-                                "[prescreen] using previous-chunk points as fallback"
+                                "[grounding] using previous-chunk points as fallback"
                             )
                         else:
                             chunk_info["fallback_reason"] = "could_not_extract_points"
                     else:
                         chunk_info["fallback_reason"] = "no_objects_found"
 
-            # Incrementally save prescreen outputs (mirrors tracking_outputs.parquet pattern)
-            ps_chunk_df = process_tracking_outputs(prescreen_outputs)
-            ps_chunk_df = ps_chunk_df.sort_index()
-            if prescreen_results_path.exists():
-                ps_existing_df = pd.read_parquet(prescreen_results_path)
-                ps_chunk_df = pd.concat([ps_existing_df, ps_chunk_df]).sort_index()
-                del ps_existing_df
-            ps_chunk_df.to_parquet(prescreen_results_path)
-            del ps_chunk_df
+            # Incrementally save grounding outputs (mirrors tracking_outputs.parquet pattern)
+            gs_chunk_df = process_tracking_outputs(grounding_outputs)
+            gs_chunk_df = gs_chunk_df.sort_index()
+            if grounding_results_path.exists():
+                gs_existing_df = pd.read_parquet(grounding_results_path)
+                gs_chunk_df = pd.concat([gs_existing_df, gs_chunk_df]).sort_index()
+                del gs_existing_df
+            gs_chunk_df.to_parquet(grounding_results_path)
+            del gs_chunk_df
             logger.info(
-                f"Prescreen outputs saved to {prescreen_results_path} (chunk {chunk_idx})"
+                f"Grounding outputs saved to {grounding_results_path} (chunk {chunk_idx})"
             )
 
-            del prescreen_outputs
+            del grounding_outputs
             free_gpu_memory()
 
         else:
-            # --- Original logic (prescreen disabled) ---
+            # --- Original logic (grounding disabled) ---
             if chunk_type == "tracker" and previous_chunk_outputs is not None:
                 source_frame_idx, masks_list, boxes_list, object_ids_list = (
                     find_frame_with_enough_objects(
@@ -1103,13 +922,9 @@ def _run_single_video(cfg, run_dir: Path, config_path: Path | None = None):
                             for m in masks_list
                         ]
                     )
-                    point_method = cfg.get("point_extraction_method", "equidistant")
-                    if point_method == "equidistant":
-                        sampled = extract_equidistant_points_from_masks(
-                            masks_array, num_points=3
-                        )
-                    else:
-                        sampled = sample_points_from_masks(masks_array, num_points=3)
+                    sampled = extract_equidistant_points_from_masks(
+                        masks_array, num_points=3
+                    )
                     for i, obj_id in enumerate(object_ids_list):
                         pts = sampled[i]
                         if pts.size > 0:
@@ -1131,16 +946,20 @@ def _run_single_video(cfg, run_dir: Path, config_path: Path | None = None):
         if not use_tracker:
             if chunk_info["fallback_reason"] is None:
                 chunk_info["fallback_reason"] = (
-                    "first_chunk" if chunk_idx == 0 else "prescreen_failed_no_fallback"
+                    "first_chunk" if chunk_idx == 0 else "grounding_failed_no_fallback"
                 )
             chunk_info["model_type"] = "Sam3VideoModel"
 
         # --- Process chunk with appropriate model ---
         # start_frame offset ensures global frame indices match original video positions
-        global_start_idx = global_chunk_start
+        global_start_idx = global_chunk_start + grounding_frame_offset
         if use_tracker:
             chunk_outputs = _process_tracker_chunk(
-                chunk_frames, global_start_idx, all_prompt_points, cfg, device
+                chunk_frames[grounding_frame_offset:],
+                global_start_idx,
+                all_prompt_points,
+                cfg,
+                device,
             )
         else:
             chunk_outputs = _process_video_chunk(
@@ -1273,7 +1092,7 @@ def _run_single_video(cfg, run_dir: Path, config_path: Path | None = None):
         fps=fps,
         chunk_info={"chunks": chunk_info_list},
         video_path=video_path,
-        yolo_prescan_df=yolo_prescan_metrics_df,
+        yolo_scan_df=yolo_scan_metrics_df,
         yolo_occlusion_periods=yolo_occlusion_periods,
     )
     logger.info(f"Visualizations saved to: {vis_dir}")
@@ -1299,7 +1118,9 @@ def _run_single_video(cfg, run_dir: Path, config_path: Path | None = None):
 
 def _run_batch(cfg, video_dir: Path, job_type: str):
     """Process all video files in video_dir, each in its own subdirectory."""
-    VIDEO_EXTENSIONS = {".mp4", ".avi", ".mov", ".mkv", ".m4v"}
+    VIDEO_EXTENSIONS = {
+        ext for e in [".mp4", ".avi", ".mov", ".mkv", ".m4v"] for ext in (e, e.upper())
+    }
     video_files = sorted(
         f
         for f in video_dir.iterdir()
@@ -1313,7 +1134,7 @@ def _run_batch(cfg, video_dir: Path, job_type: str):
     config_path = Path(_args.config)
 
     for video_file in video_files:
-        sanitized = _sanitize_filename(video_file.stem)
+        sanitized = sanitize_filename(video_file.stem)
         video_run_dir = batch_dir / sanitized
         video_run_dir.mkdir(parents=True, exist_ok=True)
         (video_run_dir / "metrics").mkdir(parents=True, exist_ok=True)
@@ -1345,7 +1166,7 @@ def main():
     if not video_path and not video_dir:
         raise ValueError("Must specify either video_path or video_dir.")
 
-    job_type = "yolo_prescan" if cfg.get("prescan_only", False) else cfg.job_type
+    job_type = "yolo_scan" if cfg.get("yolo_scan_only", False) else cfg.job_type
 
     if video_dir:
         _run_batch(cfg, Path(video_dir), job_type)

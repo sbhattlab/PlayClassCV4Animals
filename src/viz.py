@@ -7,16 +7,136 @@ from pathlib import Path
 from typing import Optional, Sequence
 
 import cv2
+import matplotlib
 import matplotlib.lines as mlines
 import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
+from matplotlib.axes import Axes
 import numpy as np
 import pandas as pd
 import pycocotools.mask as mask_util
+import supervision as sv
+import torch
 from loguru import logger
 from matplotlib.cm import ScalarMappable
 from matplotlib.colors import Normalize
+from PIL import Image
+
+
+# Simple visualisation utilities
+def overlay_masks(image, masks):
+    """
+    From sam3-hugginface docs: https://huggingface.co/facebook/sam3#sam3---promptable-concept-segmentation-pcs-for-images
+    """
+    image = image.convert("RGBA")
+    masks = 255 * masks.cpu().numpy().astype(np.uint8)
+
+    n_masks = masks.shape[0]
+    cmap = matplotlib.colormaps.get_cmap("rainbow").resampled(n_masks)
+    colors = [tuple(int(c * 255) for c in cmap(i)[:3]) for i in range(n_masks)]
+
+    for mask, color in zip(masks, colors):
+        mask = Image.fromarray(mask)
+        # Resize mask to match image dimensions if needed
+        if mask.size != image.size:
+            mask = mask.resize(image.size, Image.Resampling.NEAREST)
+        overlay = Image.new("RGBA", image.size, color + (0,))
+        alpha = mask.point(lambda v: int(v * 0.5))
+        overlay.putalpha(alpha)
+        image = Image.alpha_composite(image, overlay)
+    return image
+
+
+def convert_numpy_to_pil(array):
+    return Image.fromarray(np.uint8(array)).convert("RGB")
+
+
+def draw_points_on_axes(
+    ax: Axes,
+    points,
+    colors=None,
+    marker: str = "o",
+    marker_size: int = 60,
+    marker_edgecolor: str = "white",
+    line: bool = True,
+    line_width: float = 1.0,
+    line_alpha: float = 0.9,
+    labels: bool = True,
+    label_offset=(4, -4),
+) -> dict:
+    """
+    Draw prompt points on a matplotlib image axis.
+
+    Args:
+        ax: Axes with an image already shown.
+        points: Array-like of shape (N_objects, N_points_per_object, 2) in (x, y) coords.
+        colors: List of (R, G, B[, A]) tuples, one per object. Defaults to tab10.
+        marker: Marker style.
+        marker_size: Scatter marker size.
+        marker_edgecolor: Edge colour of each marker.
+        line: Draw a line connecting points within each object.
+        line_width: Width of connecting lines.
+        line_alpha: Opacity of connecting lines.
+        labels: Annotate each point with "object:point" index.
+        label_offset: (dx, dy) pixel offset for label text.
+
+    Returns:
+        Dict with keys 'scatters', 'lines', and 'texts' listing the artists added.
+    """
+    pts = np.asarray(points, dtype=float)
+    if pts.ndim != 3 or pts.shape[2] != 2:
+        raise ValueError("points must have shape (N, M, 2)")
+
+    n = pts.shape[0]
+    if colors is None:
+        cmap = matplotlib.colormaps["tab10"]
+        colors = [cmap(i % cmap.N) for i in range(n)]
+    else:
+        colors = list(colors)
+
+    scatters, lines, texts = [], [], []
+
+    for i in range(n):
+        obj_pts = pts[i]
+        if obj_pts.size == 0:
+            continue
+        x, y = obj_pts[:, 0], obj_pts[:, 1]
+
+        if line:
+            (ln,) = ax.plot(
+                x, y, "-", color=colors[i], linewidth=line_width, alpha=line_alpha, zorder=9
+            )
+            lines.append(ln)
+
+        sc = ax.scatter(
+            x, y,
+            s=marker_size,
+            c=[colors[i]] * len(x),
+            marker=marker,
+            edgecolors=marker_edgecolor,
+            linewidths=0.6,
+            zorder=10,
+        )
+        scatters.append(sc)
+
+        if labels:
+            for j, (xx, yy) in enumerate(zip(x, y)):
+                t = ax.text(
+                    xx + label_offset[0],
+                    yy + label_offset[1],
+                    f"{i}:{j}",
+                    color="white",
+                    fontsize=8,
+                    ha="left",
+                    va="center",
+                    zorder=11,
+                    bbox=dict(boxstyle="round,pad=0.1", fc=colors[i], ec="none", alpha=0.6),
+                )
+                texts.append(t)
+
+    return {"scatters": scatters, "lines": lines, "texts": texts}
+
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -800,12 +920,12 @@ def plot_prompt_points(tracking_df, chunk_info, video_path, fps=None, output_dir
 
 
 # ---------------------------------------------------------------------------
-# Plot 6: YOLO prescan overview
+# Plot 6: YOLO scan overview
 # ---------------------------------------------------------------------------
 
 
-def plot_yolo_prescan_overview(
-    yolo_prescan_df,
+def plot_yolo_scan_overview(
+    yolo_scan_df,
     occlusion_periods=None,
     chunk_boundaries=None,
     fps=None,
@@ -813,14 +933,14 @@ def plot_yolo_prescan_overview(
     name_suffix=None,
 ):
     """
-    4-panel timeseries overview of YOLO-based prescan metrics.
+    4-panel timeseries overview of YOLO-based scan metrics.
 
     Panels: object count, max pairwise bbox IoU, clustering coefficient,
     high-occlusion flag. Occlusion periods are shaded in red across all panels.
     Chunk boundaries (re-initialization points) are shown as vertical lines.
 
     Args:
-        yolo_prescan_df: DataFrame from yolo_prescan_to_df() with columns
+        yolo_scan_df: DataFrame from yolo_scan_to_df() with columns
             frame_idx, num_objects, max_pairwise_bbox_iou,
             clustering_coefficient, is_high_occlusion, mean_confidence.
         occlusion_periods: List of (start_frame, end_frame) tuples. Optional.
@@ -828,7 +948,7 @@ def plot_yolo_prescan_overview(
         fps: Video FPS for MM:SS x-axis. None = frame index.
         save_path: Path to save PNG. None = plt.show().
     """
-    frames = yolo_prescan_df["frame_idx"].values
+    frames = yolo_scan_df["frame_idx"].values
     x = np.array([_frame_to_x(f, fps) for f in frames])
 
     fig, axes = plt.subplots(4, 1, sharex=True, figsize=(14, 10))
@@ -852,7 +972,7 @@ def plot_yolo_prescan_overview(
     ax = axes[0]
     ax.step(
         x,
-        yolo_prescan_df["num_objects"].values,
+        yolo_scan_df["num_objects"].values,
         where="mid",
         color="steelblue",
         linewidth=0.8,
@@ -861,10 +981,10 @@ def plot_yolo_prescan_overview(
     ax.set_ylabel("# Objects")
     ax.yaxis.set_major_locator(mticker.MaxNLocator(integer=True))
     if not name_suffix:
-        ax.set_title("YOLO Pre-scan Overview", fontsize=12, fontweight="bold")
+        ax.set_title("YOLO Scan Overview", fontsize=12, fontweight="bold")
     else:
         ax.set_title(
-            f"YOLO Pre-scan Overview ({name_suffix})", fontsize=12, fontweight="bold"
+            f"YOLO Scan Overview ({name_suffix})", fontsize=12, fontweight="bold"
         )
 
     ax.grid(True, alpha=0.3)
@@ -873,7 +993,7 @@ def plot_yolo_prescan_overview(
 
     # Panel 2: Max pairwise bbox IoU
     ax = axes[1]
-    iou_vals = yolo_prescan_df["max_pairwise_bbox_iou"].values
+    iou_vals = yolo_scan_df["max_pairwise_bbox_iou"].values
     ax.plot(x, iou_vals, linewidth=0.8, color="tomato", alpha=0.8)
     ax.axhline(
         0.15,
@@ -895,7 +1015,7 @@ def plot_yolo_prescan_overview(
     ax = axes[2]
     ax.plot(
         x,
-        yolo_prescan_df["clustering_coefficient"].values,
+        yolo_scan_df["clustering_coefficient"].values,
         linewidth=0.8,
         color="mediumpurple",
         alpha=0.8,
@@ -917,7 +1037,7 @@ def plot_yolo_prescan_overview(
 
     # Panel 4: High occlusion flag
     ax = axes[3]
-    occ_flags = yolo_prescan_df["is_high_occlusion"].astype(int).values
+    occ_flags = yolo_scan_df["is_high_occlusion"].astype(int).values
     ax.fill_between(x, 0, occ_flags, alpha=0.5, color="red", step="mid")
     ax.set_ylabel("High\nOcclusion")
     ax.set_ylim(-0.1, 1.1)
@@ -966,7 +1086,7 @@ def generate_all_visualizations(
     fps=None,
     chunk_info=None,
     video_path=None,
-    yolo_prescan_df=None,
+    yolo_scan_df=None,
     yolo_occlusion_periods=None,
 ):
     """
@@ -979,7 +1099,7 @@ def generate_all_visualizations(
         fps: Video FPS for MM:SS axis labels.
         chunk_info: Dict with 'chunks' key for diagnostic plots. Optional.
         video_path: Path to source video for diagnostic plots. Optional.
-        yolo_prescan_df: DataFrame from yolo_prescan_to_df. Optional.
+        yolo_scan_df: DataFrame from yolo_scan_to_df. Optional.
         yolo_occlusion_periods: List of (start, end) frame tuples. Optional.
     """
     output_dir = Path(output_dir)
@@ -1019,8 +1139,8 @@ def generate_all_visualizations(
             output_dir=output_dir,
         )
 
-    if yolo_prescan_df is not None and not yolo_prescan_df.empty:
-        # Extract chunk boundaries for overlay on YOLO prescan plot
+    if yolo_scan_df is not None and not yolo_scan_df.empty:
+        # Extract chunk boundaries for overlay on YOLO scan plot
         chunk_boundaries_list = None
         if chunk_info is not None and "chunks" in chunk_info:
             # Use start frame of each tracker chunk (skip chunk 0 which is text-prompted)
@@ -1029,10 +1149,119 @@ def generate_all_visualizations(
                 for c in chunk_info["chunks"]
                 if c["model_type"] == "Sam3TrackerVideoModel"
             ]
-        plot_yolo_prescan_overview(
-            yolo_prescan_df,
+        plot_yolo_scan_overview(
+            yolo_scan_df,
             occlusion_periods=yolo_occlusion_periods,
             chunk_boundaries=chunk_boundaries_list,
             fps=fps,
-            save_path=output_dir / "yolo_prescan_overview.png",
+            save_path=output_dir / "yolo_scan_overview.png",
         )
+
+
+# ---------------------------------------------------------------------------
+# Video annotation
+# ---------------------------------------------------------------------------
+
+
+def _to_numpy(x):
+    if hasattr(x, "cpu"):
+        x = x.cpu()
+    if hasattr(x, "numpy"):
+        x = x.numpy()
+    return np.array(x)
+
+
+def create_annotation_callback(outputs_per_frame: dict):
+    """
+    Creates a callback function for sv.process_video that annotates frames
+    using pre-computed SAM3 tracking outputs.
+    """
+    mask_annotator = sv.MaskAnnotator()
+    box_annotator = sv.BoxAnnotator(thickness=2)
+    label_annotator = sv.LabelAnnotator()
+
+    def callback(frame: np.ndarray, frame_idx: int) -> np.ndarray:
+        # Get outputs for this frame (may be missing for some frames)
+        if frame_idx not in outputs_per_frame:
+            return frame  # return original frame if no detections
+
+        frame_out = outputs_per_frame[frame_idx]
+
+        # Convert to tensors (handles both torch tensor and numpy array inputs)
+        masks_raw = frame_out["masks"]
+        boxes_raw = frame_out["boxes"]
+        ids_raw = frame_out["object_ids"]
+        scores_raw = frame_out["scores"]
+
+        if isinstance(masks_raw, np.ndarray):
+            masks_t = torch.from_numpy(masks_raw)
+        else:
+            masks_t = masks_raw.detach().cpu()
+
+        if isinstance(boxes_raw, np.ndarray):
+            boxes_t = torch.from_numpy(boxes_raw)
+        else:
+            boxes_t = boxes_raw.detach().cpu()
+
+        if isinstance(ids_raw, np.ndarray):
+            ids_t = torch.from_numpy(ids_raw)
+        else:
+            ids_t = ids_raw.detach().cpu()
+
+        if isinstance(scores_raw, np.ndarray):
+            scores_t = torch.from_numpy(scores_raw)
+        else:
+            scores_t = scores_raw.detach().cpu()
+
+        # Prepare masks: ensure shape (N, 1, H, W)
+        if masks_t.ndim == 3:  # (N, H, W)
+            masks_t = masks_t.unsqueeze(1)  # -> (N, 1, H, W)
+        masks_t = masks_t.to(torch.uint8)
+
+        # Build transformers-style results
+        transformers_res = {
+            "boxes": boxes_t,
+            "masks": masks_t,
+            "labels": ids_t,
+            "scores": scores_t,
+        }
+
+        # Create id2label mapping
+        id2label = {int(i): f"id:{int(i)}" for i in _to_numpy(ids_t)}
+
+        # Build detections
+        detections = sv.Detections.from_transformers(
+            transformers_results=transformers_res, id2label=id2label
+        )
+
+        # Create labels with ID and confidence
+        labels = [
+            f"#{int(obj_id)} {confidence:.2f}"
+            for obj_id, confidence in zip(_to_numpy(ids_t), detections.confidence)
+        ]
+
+        # Apply annotations
+        annotated = mask_annotator.annotate(scene=frame.copy(), detections=detections)
+        annotated = box_annotator.annotate(scene=annotated, detections=detections)
+        annotated = label_annotator.annotate(
+            scene=annotated, detections=detections, labels=labels
+        )
+
+        return annotated
+
+    return callback
+
+
+def annotate_video_with_sam3_outputs(
+    source_path: str, target_path: str, outputs_per_frame: dict
+):
+    """
+    Process entire video with SAM3 tracking outputs and save annotated version.
+    """
+    callback = create_annotation_callback(outputs_per_frame)
+    sv.process_video(
+        source_path=source_path,
+        target_path=target_path,
+        callback=callback,
+        show_progress=True,
+    )

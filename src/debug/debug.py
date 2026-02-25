@@ -34,6 +34,7 @@ def load_outputs(config_path=CONFIG_PATH, run_id="20260207_185451_sam3_hf"):
     # viz_dir = run_dir / "visualizations"
 
     tracking_outputs = pd.read_parquet(run_dir / "tracking_outputs.parquet")
+    grounding_outputs = pd.read_parquet(run_dir / "grounding_outputs.parquet")
 
     with open(run_dir / "chunk_info.json", "r") as f:
         chunk_info = json.load(f)
@@ -44,4 +45,4 @@ def load_outputs(config_path=CONFIG_PATH, run_id="20260207_185451_sam3_hf"):
         pd.read_parquet(metrics_dir / "summary_metrics.parquet"),
     )
 
-    return metrics, chunk_info, tracking_outputs
+    return metrics, chunk_info, tracking_outputs, grounding_outputs
