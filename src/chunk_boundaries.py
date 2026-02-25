@@ -456,8 +456,7 @@ def yolo_scan_to_df(per_frame_metrics: List[Dict[str, Any]]) -> pd.DataFrame:
 def chunk_video_frames_adaptive(
     total_frames: int,
     fps: float,
-    video_model_seconds: int,
-    tracker_seconds: int,
+    chunk_seconds: float = 60.0,
     per_frame_metrics: list[dict] | None = None,
     search_window_seconds: float = 10.0,
     max_chunk_seconds: float = 150.0,
@@ -482,14 +481,13 @@ def chunk_video_frames_adaptive(
     If no frame in the window has a positive separation score the nominal
     boundary is kept unchanged and a debug message is logged.
 
-    Small trailing remainders (< 10 % of tracker chunk size) are absorbed into
+    Small trailing remainders (< 10 % of chunk size) are absorbed into
     the preceding chunk.
 
     Args:
         total_frames: Total number of frames in the video.
         fps: Video frame rate.
-        video_model_seconds: Duration of the first (text-prompted) chunk in seconds.
-        tracker_seconds: Duration of subsequent (point-prompted) chunks in seconds.
+        chunk_seconds: Duration of each chunk in seconds.
         per_frame_metrics: Per-frame metric dicts from ``compute_yolo_per_frame_metrics``.
             Must contain ``frame_idx`` and ``separation_score``.  When ``None``
             the nominal fixed-chunk boundaries are returned unchanged.
@@ -503,21 +501,20 @@ def chunk_video_frames_adaptive(
         List of (start_frame, end_frame, model_type) tuples where model_type is
         ``"video"`` (first chunk) or ``"tracker"`` (all others).
     """
-    video_model_frames = int(fps * video_model_seconds)
-    tracker_frames = int(fps * tracker_seconds)
+    chunk_frames_count = int(fps * chunk_seconds)
     search_window_frames = int(search_window_seconds * fps)
     max_frames = int(max_chunk_seconds * fps)
 
     # Step 1: Generate initial fixed chunks
     fixed_chunks: list[tuple[int, int, str]] = []
-    end = min(video_model_frames, total_frames)
+    end = min(chunk_frames_count, total_frames)
     fixed_chunks.append((0, end, "video"))
 
     start = end
     while start < total_frames:
-        end = min(start + tracker_frames, total_frames)
+        end = min(start + chunk_frames_count, total_frames)
         remaining_after = total_frames - end
-        if 0 < remaining_after < tracker_frames * 0.1:
+        if 0 < remaining_after < chunk_frames_count * 0.1:
             end = total_frames
         fixed_chunks.append((start, end, "tracker"))
         start = end
@@ -620,7 +617,7 @@ def chunk_video_frames_adaptive(
     # Step 5: Absorb small trailing chunks (< 10% of tracker chunk size)
     if len(adjusted_chunks) > 1:
         last_start, last_end, _ = adjusted_chunks[-1]
-        if last_end - last_start < tracker_frames * 0.1:
+        if last_end - last_start < chunk_frames_count * 0.1:
             prev_start, _, prev_type = adjusted_chunks[-2]
             logger.info(
                 f"Absorbing small trailing chunk "

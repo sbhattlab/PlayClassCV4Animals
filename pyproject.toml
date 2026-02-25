@@ -204,7 +204,7 @@ test-sam3-native-video = "python -m src.test.sam3_native_video"
 # Tracking pipelines
 sam3-hf-default = "python -m script.sam3.run_sam3_hf --config config/sam3_hf_config.yaml"
 sam3-hf-manual = "python -m script.sam3.run_sam3_hf --config config/sam3_hf_manual_chunking.yaml"
-sam3-hf-yolo-scan = "python -m script.sam3.run_sam3_hf --config config/yolo_scan_only.yaml"
+sam3-hf-yolo-scan = "python -m script.sam3.run_sam3_hf --config config/sam3_hf_yolo_scan_only.yaml"
 
 # =============================================================================
 # Tasks - SAM3 Native

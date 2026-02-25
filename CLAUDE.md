@@ -65,7 +65,7 @@ notebook/                   # Jupyter notebooks for EDA and demos
 - **Config-driven**: `run_sam3_hf.py` reads YAML configs via OmegaConf. The `_early_init()` pattern parses config and sets `CUDA_VISIBLE_DEVICES` and `PYTORCH_ALLOC_CONF` before torch is imported. A `tracking:` section overrides `Sam3VideoConfig` parameters (keep-alive, IoU thresholds, reconditioning interval, etc.).
 - **Timestamped output**: Each run creates `{output_dir}/{YYYYMMDD_HHMMSS}_{job_type}/` with subdirectories for `metrics/` and `visualizations/`. Config is copied for reproducibility.
 - **Loguru logging**: Console (colored) + file handler in run directory. Replaces all `print()`.
-- **Chunked processing**: Long videos are split into chunks via `chunk_video_frames_adaptive()`. Chunk 0 uses `Sam3VideoModel` (text-prompted, shorter: `video_model_chunk_seconds`). Subsequent chunks use `Sam3TrackerVideoModel` (point-prompted, longer: `tracker_chunk_seconds`). Small trailing remainders (<10% of chunk size) are absorbed into the last chunk. Point prompts are extracted from previous chunk's masks via `extract_equidistant_points_from_masks()`. `find_frame_with_enough_objects()` searches backwards for a frame with enough detected objects. `max_frames_to_track` limits how many frames are processed per video.
+- **Chunked processing**: Long videos are split into chunks via `chunk_video_frames_adaptive()`. Initial chunk size is set by `chunk_seconds` (default 60 s); when YOLO scan data is available, each boundary is shifted within a ±`adaptive_search_window_seconds` window to the frame with the highest separation score. Chunk 0 uses `Sam3VideoModel` (text-prompted); subsequent chunks use `Sam3TrackerVideoModel` (point-prompted). Small trailing remainders (<10% of chunk size) are absorbed into the last chunk. Point prompts are extracted from previous chunk's masks via `extract_equidistant_points_from_masks()`. `find_frame_with_enough_objects()` searches backwards for a frame with enough detected objects. `max_frames_to_track` limits how many frames are processed per video.
 - **Two model phases**: `Sam3VideoModel` (text→segmentation) for initialization, `Sam3TrackerVideoModel` (point→tracking) for propagation. Each chunk loads its model fresh and cleans up GPU memory afterwards (`free_gpu_memory()` with triple `gc.collect` + CUDA cache clearing).
 - **Adaptive chunking (YOLO scan)**: When `use_adaptive_chunking: true`, `run_yolo_scan()` (in `src/yolo_scan.py`) runs YOLO tracking on the full video and returns a raw `yolo_df`. Analysis — `compute_yolo_per_frame_metrics()` → `identify_occlusion_periods()` → `find_high_separation_windows()` — lives in `src/chunk_boundaries.py`. `chunk_video_frames_adaptive()` refines boundaries in priority order — separation-first (highest separation_score inside a high-separation window), then occlusion avoidance (farthest from occlusion with 90%/50% directional penalties), validated against `adaptive_max_chunk_seconds`. Scan outputs saved as `yolo_tracking.parquet`, `yolo_scan_metrics.parquet`, `yolo_scan_summary.parquet`. A `yolo_scan:` config section controls model, thresholds, and tracker config. To reanalyse boundaries without re-running YOLO, use `script/compute_chunk_boundaries.py`.
 - **Manual chunking**: Set `manual_chunk_frames` to a list of `[start, end]` pairs to override fixed/adaptive chunking entirely. First pair → `Sam3VideoModel`; subsequent → `Sam3TrackerVideoModel`. Disables `yolo_scan_only`/`use_adaptive_chunking` with warnings. See `build_manual_chunks()` in `src/utils.py` and `config/sam3_hf_manual_chunking.yaml`.
@@ -135,10 +135,9 @@ yolo_df = pd.read_parquet(run_dir / "yolo_tracking.parquet")
 per_frame_metrics = compute_yolo_per_frame_metrics(yolo_df)
 occlusion_periods = identify_occlusion_periods(per_frame_metrics, window_frames=25)
 separation_windows = find_high_separation_windows(per_frame_metrics)
-chunks = chunk_video_frames_adaptive(total_frames, fps, 15, 60,
-    separation_windows=separation_windows,
+chunks = chunk_video_frames_adaptive(total_frames, fps,
+    chunk_seconds=60,
     per_frame_metrics=per_frame_metrics,
-    occlusion_periods=occlusion_periods,
 )
 ```
 
@@ -174,7 +173,6 @@ Outputs saved to `{output_dir}/{timestamp}_yolo_scan/`.
 - Implement config ingest for test scripts
 - Method for marking output run directory as 'incomplete'
   - Possible solution: placeholder name has `_incomplete` suffix, until completed, in which case the suffix is stripped.
-- `video_model_chunk_seconds` and `tracker_chunk_seconds` config keys should *not* be required - currently, failure to provide them during e.g. manual mode causes run to fail
 - Benchmark tracking performance using frame streaming vs frame preloading
 
 # Misc. notes

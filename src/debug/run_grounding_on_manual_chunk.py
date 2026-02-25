@@ -2,7 +2,7 @@ import os
 
 from src.debug.debug import load_inputs
 
-cfg, video_info = load_inputs("config/sam3_hf_manual_chunking_c5g2.yaml")
+cfg, video_info = load_inputs("config/sam3_hf_manual_chunking_c5g2_day_28.yaml")
 os.environ["CUDA_VISIBLE_DEVICES"] = cfg.get("CUDA_VISIBLE_DEVICES", "1")
 
 

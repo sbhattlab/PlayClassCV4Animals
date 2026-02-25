@@ -39,10 +39,8 @@ yolo_scan_only: true
 # Occlusion-aware adaptive chunking (YOLO-based scan)
 use_adaptive_chunking: true
 
-# Base chunk sizes
-video_model_chunk_seconds: 15 # Duration of first chunk (Sam3VideoModel, text-prompted)
-tracker_chunk_seconds: 60 # Duration of subsequent chunks (Sam3TrackerVideoModel)
-
+# Chunk sizes
+chunk_seconds: 60 # Base duration of each chunk in seconds
 # Chunk length limits
 adaptive_max_chunk_seconds: 120 # Hard VRAM cap — never exceed this
 adaptive_search_window_seconds: 10.0 # Search radius (±s) when refining each boundary

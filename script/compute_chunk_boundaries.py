@@ -12,7 +12,7 @@ Given a run dir that contains ``yolo_tracking.parquet``, this script:
 6. Generates visualizations/chunk_boundaries_<run>.png (frame screengrab grid)
 
 Tunable parameters live in the YAML config under ``yolo_scan:`` and at the
-top level (``tracker_chunk_seconds``, ``adaptive_max_chunk_seconds``, etc.).
+top level (``chunk_seconds``, ``adaptive_max_chunk_seconds``, etc.).
 To tweak: edit the YAML copy in the run dir, then re-run this script.
 
 Usage::
@@ -139,8 +139,7 @@ def main():
     # -------------------------------------------------------------------------
     # 5. Adaptive chunk boundaries
     # -------------------------------------------------------------------------
-    video_model_seconds = float(cfg.get("video_model_chunk_seconds", 15))
-    tracker_seconds = float(cfg.get("tracker_chunk_seconds", 60))
+    chunk_seconds = float(cfg.get("chunk_seconds", 60))
     search_window_seconds = float(cfg.get("adaptive_search_window_seconds", 10.0))
     max_chunk_seconds = float(cfg.get("adaptive_max_chunk_seconds", 150))
 
@@ -148,8 +147,7 @@ def main():
     chunks = chunk_video_frames_adaptive(
         total_frames,
         fps,
-        video_model_seconds,
-        tracker_seconds,
+        chunk_seconds,
         per_frame_metrics=per_frame_metrics,
         search_window_seconds=search_window_seconds,
         max_chunk_seconds=max_chunk_seconds,

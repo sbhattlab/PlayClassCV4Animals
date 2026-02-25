@@ -1,0 +1,90 @@
+# SAM3-HF manual chunking mode
+# Usage: pixi run -e sam3-hf python -m script.sam3.run_sam3_hf --config config/sam3_hf_manual_chunking.yaml
+
+job_type: "sam3_hf"
+
+CUDA_VISIBLE_DEVICES: "1"
+PYTORCH_ALLOC_CONF: "expandable_segments:True,garbage_collection_threshold:0.6"
+
+video_path: "video-data/C1G1_Test_1_day_28_1_Camera_4_2025_02_04_10_59_56_1.mp4"
+text_prompt: "bird"
+output_dir: "ext-data/output/results/sam3-hf"
+
+start_frame: 0
+max_frames_to_track: 0
+
+yolo_scan_only: false
+use_adaptive_chunking: false
+
+manual_chunk_frames:
+  - [0, 383]
+  - [383, 2698]
+  - [2698, 3826]
+  - [3826, 7318]
+  - [7318, 8419]
+  - [8419, 9446]
+  - [9446, 10390]
+  - [10390, 12339]
+  - [12339, 14231]
+  - [14231, 15780]
+  - [15780, 17475]
+  - [17475, 19509]
+  - [19509, 21011]
+  - [21011, 22529]
+
+# ---TEST: two small ultra-small 15 s chunks:
+# - [0, 375]
+# - [375, 750]
+
+# --- TEST: mid-chunk reseed on hardest chunk (chunk 3 split + chunk 4) ---
+# manual_chunk_frames:
+# - [3826, 4076]
+# - [4076, 7318]
+# - [7318, 8419]
+
+mid_chunk_reseed:
+  enabled: false
+  max_iou_threshold: 0.08 # gate: only reseed when max pairwise IoU is below this
+  window_frames: 10 # require 10 consecutive frames below threshold before triggering
+  cooldown_frames: 100 # minimum frames between reseeds (~4 s @ 25 fps)
+
+# =============================================================================
+# Text Grounding Re-Grounding
+# Run Sam3VideoModel on first N frames of each tracker chunk for fresh
+# text-grounded detections, replacing drifted point prompts from prev chunk.
+# Cost: ~same as Chunk 0 per tracker chunk. Keep grounding_frames small.
+# =============================================================================
+text_grounding:
+  enabled: true # Off by default
+  grounding_frames: 125 # Frames to ground (~5 s at 25 fps)
+  min_objects: 3 # Min detections to accept grounding result
+  best_frame_method: "combined" # "combined" | "min_occlusion" | "best_scores"
+  fallback_to_prev_chunk: true # Fall back to prev-chunk points if grounding fails
+  id_matching: true # Remap fresh IDs to previous chunk IDs
+  id_match_iou_threshold: 0.10 # Min mask IoU to accept an ID assignment
+
+# =============================================================================
+# Multi-object Tracking Heuristics
+# =============================================================================
+min_objects_for_tracking: 3 # Minimum objects to look for in previous chunk
+max_lookback_frames: 10 # Max frames to look back
+
+# =============================================================================
+# Sam3VideoConfig Tracking Parameters
+# These help prevent identity loss and duplicate assignments
+# =============================================================================
+tracking:
+  init_trk_keep_alive: 60 # Keep tracks alive longer (default: 30)
+  max_trk_keep_alive: 60 # Higher ceiling for keep-alive (default: 30)
+  min_trk_keep_alive: 0 # Don't go negative as quickly (default: -1)
+  trk_assoc_iou_thresh: 0.3 # More lenient matching (default: 0.5)
+  hotstart_dup_thresh: 12 # Stricter duplicate detection (default: 8)
+  suppress_overlap_thresh: 0.8 # Stricter overlap suppression (default: 0.7)
+  recondition_every_nth_frame: 8 # More frequent reconditioning (default: 16)
+
+# =============================================================================
+# Metrics Configuration
+# =============================================================================
+metrics:
+  occlusion_iou_threshold: 0.15 # IoU above this = objects overlapping
+  clustering_distance_threshold: 50.0 # pixels - objects closer than this are "clustered"

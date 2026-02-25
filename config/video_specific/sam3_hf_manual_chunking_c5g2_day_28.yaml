@@ -6,33 +6,30 @@ job_type: "sam3_hf"
 CUDA_VISIBLE_DEVICES: "0"
 PYTORCH_ALLOC_CONF: "expandable_segments:True,garbage_collection_threshold:0.6"
 
-video_path: "ext-data/raw/C5G2_Test_1_day_28_1_Camera_5_2025_02_04_11_35_00_2_6_fps.mp4"
+video_path: "ext-data/raw/C5G2_Test_1_day_28_1_Camera_5_2025_02_04_11_35_00_2.mp4"
 text_prompt: "bird"
 output_dir: "ext-data/output/results/sam3-hf"
 
 start_frame: 0
 max_frames_to_track: 0
 
-video_model_chunk_seconds: 15
-tracker_chunk_seconds: 45
-
 yolo_scan_only: false
 use_adaptive_chunking: false
 
 manual_chunk_frames:
-  - [0, 313]
-  - [313, 613]
-  - [613, 954]
-  - [954, 1223]
-  - [1223, 1650]
-  - [1650, 2396]
-  - [2396, 2844]
-  - [2844, 3202]
-  - [3202, 3623]
-  - [3623, 4138]
-  - [4138, 4680]
-  - [4680, 5177]
-  - [5177, 5404]
+  - [0, 1308]
+  - [1308, 2558]
+  - [2558, 3976]
+  - [3976, 5096]
+  - [5096, 6879]
+  - [6879, 9984]
+  - [9984, 11850]
+  - [11850, 13345]
+  - [13345, 15097]
+  - [15097, 17245]
+  - [17245, 19502]
+  - [19502, 21574]
+  - [21574, 22514]
 # ---TEST: two small ultra-small 15 s chunks:
 # - [0, 375]
 # - [375, 750]
@@ -57,7 +54,7 @@ mid_chunk_reseed:
 # =============================================================================
 text_grounding:
   enabled: true # Off by default
-  grounding_frames: 25 # Frames to ground
+  grounding_frames: 125 # Frames to ground (~5 s at 25 fps)
   min_objects: 3 # Min detections to accept grounding result
   best_frame_method: "combined" # "combined" | "min_occlusion" | "best_scores"
   fallback_to_prev_chunk: true # Fall back to prev-chunk points if grounding fails

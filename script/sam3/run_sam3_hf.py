@@ -620,8 +620,7 @@ def _run_single_video(cfg, run_dir: Path, config_path: Path | None = None):
         chunks = chunk_video_frames_adaptive(
             total_frames,
             fps,
-            cfg.video_model_chunk_seconds,
-            cfg.tracker_chunk_seconds,
+            cfg.get("chunk_seconds", 60),
             separation_windows=yolo_separation_windows or None,
             per_frame_metrics=yolo_scan_results.get("per_frame_metrics")
             if yolo_scan_results
