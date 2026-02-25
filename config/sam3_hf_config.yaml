@@ -16,8 +16,8 @@ PYTORCH_ALLOC_CONF: "expandable_segments:True,garbage_collection_threshold:0.6" 
 # Video/IO Configuration
 # =============================================================================
 # Video input — specify exactly one:
-video_path: "video-data/C3G3_Test_1_day_28_1_Camera_8_2025_02_04_09_09_08_3.mp4"
-# video_dir: "video-data/"    # Uncomment to batch-process all videos in directory (mutually exclusive with video_path)
+# video_path: null
+video_dir: "video-data/batch" # Uncomment to batch-process all videos in directory (mutually exclusive with video_path)
 text_prompt: "bird"
 
 # Output directory - results will be saved to a timestamped subdirectory
