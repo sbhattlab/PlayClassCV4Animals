@@ -20,34 +20,34 @@ yolo_scan_only: false
 use_adaptive_chunking: false
 
 manual_chunk_frames:
-- [0   , 1308]
-- [1308, 2558]
-- [2558, 3976]
-- [3976, 5096]
-- [5096, 6879]
-- [6879, 9984]
-- [9984, 11850]
-- [11850, 13345]
-- [13345, 15097]
-- [15097, 17245]
-- [17245, 19502]
-- [19502, 21574]
-- [21574, 22514]
+  - [0, 1308]
+  - [1308, 2558]
+  - [2558, 3976]
+  - [3976, 5096]
+  - [5096, 6879]
+  - [6879, 9984]
+  - [9984, 11850]
+  - [11850, 13345]
+  - [13345, 15097]
+  - [15097, 17245]
+  - [17245, 19502]
+  - [19502, 21574]
+  - [21574, 22514]
 # ---TEST: two small ultra-small 15 s chunks:
 # - [0, 375]
 # - [375, 750]
 
 # --- TEST: mid-chunk reseed on hardest chunk (chunk 3 split + chunk 4) ---
 # manual_chunk_frames:
-  # - [3826, 4076]    
-  # - [4076, 7318]    
-  # - [7318, 8419]   
+# - [3826, 4076]
+# - [4076, 7318]
+# - [7318, 8419]
 
 mid_chunk_reseed:
   enabled: false
-  max_iou_threshold: 0.08   # gate: only reseed when max pairwise IoU is below this
-  window_frames: 10         # require 10 consecutive frames below threshold before triggering
-  cooldown_frames: 100      # minimum frames between reseeds (~4 s @ 25 fps)
+  max_iou_threshold: 0.08 # gate: only reseed when max pairwise IoU is below this
+  window_frames: 10 # require 10 consecutive frames below threshold before triggering
+  cooldown_frames: 100 # minimum frames between reseeds (~4 s @ 25 fps)
 
 # =============================================================================
 # Text Grounding Re-Grounding
@@ -56,13 +56,13 @@ mid_chunk_reseed:
 # Cost: ~same as Chunk 0 per tracker chunk. Keep grounding_frames small.
 # =============================================================================
 text_grounding:
-  enabled: true                  # Off by default
-  grounding_frames: 125            # Frames to ground (~5 s at 25 fps)
-  min_objects: 3                  # Min detections to accept grounding result
-  best_frame_method: "combined"   # "combined" | "min_occlusion" | "best_scores"
-  fallback_to_prev_chunk: true    # Fall back to prev-chunk points if grounding fails
-  id_matching: true               # Remap fresh IDs to previous chunk IDs
-  id_match_iou_threshold: 0.10    # Min mask IoU to accept an ID assignment
+  enabled: true # Off by default
+  grounding_frames: 125 # Frames to ground (~5 s at 25 fps)
+  min_objects: 3 # Min detections to accept grounding result
+  best_frame_method: "combined" # "combined" | "min_occlusion" | "best_scores"
+  fallback_to_prev_chunk: true # Fall back to prev-chunk points if grounding fails
+  id_matching: true # Remap fresh IDs to previous chunk IDs
+  id_match_iou_threshold: 0.10 # Min mask IoU to accept an ID assignment
 
 # =============================================================================
 # Multi-object Tracking Heuristics

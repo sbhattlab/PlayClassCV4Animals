@@ -1,13 +1,17 @@
 """
-YOLO-based adaptive chunking scan.
+YOLO-based raw inference scan.
 
-The ``run_yolo_scan`` function runs YOLO+ByteTrack inference inline on a
-video file, builds a tracking DataFrame, and calls ``compute_yolo_scan_results``
-to produce transition frames suitable for ``chunk_video_frames_adaptive``.
+Runs YOLO+ByteTrack on a video and returns a per-detection DataFrame
+(``yolo_tracking.parquet``).  All downstream analysis — per-frame metrics,
+occlusion periods, separation windows, and adaptive chunking — lives in
+``src.chunk_boundaries``.
+
+Re-exports from ``src.chunk_boundaries`` are provided so that existing callers
+(e.g. ``script.sam3.run_sam3_hf``) continue to work unchanged.
 """
 
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict
 
 import cv2
 import numpy as np
@@ -16,13 +20,23 @@ from loguru import logger
 from omegaconf import OmegaConf
 from tqdm import tqdm
 
-from src.metrics import (
-    compute_bbox_centroids,
-    compute_bbox_area_stats,
-    compute_clustering_coefficient,
-    compute_pairwise_bbox_iou,
-    compute_pairwise_centroid_distances,
+# ---------------------------------------------------------------------------
+# Re-exports — analysis / chunking functions live in src.chunk_boundaries
+# ---------------------------------------------------------------------------
+from src.chunk_boundaries import (  # noqa: F401
+    chunk_video_frames_adaptive,
+    compute_separation_score,
+    compute_yolo_per_frame_metrics,
+    compute_yolo_scan_results,
+    find_high_separation_windows,
+    identify_occlusion_periods,
+    yolo_scan_to_df,
 )
+
+
+# ---------------------------------------------------------------------------
+# Inference helpers
+# ---------------------------------------------------------------------------
 
 
 def _draw_label(img: np.ndarray, label: str, x1: float, y1: float) -> None:
@@ -53,325 +67,9 @@ def _draw_label(img: np.ndarray, label: str, x1: float, y1: float) -> None:
     )
 
 
-def compute_yolo_per_frame_metrics(
-    yolo_df: pd.DataFrame,
-    occlusion_iou_threshold: float = 0.15,
-    clustering_distance_threshold: float = 0.15,  # normalized coordinates
-    use_normalized_coords: bool = True,
-    separation_min_objects: int = 3,
-    separation_min_distance: float = 0.15,
-) -> List[Dict[str, Any]]:
-    """
-    Compute per-frame spatial, overlap, and bbox quality metrics from YOLO tracking.
-
-    Similar to metrics.compute_per_frame_metrics but operates on YOLO bbox data.
-
-    Args:
-        yolo_df: DataFrame with columns [frame, track_id, x1, y1, x2, y2,
-                 cx_norm, cy_norm, confidence] (from YOLO tracking)
-        occlusion_iou_threshold: bbox IoU above which a pair is "overlapping"
-        clustering_distance_threshold: centroid distance for clustering coefficient
-        use_normalized_coords: use cx_norm/cy_norm for distances (recommended)
-        separation_min_objects: minimum objects for a non-zero separation_score
-        separation_min_distance: minimum min_centroid_distance for separation_score
-
-    Returns:
-        List of dicts (sorted by frame), one per frame with metrics:
-        - num_objects: detection count
-        - objects_present: list of track IDs
-        - min_centroid_distance: minimum pairwise centroid distance
-        - mean_centroid_distance: mean pairwise centroid distance
-        - clustering_coefficient: fraction of pairs within threshold
-        - max_pairwise_bbox_iou: maximum bbox overlap
-        - mean_pairwise_bbox_iou: mean bbox overlap
-        - num_overlapping_pairs: count of pairs above IoU threshold
-        - mean_bbox_area: mean detection area
-        - min_bbox_area: smallest detection
-        - max_bbox_area: largest detection
-        - bbox_area_variance: area variance
-        - is_high_occlusion: flag (high IoU or high clustering)
-        - is_object_count_change: object count changed from prev frame
-        - mean_confidence: mean YOLO detection confidence
-        - separation_score: per-frame subject separation quality in [0, 1]
-    """
-    results: List[Dict[str, Any]] = []
-    prev_num_objects: Optional[int] = None
-
-    # Sort by frame to ensure sequential processing
-    yolo_df = yolo_df.sort_values("frame").reset_index(drop=True)
-
-    for frame_idx in sorted(yolo_df["frame"].unique()):
-        frame_dets = yolo_df[yolo_df["frame"] == frame_idx]
-        n = len(frame_dets)
-
-        if n == 0:
-            results.append(
-                {
-                    "frame_idx": int(frame_idx),
-                    "num_objects": 0,
-                    "objects_present": [],
-                    "min_centroid_distance": float("inf"),
-                    "mean_centroid_distance": float("inf"),
-                    "clustering_coefficient": 0.0,
-                    "max_pairwise_bbox_iou": 0.0,
-                    "mean_pairwise_bbox_iou": 0.0,
-                    "num_overlapping_pairs": 0,
-                    "mean_bbox_area": 0.0,
-                    "min_bbox_area": 0.0,
-                    "max_bbox_area": 0.0,
-                    "bbox_area_variance": 0.0,
-                    "is_high_occlusion": False,
-                    "is_object_count_change": prev_num_objects is not None
-                    and prev_num_objects != 0,
-                    "mean_confidence": 0.0,
-                    "separation_score": 0.0,
-                }
-            )
-            prev_num_objects = 0
-            continue
-
-        # Extract bounding boxes and centroids
-        boxes = frame_dets[["x1", "y1", "x2", "y2"]].values
-
-        if use_normalized_coords and "cx_norm" in frame_dets.columns:
-            centroids = frame_dets[["cx_norm", "cy_norm"]].values
-        else:
-            centroids = compute_bbox_centroids(boxes)
-
-        # Centroid distances
-        dist_matrix = compute_pairwise_centroid_distances(centroids)
-        if n > 1:
-            upper_dists = dist_matrix[np.triu_indices(n, k=1)]
-            min_dist = (
-                float(np.nanmin(upper_dists)) if len(upper_dists) else float("inf")
-            )
-            mean_dist = (
-                float(np.nanmean(upper_dists)) if len(upper_dists) else float("inf")
-            )
-        else:
-            min_dist = float("inf")
-            mean_dist = float("inf")
-
-        clust_coef = compute_clustering_coefficient(
-            centroids, clustering_distance_threshold
-        )
-
-        # Bbox IoU
-        iou_matrix = compute_pairwise_bbox_iou(boxes)
-        if n > 1:
-            upper_iou = iou_matrix[np.triu_indices(n, k=1)]
-            max_iou = float(np.max(upper_iou)) if len(upper_iou) else 0.0
-            mean_iou = float(np.mean(upper_iou)) if len(upper_iou) else 0.0
-            num_overlap = int(np.sum(upper_iou > occlusion_iou_threshold))
-        else:
-            max_iou = 0.0
-            mean_iou = 0.0
-            num_overlap = 0
-
-        # Bbox areas
-        area_stats = compute_bbox_area_stats(boxes)
-
-        # Confidence
-        mean_conf = float(frame_dets["confidence"].mean())
-
-        # Flags
-        is_high_occ = max_iou > occlusion_iou_threshold or clust_coef > 0.5
-        is_count_change = prev_num_objects is not None and prev_num_objects != n
-
-        sep_score = compute_separation_score(
-            num_objects=n,
-            min_centroid_distance=min_dist,
-            clustering_coefficient=float(clust_coef),
-            num_overlapping_pairs=num_overlap,
-            min_objects=separation_min_objects,
-            min_separation_distance=separation_min_distance,
-        )
-
-        results.append(
-            {
-                "frame_idx": int(frame_idx),
-                "num_objects": n,
-                "objects_present": frame_dets["track_id"].tolist(),
-                "min_centroid_distance": min_dist,
-                "mean_centroid_distance": mean_dist,
-                "clustering_coefficient": float(clust_coef),
-                "max_pairwise_bbox_iou": max_iou,
-                "mean_pairwise_bbox_iou": mean_iou,
-                "num_overlapping_pairs": num_overlap,
-                "mean_bbox_area": area_stats["mean"],
-                "min_bbox_area": area_stats["min"],
-                "max_bbox_area": area_stats["max"],
-                "bbox_area_variance": area_stats["variance"],
-                "is_high_occlusion": is_high_occ,
-                "is_object_count_change": is_count_change,
-                "mean_confidence": mean_conf,
-                "separation_score": sep_score,
-            }
-        )
-        prev_num_objects = n
-
-    return results
-
-
-def compute_separation_score(
-    num_objects: int,
-    min_centroid_distance: float,
-    clustering_coefficient: float,
-    num_overlapping_pairs: int,
-    min_objects: int = 3,
-    min_separation_distance: float = 0.15,
-) -> float:
-    """
-    Per-frame separation quality score in [0, 1].
-
-    Returns 0 for frames that fail the hard gates (too few objects, any
-    overlap, or subjects too close). Otherwise:
-        min(min_centroid_distance, 1.0) * (1 - clustering_coefficient)
-
-    Args:
-        num_objects: Number of detected objects in the frame.
-        min_centroid_distance: Minimum pairwise centroid distance (normalised).
-        clustering_coefficient: Fraction of pairs within the clustering threshold.
-        num_overlapping_pairs: Count of bbox pairs with IoU above threshold.
-        min_objects: Minimum objects required to score above zero.
-        min_separation_distance: Minimum min_centroid_distance required.
-
-    Returns:
-        Float in [0, 1]. Higher = subjects more spread out and unambiguous.
-    """
-    if (
-        num_objects < min_objects
-        or num_overlapping_pairs > 0
-        or min_centroid_distance == float("inf")
-        or min_centroid_distance < min_separation_distance
-    ):
-        return 0.0
-    return min(min_centroid_distance, 1.0) * (1.0 - clustering_coefficient)
-
-
-def find_high_separation_windows(
-    per_frame_metrics: List[Dict[str, Any]],
-    min_objects: int = 3,
-    min_separation_distance: float = 0.15,
-    min_window_frames: int = 25,
-    gap_tolerance_frames: int = 5,
-) -> List[Tuple[int, int]]:
-    """
-    Find sustained periods of high subject separation.
-
-    A frame qualifies when its separation score > 0 (i.e. num_objects >=
-    min_objects, num_overlapping_pairs == 0, and min_centroid_distance >=
-    min_separation_distance).  Contiguous runs of qualifying frames — where
-    the gap to the next qualifying frame is <= gap_tolerance_frames — that
-    span >= min_window_frames total are returned as (start_frame, end_frame)
-    tuples.
-
-    Args:
-        per_frame_metrics: Output of compute_yolo_per_frame_metrics.
-        min_objects: Minimum detections required for a frame to qualify.
-        min_separation_distance: Normalised centroid distance threshold.
-        min_window_frames: Minimum span (in frames) for a window to be kept.
-        gap_tolerance_frames: Frames with no detections that can be bridged
-            within a run without breaking it.
-
-    Returns:
-        List of (start_frame, end_frame) tuples, sorted by start_frame.
-    """
-    if not per_frame_metrics:
-        return []
-
-    qualifying = [
-        m["frame_idx"]
-        for m in sorted(per_frame_metrics, key=lambda m: m["frame_idx"])
-        if compute_separation_score(
-            num_objects=m["num_objects"],
-            min_centroid_distance=m["min_centroid_distance"],
-            clustering_coefficient=m["clustering_coefficient"],
-            num_overlapping_pairs=m["num_overlapping_pairs"],
-            min_objects=min_objects,
-            min_separation_distance=min_separation_distance,
-        )
-        > 0.0
-    ]
-
-    if not qualifying:
-        return []
-
-    windows: List[Tuple[int, int]] = []
-    run_start = qualifying[0]
-    run_end = qualifying[0]
-
-    for frame in qualifying[1:]:
-        if frame - run_end <= gap_tolerance_frames:
-            run_end = frame
-        else:
-            if run_end - run_start + 1 >= min_window_frames:
-                windows.append((run_start, run_end))
-            run_start = frame
-            run_end = frame
-
-    # Flush trailing run
-    if run_end - run_start + 1 >= min_window_frames:
-        windows.append((run_start, run_end))
-
-    return windows
-
-
-def identify_occlusion_periods(
-    per_frame_metrics: List[Dict[str, Any]],
-    window_frames: int = 125,  # 1 second at 25fps, 5 seconds at 25fps
-    high_occlusion_threshold: float = 0.3,  # fraction of frames flagged
-) -> List[Tuple[int, int]]:
-    """
-    Identify contiguous periods of high occlusion using a sliding window.
-
-    Args:
-        per_frame_metrics: output of compute_yolo_per_frame_metrics
-        window_frames: sliding window size (e.g., 125 frames = 1s @ 25fps)
-        high_occlusion_threshold: fraction of frames in window that must be
-                                  flagged to mark the period as high-occlusion
-
-    Returns:
-        List of (start_frame, end_frame) tuples for occlusion periods
-    """
-    if not per_frame_metrics:
-        return []
-
-    # Extract frame indices and occlusion flags
-    frames = np.array([m["frame_idx"] for m in per_frame_metrics])
-    flags = np.array([m["is_high_occlusion"] for m in per_frame_metrics])
-
-    periods: List[Tuple[int, int]] = []
-    i = 0
-
-    while i < len(frames):
-        # Define window end
-        window_end_idx = min(i + window_frames, len(frames))
-        window_flags = flags[i:window_end_idx]
-
-        # Check if this window exceeds threshold
-        if np.mean(window_flags) >= high_occlusion_threshold:
-            # Start of occlusion period
-            start_frame = frames[i]
-
-            # Extend until occlusion drops below threshold
-            j = i
-            while j < len(frames):
-                window_end_idx = min(j + window_frames, len(frames))
-                window_flags = flags[j:window_end_idx]
-                if np.mean(window_flags) < high_occlusion_threshold:
-                    break
-                j += 1
-
-            end_frame = frames[min(j + window_frames - 1, len(frames) - 1)]
-            periods.append((int(start_frame), int(end_frame)))
-
-            # Skip past this period
-            i = j + window_frames
-        else:
-            i += 1
-
-    return periods
+# ---------------------------------------------------------------------------
+# Main inference entry point
+# ---------------------------------------------------------------------------
 
 
 def run_yolo_scan(
@@ -399,34 +97,33 @@ def run_yolo_scan(
 
     Loads a YOLO model, runs tracking with ``model.track(stream=True)``,
     builds a per-detection DataFrame, then delegates to
-    ``compute_yolo_scan_results`` for occlusion/transition analysis.
-    The YOLO model and GPU memory are released before returning.
+    ``compute_yolo_scan_results`` (from ``src.chunk_boundaries``) for
+    occlusion/transition analysis.  The YOLO model and GPU memory are
+    released before returning.
 
     Args:
         video_path: Path to the input video file.
-        fps: Video frame rate (used for windowed occlusion detection).
+        fps: Video frame rate.
         total_frames: Total frame count (for logging only).
-        device: Device string (e.g. ``"cuda:0"``, ``"cpu"``). Typically
-            derived from ``Accelerator().device`` which respects the
-            ``CUDA_VISIBLE_DEVICES`` env var set from the config YAML.
-        model_name: YOLO model weight file (e.g. ``"yolo11x.pt"``).
+        device: Device string (e.g. ``"cuda:0"``).
+        model_name: YOLO model weight file.
         conf_thresh: Confidence threshold for detections.
         iou_thresh: IoU threshold for NMS.
         tracker_config: Path to ByteTrack YAML config.
-        allowed_classes: Set of class name strings to keep (e.g. ``{"bird"}``).
-            ``None`` keeps all classes.
+        allowed_classes: Set of class name strings to keep. ``None`` keeps all.
         window_seconds: Sliding window for occlusion period detection.
         high_occlusion_threshold: Fraction of flagged frames in window.
         occlusion_iou_threshold: Bbox IoU above which a pair is overlapping.
         clustering_distance_threshold: Normalized centroid distance threshold.
-        output_video_path: Optional path to save annotated video with bounding boxes.
-            If ``None``, no video is written.
+        separation_min_objects: Min detections for a frame to qualify as separated.
+        separation_min_distance: Min normalised centroid distance for separation.
+        separation_min_window_seconds: Min duration for a separation window.
+        separation_gap_tolerance_frames: Bridgeable gap within a separation run.
+        output_video_path: Optional path to save annotated video.
 
     Returns:
-        Dict with keys:
-        - ``yolo_df``: Raw tracking DataFrame (one row per detection per frame).
-        - ``scan_results``: Output of ``compute_yolo_scan_results``.
-        - ``model_name``, ``conf_thresh``, ``iou_thresh``: Echo of config.
+        Dict with keys: ``yolo_df``, ``scan_results``, ``model_name``,
+        ``conf_thresh``, ``iou_thresh``.
     """
     try:
         from ultralytics import YOLO
@@ -448,7 +145,6 @@ def run_yolo_scan(
 
     model = YOLO(model_name)
 
-    # Build allowed class IDs from names if specified
     allowed_class_ids: set[int] | None = None
     if allowed_classes is not None:
         allowed_class_ids = {
@@ -459,12 +155,8 @@ def run_yolo_scan(
             f"(IDs: {allowed_class_ids})"
         )
 
-    # Set up video writer if output path is provided
     video_writer = None
     if output_video_path is not None:
-        import cv2
-
-        # Get video metadata for writer
         cap_meta = cv2.VideoCapture(str(video_path))
         video_fps = cap_meta.get(cv2.CAP_PROP_FPS)
         video_fps = float(video_fps) if video_fps and video_fps > 0 else fps
@@ -481,7 +173,6 @@ def run_yolo_scan(
             f"({width}x{height} @ {video_fps:.1f} FPS)"
         )
 
-    # Run tracking with stream mode for memory efficiency
     rows: list[dict] = []
     frame_count = 0
 
@@ -502,23 +193,19 @@ def run_yolo_scan(
     )
 
     for result in results_gen:
-        # Stop after processing total_frames
         if frame_count >= total_frames:
             break
 
-        # Get frame image for video writing
         frame_img = result.orig_img.copy() if video_writer is not None else None
 
         boxes = result.boxes
         if boxes is None or len(boxes) == 0:
-            # Write blank frame if video writer is active
             if video_writer is not None and frame_img is not None:
                 video_writer.write(frame_img)
             frame_count += 1
             pbar.update(1)
             continue
 
-        # Get image dimensions for normalization
         img_h, img_w = result.orig_shape
 
         xyxy = boxes.xyxy.cpu().numpy()
@@ -527,7 +214,6 @@ def run_yolo_scan(
         track_ids = boxes.id.cpu().numpy().astype(int) if boxes.id is not None else None
 
         for i in range(len(xyxy)):
-            # Filter by allowed classes
             if allowed_class_ids is not None and cls_ids[i] not in allowed_class_ids:
                 continue
 
@@ -550,20 +236,16 @@ def run_yolo_scan(
                 }
             )
 
-            # Draw bounding box and label on frame for video
             if video_writer is not None and frame_img is not None:
-                color = (0, 255, 0)  # Green
                 cv2.rectangle(
                     frame_img,
                     (int(x1), int(y1)),
                     (int(x2), int(y2)),
-                    color,
+                    (0, 255, 0),
                     2,
                 )
-                label = f"ID {tid} conf={confs[i]:.2f}"
-                _draw_label(frame_img, label, x1, y1)
+                _draw_label(frame_img, f"ID {tid} conf={confs[i]:.2f}", x1, y1)
 
-        # Write annotated frame to video
         if video_writer is not None and frame_img is not None:
             video_writer.write(frame_img)
 
@@ -573,12 +255,10 @@ def run_yolo_scan(
     pbar.close()
     logger.info(f"YOLO scan: processed {frame_count} frames, {len(rows)} detections")
 
-    # Release video writer if it was used
     if video_writer is not None:
         video_writer.release()
         logger.info(f"YOLO scan: annotated video saved to {output_video_path}")
 
-    # Clean up YOLO model and free GPU
     del model
     free_gpu_memory()
     logger.info("YOLO scan: model unloaded, GPU memory freed")
@@ -593,6 +273,7 @@ def run_yolo_scan(
                 "per_frame_metrics": [],
                 "occlusion_periods": [],
                 "transition_frames": np.array([], dtype=int),
+                "separation_windows": [],
                 "total_frames": total_frames,
                 "video_duration_seconds": total_frames / fps,
                 "fps": fps,
@@ -604,7 +285,6 @@ def run_yolo_scan(
             "iou_thresh": iou_thresh,
         }
 
-    # Compute scan results (per-frame metrics, occlusion periods, transitions)
     scan_results = compute_yolo_scan_results(
         yolo_df,
         fps=fps,
@@ -630,414 +310,3 @@ def run_yolo_scan(
         "conf_thresh": conf_thresh,
         "iou_thresh": iou_thresh,
     }
-
-
-def compute_yolo_scan_results(
-    yolo_df: pd.DataFrame,
-    fps: float = 25.0,
-    window_seconds: float = 1.0,
-    high_occlusion_threshold: float = 0.3,
-    occlusion_iou_threshold: float = 0.15,
-    clustering_distance_threshold: float = 0.15,
-    separation_min_objects: int = 3,
-    separation_min_distance: float = 0.15,
-    separation_min_window_seconds: float = 1.0,
-    separation_gap_tolerance_frames: int = 5,
-) -> Dict[str, Any]:
-    """
-    Run full YOLO-based scan analysis: occlusion periods + separation windows.
-
-    This is the main entry point that uses semantic object detection to identify
-    high-occlusion regions and high-separation windows for adaptive chunking.
-
-    Args:
-        yolo_df: YOLO tracking DataFrame
-        fps: video frame rate
-        window_seconds: sliding window duration for occlusion detection
-        high_occlusion_threshold: fraction of frames flagged in window
-        occlusion_iou_threshold: bbox IoU threshold for overlap
-        clustering_distance_threshold: normalized centroid distance threshold
-        separation_min_objects: minimum detections for a frame to qualify as
-            high-separation (used for both per-frame score and window detection)
-        separation_min_distance: minimum normalised centroid distance for
-            a frame to qualify as high-separation
-        separation_min_window_seconds: minimum duration (seconds) of a
-            sustained high-separation run to be returned as a window
-        separation_gap_tolerance_frames: frames with no qualifying detections
-            that can be bridged without breaking a separation run
-
-    Returns:
-        Dict containing:
-        - per_frame_metrics: List[Dict] with spatial metrics + separation_score
-        - occlusion_periods: List[(start_frame, end_frame)] high-occlusion periods
-        - transition_frames: np.ndarray of frames where occlusion changes
-        - separation_windows: List[(start_frame, end_frame)] high-separation windows
-        - total_frames: int, total frame count
-        - video_duration_seconds: float
-        - fps: float
-    """
-    window_frames = int(window_seconds * fps)
-    separation_min_window_frames = max(1, int(separation_min_window_seconds * fps))
-
-    # Compute per-frame metrics (includes separation_score)
-    per_frame_metrics = compute_yolo_per_frame_metrics(
-        yolo_df,
-        occlusion_iou_threshold=occlusion_iou_threshold,
-        clustering_distance_threshold=clustering_distance_threshold,
-        use_normalized_coords=True,
-        separation_min_objects=separation_min_objects,
-        separation_min_distance=separation_min_distance,
-    )
-
-    # Identify occlusion periods
-    occlusion_periods = identify_occlusion_periods(
-        per_frame_metrics,
-        window_frames=window_frames,
-        high_occlusion_threshold=high_occlusion_threshold,
-    )
-
-    # Extract transition frames (start/end of each period)
-    transition_frames = []
-    for start, end in occlusion_periods:
-        transition_frames.extend([start, end])
-    transition_frames = np.array(sorted(set(transition_frames)))
-
-    # Identify high-separation windows
-    separation_windows = find_high_separation_windows(
-        per_frame_metrics,
-        min_objects=separation_min_objects,
-        min_separation_distance=separation_min_distance,
-        min_window_frames=separation_min_window_frames,
-        gap_tolerance_frames=separation_gap_tolerance_frames,
-    )
-
-    total_frames = yolo_df["frame"].max()
-    video_duration = total_frames / fps
-
-    logger.info(
-        f"YOLO scan: {len(separation_windows)} high-separation windows found "
-        f"(min_distance={separation_min_distance}, min_objects={separation_min_objects})"
-    )
-
-    return {
-        "per_frame_metrics": per_frame_metrics,
-        "occlusion_periods": occlusion_periods,
-        "transition_frames": transition_frames,
-        "separation_windows": separation_windows,
-        "total_frames": int(total_frames),
-        "video_duration_seconds": float(video_duration),
-        "fps": float(fps),
-        "window_frames": int(window_frames),
-        "high_occlusion_threshold": float(high_occlusion_threshold),
-    }
-
-
-def yolo_scan_to_df(per_frame_metrics: List[Dict[str, Any]]) -> pd.DataFrame:
-    """
-    Convert per-frame metrics list to a DataFrame for analysis/export.
-
-    Similar to metrics.per_frame_metrics_to_df.
-    """
-    if not per_frame_metrics:
-        return pd.DataFrame()
-
-    rows = []
-    for d in per_frame_metrics:
-        r = d.copy()
-        # Convert list to comma-separated string
-        r["objects_present"] = ",".join(str(x) for x in r.get("objects_present", []))
-        rows.append(r)
-
-    return pd.DataFrame(rows)
-
-
-def chunk_video_frames_adaptive(
-    total_frames: int,
-    fps: float,
-    video_model_seconds: int,
-    tracker_seconds: int,
-    separation_windows: list[tuple[int, int]] | None = None,
-    per_frame_metrics: list[dict] | None = None,
-    occlusion_periods: list[tuple[int, int]] | None = None,
-    transition_frames: np.ndarray | None = None,
-    search_window_seconds: float = 10.0,
-    min_chunk_seconds: float = 15.0,
-    max_chunk_seconds: float = 90.0,
-    margin_seconds: float = 3.0,
-) -> list[tuple[int, int, str]]:
-    """
-    Split video into adaptive chunks, optionally refined by separation windows
-    or occlusion avoidance.
-
-    Generates initial fixed chunks (chunk 0 → video model, remainder → tracker),
-    then for each tracker-chunk boundary refines in priority order:
-
-      1. Separation-first: if ``separation_windows`` and ``per_frame_metrics``
-         are provided, search ±search_window_seconds for frames inside a
-         separation window and pick the highest separation_score.
-      2. Occlusion avoidance: if ``occlusion_periods`` are provided, search for
-         frames outside occlusion periods (+margin_seconds buffer) and prefer
-         frames farthest from any occlusion.
-      3. No-op: keep original boundary if neither applies or constraints are
-         violated.
-
-    Validates against min_chunk_seconds / max_chunk_seconds and absorbs trailing
-    remainders < 10% of tracker chunk size.
-
-    Args:
-        total_frames: Total number of frames in the video.
-        fps: Video frame rate.
-        video_model_seconds: Duration of the first (text-prompted) chunk in seconds.
-        tracker_seconds: Duration of subsequent (point-prompted) chunks in seconds.
-        separation_windows: List of (start_frame, end_frame) high-separation windows.
-            When provided together with per_frame_metrics, enables separation-first
-            boundary refinement.
-        per_frame_metrics: Per-frame metric dicts (must contain 'frame_idx' and
-            'separation_score'). Required for separation-first refinement.
-        occlusion_periods: List of (start_frame, end_frame) high-occlusion periods.
-            Used as a fallback when separation-first is unavailable.
-        transition_frames: Legacy parameter kept for backwards compatibility.
-            Ignored when occlusion_periods or separation_windows are provided.
-        search_window_seconds: Search radius (seconds) around each boundary.
-        min_chunk_seconds: Minimum allowed chunk duration after adjustment.
-        max_chunk_seconds: Maximum allowed chunk duration after adjustment.
-        margin_seconds: Safety buffer (seconds) around occlusion period edges.
-
-    Returns:
-        List of (start_frame, end_frame, model_type) tuples where model_type is
-        "video" (first chunk) or "tracker" (all others).
-    """
-    video_model_frames = int(fps * video_model_seconds)
-    tracker_frames = int(fps * tracker_seconds)
-    search_window_frames = int(search_window_seconds * fps)
-    min_frames = int(min_chunk_seconds * fps)
-    max_frames = int(max_chunk_seconds * fps)
-    margin_frames = int(margin_seconds * fps)
-
-    # Step 1: Generate initial fixed chunks (same logic as old chunk_video_frames_dual)
-    fixed_chunks: list[tuple[int, int, str]] = []
-    end = min(video_model_frames, total_frames)
-    fixed_chunks.append((0, end, "video"))
-
-    start = end
-    while start < total_frames:
-        end = min(start + tracker_frames, total_frames)
-        remaining_after = total_frames - end
-        if 0 < remaining_after < tracker_frames * 0.1:
-            end = total_frames  # absorb small tail
-        fixed_chunks.append((start, end, "tracker"))
-        start = end
-
-    if len(fixed_chunks) <= 1:
-        return fixed_chunks
-
-    # Step 2: Collect refinement data
-    use_separation = bool(separation_windows and per_frame_metrics)
-    use_occlusion = bool(occlusion_periods)
-
-    score_lookup: dict[int, float] = {}
-    if use_separation and per_frame_metrics:
-        score_lookup = {
-            m["frame_idx"]: m["separation_score"]
-            for m in per_frame_metrics
-            if m.get("separation_score", 0.0) > 0.0
-        }
-
-    boundaries = [c[0] for c in fixed_chunks]
-    total_end = fixed_chunks[-1][1]
-    adjusted_boundaries = list(boundaries)
-
-    def _is_in_occlusion(frame: int) -> bool:
-        """Check if frame falls within any occlusion period (with margin)."""
-        if not occlusion_periods:
-            return False
-        for start_f, end_f in occlusion_periods:
-            if (start_f - margin_frames) <= frame <= (end_f + margin_frames):
-                return True
-        return False
-
-    def _occlusion_quality(frame: int) -> float:
-        """
-        Compute quality score for a candidate boundary (higher = better).
-
-        Scoring rules:
-        1. Distance to nearest occlusion (farther = better)
-        2. Strong penalty if occlusion is ahead (within next margin_frames)
-        3. Moderate penalty if occlusion is behind (within prev margin_frames)
-        """
-        if not occlusion_periods:
-            return 1000.0  # Arbitrary high score if no occlusions
-
-        min_dist = float("inf")
-        occlusion_ahead = False
-        occlusion_behind = False
-
-        for start_f, end_f in occlusion_periods:
-            # Check if occlusion is ahead (about to start)
-            if start_f > frame and (start_f - frame) <= margin_frames:
-                occlusion_ahead = True
-            # Check if occlusion just ended
-            if end_f < frame and (frame - end_f) <= margin_frames:
-                occlusion_behind = True
-
-            # Distance to nearest edge
-            dist = min(abs(frame - start_f), abs(frame - end_f))
-            min_dist = min(min_dist, dist)
-
-        # Base score is distance
-        score = float(min_dist)
-
-        # Heavy penalty if occlusion is just ahead
-        if occlusion_ahead:
-            score *= 0.1  # 90% penalty
-
-        # Moderate penalty if occlusion just ended
-        if occlusion_behind:
-            score *= 0.5  # 50% penalty
-
-        return score
-
-    # Step 3: Refine tracker-chunk boundaries (indices 1+)
-    for i in range(1, len(adjusted_boundaries)):
-        original = adjusted_boundaries[i]
-        search_start = max(0, original - search_window_frames)
-        search_end = min(total_end, original + search_window_frames)
-        best_candidate = None
-
-        if use_separation:
-            # Separation-first: find highest-score frame inside a separation window
-            sep_candidates: dict[int, float] = {}
-            for win_start, win_end in separation_windows:  # type: ignore[union-attr]
-                overlap_start = max(win_start, search_start)
-                overlap_end = min(win_end, search_end)
-                if overlap_start > overlap_end:
-                    continue
-                for frame, score in score_lookup.items():
-                    if overlap_start <= frame <= overlap_end:
-                        sep_candidates[frame] = score
-
-            if sep_candidates:
-                best_candidate = max(sep_candidates, key=lambda f: sep_candidates[f])
-                shift = best_candidate - original
-                prev_start = adjusted_boundaries[i - 1]
-                next_end = (
-                    adjusted_boundaries[i + 1]
-                    if i + 1 < len(adjusted_boundaries)
-                    else total_end
-                )
-                prev_len = best_candidate - prev_start
-                next_len = next_end - best_candidate
-
-                if prev_len < min_frames or prev_len > max_frames:
-                    logger.debug(
-                        f"Separation boundary {i}: frame {original} → {best_candidate} rejected "
-                        f"(prev chunk {prev_len / fps:.1f}s outside "
-                        f"[{min_chunk_seconds}-{max_chunk_seconds}]s)"
-                    )
-                    best_candidate = None
-                elif next_len < min_frames or next_len > max_frames:
-                    logger.debug(
-                        f"Separation boundary {i}: frame {original} → {best_candidate} rejected "
-                        f"(next chunk {next_len / fps:.1f}s outside "
-                        f"[{min_chunk_seconds}-{max_chunk_seconds}]s)"
-                    )
-                    best_candidate = None
-                else:
-                    adjusted_boundaries[i] = best_candidate
-                    logger.info(
-                        f"Separation boundary {i}: frame {original} → {best_candidate} "
-                        f"(shifted {shift:+d} frames, "
-                        f"separation_score={sep_candidates[best_candidate]:.3f})"
-                    )
-                    continue  # Done with this boundary
-            else:
-                logger.debug(
-                    f"Separation boundary {i}: frame {original} — no separation windows "
-                    f"in ±{search_window_seconds}s, trying occlusion fallback"
-                )
-
-        if use_occlusion and best_candidate is None:
-            # Occlusion avoidance fallback
-            candidates_list = list(range(search_start, search_end + 1))
-            safe_candidates = [f for f in candidates_list if not _is_in_occlusion(f)]
-
-            if not safe_candidates:
-                logger.warning(
-                    f"Boundary {i}: frame {original} — all candidates within occlusion periods "
-                    f"(±{search_window_seconds}s window), keeping original (RISKY)"
-                )
-                continue
-
-            best_candidate = max(safe_candidates, key=_occlusion_quality)
-            shift = int(best_candidate) - original
-            prev_start = adjusted_boundaries[i - 1]
-            next_end = (
-                adjusted_boundaries[i + 1]
-                if i + 1 < len(adjusted_boundaries)
-                else total_end
-            )
-            prev_len = int(best_candidate) - prev_start
-            next_len = next_end - int(best_candidate)
-
-            if prev_len < min_frames or prev_len > max_frames:
-                logger.debug(
-                    f"Boundary {i}: frame {original} → {best_candidate} rejected "
-                    f"(prev chunk would be {prev_len / fps:.1f}s, "
-                    f"limits: {min_chunk_seconds}-{max_chunk_seconds}s)"
-                )
-                continue
-
-            if next_len < min_frames or next_len > max_frames:
-                logger.debug(
-                    f"Boundary {i}: frame {original} → {best_candidate} rejected "
-                    f"(next chunk would be {next_len / fps:.1f}s, "
-                    f"limits: {min_chunk_seconds}-{max_chunk_seconds}s)"
-                )
-                continue
-
-            adjusted_boundaries[i] = int(best_candidate)
-            quality = _occlusion_quality(int(best_candidate))
-            logger.info(
-                f"Boundary {i}: frame {original} → {best_candidate} "
-                f"(shifted by {shift:+d} frames, quality score: {quality:.1f})"
-            )
-
-    # Step 4: Rebuild chunks from adjusted boundaries
-    adjusted_chunks = []
-    for i in range(len(adjusted_boundaries)):
-        s = adjusted_boundaries[i]
-        e = (
-            adjusted_boundaries[i + 1]
-            if i + 1 < len(adjusted_boundaries)
-            else total_end
-        )
-        model_type = fixed_chunks[i][2]
-        adjusted_chunks.append((s, e, model_type))
-
-    # Step 5: Absorb small trailing chunks (<10% of tracker chunk size)
-    if len(adjusted_chunks) > 1:
-        last_start, last_end, _ = adjusted_chunks[-1]
-        last_len = last_end - last_start
-        prev_start, _, prev_type = adjusted_chunks[-2]
-        should_absorb = False
-
-        if last_len < tracker_frames * 0.1:
-            should_absorb = True
-            logger.info(
-                f"Absorbing small trailing chunk ({last_len} frames, "
-                f"{last_len / fps:.1f}s) into previous chunk"
-            )
-        elif occlusion_periods and _is_in_occlusion(last_start):
-            combined_len = last_end - prev_start
-            if combined_len <= max_frames:
-                should_absorb = True
-                logger.info(
-                    f"Absorbing last chunk (boundary at {last_start} too close to occlusion) "
-                    f"into previous chunk (combined: {combined_len / fps:.1f}s)"
-                )
-
-        if should_absorb:
-            adjusted_chunks[-2] = (prev_start, last_end, prev_type)
-            adjusted_chunks.pop()
-
-    return adjusted_chunks

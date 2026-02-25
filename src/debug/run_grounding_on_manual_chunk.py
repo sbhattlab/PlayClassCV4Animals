@@ -1,6 +1,6 @@
 import os
 
-from src.debug import load_inputs
+from src.debug.debug import load_inputs
 
 cfg, video_info = load_inputs("config/sam3_hf_manual_chunking_c5g2.yaml")
 os.environ["CUDA_VISIBLE_DEVICES"] = cfg.get("CUDA_VISIBLE_DEVICES", "1")
@@ -11,7 +11,6 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
-import torch
 from accelerate import Accelerator
 
 from script.sam3.run_sam3_hf import _process_video_chunk
@@ -26,7 +25,8 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
-N_GROUNDING_FRAMES = 125
+N_GROUNDING_FRAMES = cfg.get("text_grounding").get("grounding_frames", 125)
+logger.info(f"Number grounding frames: {N_GROUNDING_FRAMES}")
 
 
 def overlay_masks(frame, masks, colors=None, alpha=0.5):

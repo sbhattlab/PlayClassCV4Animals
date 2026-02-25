@@ -48,14 +48,14 @@ def _early_init():
 # Call early init BEFORE importing torch/transformers
 _args, _cfg = _early_init()
 
-import torch  # noqa: E402
+import torch
 
 # Allow TF32 on Ampere+ GPUs — ~2x faster matmul with negligible precision loss
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
-from accelerate import Accelerator  # noqa: E402
+from accelerate import Accelerator
 from transformers import (
-    Sam3TrackerVideoConfig,  # noqa: E402
+    Sam3TrackerVideoConfig,
     Sam3TrackerVideoModel,
     Sam3TrackerVideoProcessor,
     Sam3VideoConfig,
@@ -64,13 +64,13 @@ from transformers import (
 )
 
 from src.grounding import (
-    find_best_grounding_frame,  # noqa: E402
+    find_best_grounding_frame,
     match_grounding_ids_to_previous,
     run_grounding,
 )
 from src.metrics import (
-    compute_max_pairwise_iou,  # noqa: E402
-    compute_per_frame_metrics,  # noqa: E402
+    compute_max_pairwise_iou,
+    compute_per_frame_metrics,
     compute_per_run_metrics,
     compute_summary_metrics,
     per_frame_metrics_to_df,
@@ -85,7 +85,7 @@ from src.processing import (
 )
 from src.utils import (
     build_manual_chunks,
-    create_run_directory,  # noqa: E402
+    create_run_directory,
     free_gpu_memory,
     free_system_memory,
     get_video_metadata,
@@ -94,20 +94,14 @@ from src.utils import (
     setup_logger,
 )
 from src.viz import (
-    annotate_video_with_sam3_outputs,  # noqa: E402
-    generate_all_visualizations,  # noqa: E402
+    annotate_video_with_sam3_outputs,
+    generate_all_visualizations,
 )
 from src.yolo_scan import (
-    chunk_video_frames_adaptive,  # noqa: E402
+    chunk_video_frames_adaptive,
     run_yolo_scan,
     yolo_scan_to_df,
 )
-
-# Import parameter sensitivity function for optional testing
-try:
-    from script.sam3.parameter_sensitivity import run_parameter_sensitivity_analysis
-except ImportError:
-    run_parameter_sensitivity_analysis = None  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Per-chunk processing helpers
@@ -639,8 +633,7 @@ def _run_single_video(cfg, run_dir: Path, config_path: Path | None = None):
             if yolo_scan_results
             else None,
             search_window_seconds=cfg.get("adaptive_search_window_seconds", 10.0),
-            min_chunk_seconds=cfg.get("adaptive_min_chunk_seconds", 15),
-            max_chunk_seconds=cfg.get("adaptive_max_chunk_seconds", 90),
+            max_chunk_seconds=cfg.get("adaptive_max_chunk_seconds", 150),
         )
 
     # Exit early if yolo-scan-only mode
@@ -1125,7 +1118,9 @@ def _run_single_video(cfg, run_dir: Path, config_path: Path | None = None):
 
 def _run_batch(cfg, video_dir: Path, job_type: str):
     """Process all video files in video_dir, each in its own subdirectory."""
-    VIDEO_EXTENSIONS = {".mp4", ".avi", ".mov", ".mkv", ".m4v"}
+    VIDEO_EXTENSIONS = {
+        ext for e in [".mp4", ".avi", ".mov", ".mkv", ".m4v"] for ext in (e, e.upper())
+    }
     video_files = sorted(
         f
         for f in video_dir.iterdir()

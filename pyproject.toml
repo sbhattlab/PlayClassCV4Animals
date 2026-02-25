@@ -6,6 +6,10 @@ name = "chicken-behav-classifier"
 version = "0.1.0"
 requires-python = ">=3.11,<3.12"
 
+[tool.ruff.lint]
+# Suppress E402 "Module level import not at top of file" errors
+ignore = ["E402"]
+
 # =============================================================================
 # Pixi Workspace Configuration
 # =============================================================================
