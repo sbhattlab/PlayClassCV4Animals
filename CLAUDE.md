@@ -58,16 +58,16 @@ src/
   ethogram.py               # Behavior label parsing from Excel registration protocols
   dataset/                  # Dataset construction package
     __init__.py             # Package marker (no re-exports; import from submodules directly)
-    utils.py                # Shared helpers: fmt_time, _decode_rle_mask
-    tracking_issues.py      # ID switch detection, overlap detection, ID remapping, overlap removal
+    utils.py                # Shared helpers: fmt_time, get_video_fps, _decode_rle_mask
+    tracking_issues.py      # Detection: ID switches, mask overlaps, low-score periods
+    tracking_postprocessing.py  # Remediation: prefill from issues, ID-scoped trims, ID remaps, process_tracks
     labels.py               # Behaviour label parsing from Excel registration protocols
     features.py             # Handcrafted mask features: spatial, temporal, pairwise, summarization
     embeddings.py           # DINOv3 CLS-token embedding extraction from tracked objects
-    base.py                 # Glue: process_tracks (overlap removal + ID merge)
   debug/                    # Interactive debugging utilities and standalone grounding test script
 
 script/
-  preprocess.py                # Build tracking_issues.json per subdir, then build dataset (single-pass)
+  preprocess.py                # Detect issues, apply postprocessing, build dataset parquets (single-pass)
   compute_chunk_boundaries.py  # User script: recompute metrics + boundaries from existing yolo_tracking.parquet
   dlc2yolo/                    # DLC-to-YOLO format converter for pose dataset creation
   convert_video_clean.py       # Video format/resolution conversion utility
@@ -114,6 +114,9 @@ Auto-generated on each run, saved to `run_dir/visualizations/`: ID timeline (tra
 ## Data Layout
 
 - `data/` — Small test data (images, short video clips, DLC annotations, ethogram parquets)
+  - `data/labels/` — Registration protocols Excel files (behaviour labels + bird info)
+  - `data/tracking/` — Symlinks to tracking run output dirs (gitignored)
+  - `data/postprocessing/` — Version-controlled copies of per-video JSONs (`tracking_postprocessing.json`, `tracking_issues.json`, `bird_info.json`, `chunk_info.json`), organized as `{run_id}/{video_subdir}/`
 - `ext-data/` — Symlink to `/mnt/birds/rebecca2025/` (longer videos, output results, image sequences)
   - `ext-data/test/batch_mode_test_set/` — 3 × 2-min clips (`test_video_1/2/3.mp4`) for batch mode testing
 - `video-data/` — Symlink to `/mnt/birds/rebecca2025/raw` (raw video files)
@@ -126,6 +129,32 @@ Auto-generated on each run, saved to `run_dir/visualizations/`: ID timeline (tra
 - supervision, loguru, OmegaConf, pycocotools, matplotlib
 - ultralytics (YOLO scan)
 - scikit-learn (legacy KMeans in `src/utils.py`, used only by `viz.py`)
+
+## Preprocessing Pipeline
+
+`script/preprocess.py` builds the dataset from tracking outputs in two passes:
+
+```sh
+# Pass 1: detect issues, generate tracking_postprocessing.json templates
+pixi run -e sam3-hf preprocess \
+    --tracking-dir data/tracking/20260225_214929_sam3_hf \
+    --label-dir data/labels
+
+# Manually fill in "to" (id_switch) and "tracking_id" (id_match) fields
+# in each tracking_postprocessing.json
+
+# Pass 2: validate, apply postprocessing, save dataset
+pixi run -e sam3-hf preprocess \
+    --tracking-dir data/tracking/20260225_214929_sam3_hf \
+    --label-dir data/labels
+```
+
+Per-video JSON files (`tracking_postprocessing.json`) support three entry types:
+- **`trim`** — Remove track rows in a frame range, optionally scoped to one ID. Causes: `overlap`, `low_score`, `merged_object`.
+- **`id_switch`** — Remap `from` ID to `to` ID for all rows before `frame` (merges split tracks).
+- **`id_match`** — Rename tracker `tracking_id` to real `protocol_id` (bird identity).
+
+Output: `dataset_tracks.parquet` + `dataset_labels.parquet` saved to the tracking dir. JSON files are copied to `data/postprocessing/` for version control.
 
 ## Utilities
 
@@ -197,7 +226,7 @@ Outputs saved to `{output_dir}/{timestamp}_yolo_scan/`.
 
 ## Linting
 
-Ruff is available as a workspace dependency:
+Ruff is available as a workspace dependency. **Do not run ruff automatically** — the user handles linting manually.
 
 ```sh
 pixi run ruff check src/ script/
