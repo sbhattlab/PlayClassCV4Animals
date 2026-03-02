@@ -56,10 +56,18 @@ src/
   chunk_boundaries.py       # Per-frame metrics, occlusion detection, separation windows, adaptive chunking
   yolo_scan.py              # YOLO inference only (run_yolo_scan); re-exports src.chunk_boundaries for compat
   ethogram.py               # Behavior label parsing from Excel registration protocols
-  preprocessing.py          # Behavior label alignment, tracking-behavior dataset construction
+  dataset/                  # Dataset construction package
+    __init__.py             # Package marker (no re-exports; import from submodules directly)
+    utils.py                # Shared helpers: fmt_time, _decode_rle_mask
+    tracking_issues.py      # ID switch detection, overlap detection, ID remapping, overlap removal
+    labels.py               # Behaviour label parsing from Excel registration protocols
+    features.py             # Handcrafted mask features: spatial, temporal, pairwise, summarization
+    embeddings.py           # DINOv3 CLS-token embedding extraction from tracked objects
+    base.py                 # Glue: process_tracks (overlap removal + ID merge)
   debug/                    # Interactive debugging utilities and standalone grounding test script
 
 script/
+  preprocess.py                # Build tracking_issues.json per subdir, then build dataset (single-pass)
   compute_chunk_boundaries.py  # User script: recompute metrics + boundaries from existing yolo_tracking.parquet
   dlc2yolo/                    # DLC-to-YOLO format converter for pose dataset creation
   convert_video_clean.py       # Video format/resolution conversion utility
