@@ -1,27 +1,9 @@
-"""Tracking issue detection: ID switches, mask overlaps, and remediation."""
+"""Tracking issue detection: ID switches, mask overlaps."""
 
 from collections import defaultdict
 from itertools import combinations
-from pathlib import Path
 
-import numpy as np
-import pandas as pd
 import pycocotools.mask as mask_util
-from loguru import logger
-
-from .utils import fmt_time
-
-
-def get_video_fps(tracking_dir):
-    """Read video FPS from yolo_scan_summary.parquet in the tracking dir. Fall back to 25.0."""
-    tracking_dir = Path(tracking_dir)
-    summary_path = tracking_dir / "metrics" / "yolo_scan_summary.parquet"
-    if summary_path.exists():
-        summary = pd.read_parquet(summary_path)
-        if "fps" in summary.columns and len(summary) > 0:
-            return float(summary["fps"].iloc[0])
-    logger.warning(f"Could not read FPS from {summary_path}, falling back to 25.0")
-    return 25.0
 
 
 def detect_id_switches(tracks, fps):
@@ -132,6 +114,68 @@ def detect_overlaps(tracks, fps, iou_threshold=0.7, merge_gap_seconds=1.0):
     return events
 
 
+def detect_low_score_periods(
+    tracks, fps, score_threshold=0.8, min_duration_seconds=1.0, merge_gap_seconds=1.0
+):
+    """Find per-ID stretches where tracker_score stays below *score_threshold*.
+
+    Only periods lasting at least *min_duration_seconds* are reported.
+    Consecutive low-score blocks within *merge_gap_seconds* are merged.
+
+    Returns a dict keyed by ``"low_score0"``, ``"low_score1"``, etc.
+    """
+    merge_gap_frames = int(merge_gap_seconds * fps)
+    min_frames = int(min_duration_seconds * fps)
+
+    events = {}
+    idx = 0
+
+    for obj_id, grp in tracks.groupby(level="object_id"):
+        low = grp[grp["tracker_score"] < score_threshold]
+        if low.empty:
+            continue
+
+        frames = sorted(low.index.get_level_values("frame_idx"))
+
+        # Build consecutive blocks
+        blocks = []
+        blk_start = blk_end = frames[0]
+        for f in frames[1:]:
+            if f <= blk_end + 1:
+                blk_end = f
+            else:
+                blocks.append((blk_start, blk_end))
+                blk_start = blk_end = f
+        blocks.append((blk_start, blk_end))
+
+        # Merge blocks within gap
+        merged = [blocks[0]]
+        for start, end in blocks[1:]:
+            if start - merged[-1][1] <= merge_gap_frames:
+                merged[-1] = (merged[-1][0], end)
+            else:
+                merged.append((start, end))
+
+        for start, end in merged:
+            if end - start + 1 < min_frames:
+                continue
+            n_low = sum(1 for f in frames if start <= f <= end)
+            total = len(grp.loc[start:end])
+            events[f"low_score{idx}"] = {
+                "start": int(start),
+                "end": int(end),
+                "start_time": round(start / fps, 2),
+                "end_time": round(end / fps, 2),
+                "id": int(obj_id),
+                "low_score_rows": n_low,
+                "total_rows": total,
+                "min_score": round(float(grp.loc[start:end, "tracker_score"].min()), 3),
+            }
+            idx += 1
+
+    return events
+
+
 def detect_tracking_issues(tracks, fps, iou_threshold=0.7, merge_gap_seconds=1.0):
     """Detect transitions and overlaps, merge into a unified tracking_issues dict.
 
@@ -141,6 +185,9 @@ def detect_tracking_issues(tracks, fps, iou_threshold=0.7, merge_gap_seconds=1.0
     id_switch_events = detect_id_switches(tracks, fps)
     overlap_events = detect_overlaps(
         tracks, fps, iou_threshold=iou_threshold, merge_gap_seconds=merge_gap_seconds
+    )
+    low_score_events = detect_low_score_periods(
+        tracks, fps, merge_gap_seconds=merge_gap_seconds
     )
 
     tracking_issues = {}
@@ -168,136 +215,15 @@ def detect_tracking_issues(tracks, fps, iou_threshold=0.7, merge_gap_seconds=1.0
             "gained": ev["gained"],
         }
 
+    for name, ev in low_score_events.items():
+        tracking_issues[name] = {
+            "type": "low_score",
+            **ev,
+        }
+
     # Sort by start frame
     tracking_issues = dict(
         sorted(tracking_issues.items(), key=lambda kv: kv[1]["start"])
     )
 
     return tracking_issues
-
-
-def prefill_id_remaps(tracking_issues, fps=25.0):
-    """Build an ``id_remaps`` template from detected ID switch events.
-
-    For each gained ID in a switch event, creates an entry with ``"to"``
-    set to ``null`` for the user to fill in.
-
-    Parameters
-    ----------
-    tracking_issues : dict
-        Output of :func:`detect_tracking_issues`.
-    fps : float
-        Video frame rate (used for the ``_time`` hint).
-
-    Returns
-    -------
-    list[dict]
-        List of remap entries ready to be written to ``id_remaps.json``.
-        Each has ``frame``, ``from``, ``to`` (null), and ``_time`` (hint).
-    """
-    remaps = []
-    for ev in tracking_issues.values():
-        if ev["type"] != "id_switch":
-            continue
-        for gained_id in ev.get("gained", []):
-            remaps.append(
-                {
-                    "frame": ev["start"],
-                    "from": gained_id,
-                    "to": None,
-                    "_time": fmt_time(ev["start"], fps),
-                }
-            )
-    return remaps
-
-
-def remove_overlaps(tracks, issues, labels):
-    overlap_events = [v for v in issues.values() if v["type"] == "overlap"]
-
-    # 1. tracks: drop rows for the overlapping IDs within the overlap frame range
-    frame_idx = tracks.index.get_level_values("frame_idx")
-    object_id = tracks.index.get_level_values("object_id")
-
-    tracks_mask = np.zeros(len(tracks), dtype=bool)
-    for ev in overlap_events:
-        tracks_mask |= (
-            (frame_idx >= ev["start"])
-            & (frame_idx <= ev["end"])
-            & np.isin(object_id, ev["ids"])
-        )
-
-    tracks_dropped = tracks_mask.sum()
-    tracks = tracks[~tracks_mask]
-
-    # 2. labels: drop all birds' rows whose 5s window [t-5, t] intersects any overlap period
-    #    (no bird_id <-> object_id mapping yet, so we must drop all birds)
-    labels_mask = pd.Series(False, index=labels.index)
-    for ev in overlap_events:
-        # window [t-5, t] intersects [start, end] when t > start and t-5 < end
-        labels_mask |= (labels["time"] > ev["start_time"]) & (
-            labels["time"] - 5 < ev["end_time"]
-        )
-
-    labels_dropped = labels_mask.sum()
-    labels = labels[~labels_mask]
-
-    print(f"tracks: dropped {tracks_dropped} rows -> {len(tracks)} remaining")
-    print(f"labels: dropped {labels_dropped} rows -> {len(labels)} remaining")
-    for ev in overlap_events:
-        dur = ev["end_time"] - ev["start_time"]
-        print(
-            f"  IDs {ev['ids']}: {fmt_time(ev['start'])} - {fmt_time(ev['end'])} ({dur:.1f}s)"
-        )
-
-    return tracks, labels
-
-
-def merge_id_on_switch(tracks, id_remaps):
-    """Remap object IDs across switch events to produce continuous per-bird tracks.
-
-    Parameters
-    ----------
-    tracks : pd.DataFrame
-        Tracking outputs with MultiIndex ``["frame_idx", "object_id"]``.
-    id_remaps : list[dict]
-        Each entry has ``"frame"`` (int), ``"from"`` (int), ``"to"`` (int).
-        All rows with ``object_id == from`` at ``frame_idx >= frame`` are
-        remapped to ``to``.  Remaps are applied in order, so later entries
-        can build on earlier ones.
-
-        Example::
-
-            [
-                {"frame": 1547, "from": 1, "to": 4},
-                {"frame": 3200, "from": 6, "to": 0}
-            ]
-
-    Returns
-    -------
-    pd.DataFrame
-        Tracks with the same columns but updated ``object_id`` index.
-    """
-    if not id_remaps:
-        return tracks
-
-    df = tracks.reset_index()
-
-    for remap in id_remaps:
-        frame = remap["frame"]
-        id_from = remap["from"]
-        id_to = remap["to"]
-
-        mask = (df["frame_idx"] >= frame) & (df["object_id"] == id_from)
-        n = mask.sum()
-        if n == 0:
-            logger.warning(
-                f"ID remap {id_from}→{id_to} at frame {frame}: no matching rows"
-            )
-            continue
-        df.loc[mask, "object_id"] = id_to
-        logger.info(
-            f"Remapped {n} rows: object_id {id_from}→{id_to} from frame {frame}"
-        )
-
-    df = df.set_index(["frame_idx", "object_id"]).sort_index()
-    return df

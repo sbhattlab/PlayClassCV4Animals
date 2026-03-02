@@ -1,6 +1,7 @@
 """
-Build tracking_issues.json and id_remaps.json for each tracking subdirectory,
-then build the dataset in a single pass (no redundant disk re-reads).
+Build tracking_issues.json and tracking_postprocessing.json for each tracking
+subdirectory, then build the dataset in a single pass (no redundant disk
+re-reads).
 
 Given a batch tracking directory (containing per-video subdirectories, each with
 ``tracking_outputs.parquet``), this script:
@@ -11,18 +12,20 @@ Given a batch tracking directory (containing per-video subdirectories, each with
    a. Reads FPS from ``yolo_scan_summary.parquet`` (falls back to 25.0)
    b. Loads ``tracking_outputs.parquet``
    c. Detects ID transitions and mask overlaps → ``tracking_issues.json``
-   d. Creates or loads ``id_remaps.json``; if any ``to`` values are null, stops.
+   d. Creates or loads ``tracking_postprocessing.json``; if any remap ``to``
+      values are null, stops.
 4. Once all remaps are filled in, runs ``process_tracks`` on the in-memory data
    and concatenates the results.
 
 Typical workflow::
 
-    # First run: generates tracking_issues.json + id_remaps.json templates
+    # First run: generates tracking_issues.json + tracking_postprocessing.json
     pixi run -e sam3-hf python -m script.preprocess \\
         --tracking-dir data/tracking/20260225_214929_sam3_hf \\
         --label-dir data/labels
 
-    # Manually fill in "to" values in each id_remaps.json
+    # Manually fill in "to" values and add trim entries in each
+    # tracking_postprocessing.json
 
     # Second run: validates remaps, builds dataset
     pixi run -e sam3-hf python -m script.preprocess \\
@@ -38,15 +41,14 @@ from pathlib import Path
 import pandas as pd
 from loguru import logger
 
-from src.dataset.base import process_tracks
 from src.dataset.labels import process_labels
-from src.dataset.tracking_issues import (
-    detect_tracking_issues,
-    get_video_fps,
-    prefill_id_remaps,
+from src.dataset.tracking_issues import detect_tracking_issues
+from src.dataset.tracking_postprocessing import (
+    check_postprocessing,
+    prefill_postprocessing,
+    process_tracks,
 )
-from src.dataset.utils import fmt_time
-
+from src.dataset.utils import fmt_time, get_video_fps
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -67,7 +69,11 @@ def _log_issues(issues, fps):
     """Log a summary of detected tracking issues."""
     n_switches = sum(1 for v in issues.values() if v["type"] == "id_switch")
     n_overlaps = sum(1 for v in issues.values() if v["type"] == "overlap")
-    logger.info(f"  Found {n_switches} ID switch(es), {n_overlaps} overlap(s)")
+    n_low = sum(1 for v in issues.values() if v["type"] == "low_score")
+    logger.info(
+        f"  Found {n_switches} ID switch(es), {n_overlaps} overlap(s), "
+        f"{n_low} low-score period(s)"
+    )
 
     for name, ev in issues.items():
         if ev["type"] == "overlap":
@@ -76,6 +82,14 @@ def _log_issues(issues, fps):
                 f"    {name}: IDs {ev['ids']}  "
                 f"{fmt_time(ev['start'], fps)} - {fmt_time(ev['end'], fps)}  "
                 f"({dur:.1f}s)"
+            )
+        elif ev["type"] == "low_score":
+            dur = ev["end_time"] - ev["start_time"]
+            logger.info(
+                f"    {name}: ID {ev['id']}  "
+                f"{fmt_time(ev['start'], fps)} - {fmt_time(ev['end'], fps)}  "
+                f"({dur:.1f}s, min_score={ev['min_score']:.3f}, "
+                f"{ev['low_score_rows']}/{ev['total_rows']} rows)"
             )
         else:
             logger.info(
@@ -93,7 +107,8 @@ def process_tracking_subdir(tracking_dir, bird_info):
     dict
         ``tracks``: DataFrame from tracking_outputs.parquet
         ``issues``: detected tracking issues dict
-        ``remaps``: id_remaps list (may contain unfilled entries)
+        ``postprocessing``: list of postprocessing entries (trims + remaps)
+        ``fps``: video FPS
         ``ready``: True if all remaps have ``to`` values filled in
     """
     tracking_dir = Path(tracking_dir)
@@ -120,25 +135,35 @@ def process_tracking_subdir(tracking_dir, bird_info):
     else:
         logger.warning(f"  No bird info matched for {tracking_dir.name}")
 
-    # Load or create id_remaps.json
-    remap_path = tracking_dir / "id_remaps.json"
-    if remap_path.exists():
-        remaps = _load_json(remap_path)
-        logger.info(f"  id_remaps.json already exists ({len(remaps)} entry/ies)")
+    # Load or create tracking_postprocessing.json
+    pp_path = tracking_dir / "tracking_postprocessing.json"
+    if pp_path.exists():
+        postprocessing = _load_json(pp_path)
+        logger.info(
+            f"  tracking_postprocessing.json already exists "
+            f"({len(postprocessing)} entry/ies)"
+        )
     else:
-        remaps = prefill_id_remaps(issues, fps)
-        _save_json(remap_path, remaps)
-        logger.info(f"  Created id_remaps.json with {len(remaps)} template(s)")
+        postprocessing = prefill_postprocessing(issues, tracks, video_birds, fps)
+        _save_json(pp_path, postprocessing)
+        logger.info(
+            f"  Created tracking_postprocessing.json with "
+            f"{len(postprocessing)} template(s)"
+        )
 
-    unfilled = sum(1 for r in remaps if r.get("to") is None)
-    if unfilled:
-        logger.warning(f"  {unfilled} unfilled remap(s) in {tracking_dir.name}")
+    # Check readiness
+    try:
+        check_postprocessing(postprocessing)
+        ready = True
+    except ValueError as e:
+        logger.warning(f"  {tracking_dir.name}: {e}")
+        ready = False
 
     return {
         "tracks": tracks,
-        "issues": issues,
-        "remaps": remaps,
-        "ready": unfilled == 0,
+        "postprocessing": postprocessing,
+        "fps": fps,
+        "ready": ready,
     }
 
 
@@ -176,7 +201,7 @@ def main():
         return
     logger.info(f"Found {len(label_files)} label file(s)")
 
-    # 2. Parse labels + bird info (once)
+    # 2. Parse labels + bird info
     labels, bird_info = process_labels(label_files)
 
     # 3. Discover tracking subdirs
@@ -192,7 +217,10 @@ def main():
     results = [process_tracking_subdir(d, bird_info) for d in tracking_dirs]
 
     if not all(r["ready"] for r in results):
-        logger.warning("Cannot build dataset — fill in 'to' fields, then re-run.")
+        logger.warning(
+            "Cannot build dataset — fill in 'to' (id_switch) and "
+            "'tracking_id' (id_match) fields, then re-run."
+        )
         return
 
     # 5. Build dataset from in-memory data
@@ -201,14 +229,22 @@ def main():
     for r in results:
         tracks_clean, labels = process_tracks(
             tracks=r["tracks"],
-            issues=r["issues"],
             labels=labels,
-            id_remaps=r["remaps"],
+            postprocessing=r["postprocessing"],
+            fps=r["fps"],
         )
         all_tracks.append(tracks_clean)
 
     tracks = pd.concat(all_tracks, ignore_index=True)
     logger.info(f"Dataset built: {len(tracks)} track rows, {len(labels)} label rows")
+
+    # 6. Save dataset
+    tracks.to_parquet(args.tracking_dir / "dataset_tracks.parquet")
+    labels.to_parquet(args.tracking_dir / "dataset_labels.parquet")
+    logger.info(
+        f"Saved dataset_tracks.parquet and dataset_labels.parquet "
+        f"to {args.tracking_dir}"
+    )
 
 
 if __name__ == "__main__":

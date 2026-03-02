@@ -1,4 +1,24 @@
+from pathlib import Path
+
+import pandas as pd
 import pycocotools.mask as mask_util
+from loguru import logger
+
+DEFAULT_FPS = 25.0
+
+
+def get_video_fps(tracking_dir):
+    """Read video FPS from yolo_scan_summary.parquet in the tracking dir."""
+    tracking_dir = Path(tracking_dir)
+    summary_path = tracking_dir / "metrics" / "yolo_scan_summary.parquet"
+    if summary_path.exists():
+        summary = pd.read_parquet(summary_path)
+        if "fps" in summary.columns and len(summary) > 0:
+            return float(summary["fps"].iloc[0])
+    logger.warning(
+        f"Could not read FPS from {summary_path}, falling back to {DEFAULT_FPS}"
+    )
+    return DEFAULT_FPS
 
 
 def fmt_time(frame_idx, fps=25.0):
