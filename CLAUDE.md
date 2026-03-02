@@ -1,5 +1,7 @@
 # CLAUDE.md
 
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
 ## Project Overview
 
 Multi-object tracking and segmentation of chickens in video data using SAM3 (HuggingFace) with an optional YOLO scan for adaptive chunking. Processes long videos by chunking them, running text-prompted segmentation on the first chunk, then propagating tracks via point prompts across subsequent chunks.
@@ -17,7 +19,7 @@ pixi install -e sam3-hf        # SAM3 HuggingFace (main pipeline)
 pixi shell -e sam3-hf          # Enter shell
 ```
 
-Other environments exist (`sam3-native`, `gs2`, macOS variants) but are not actively used. CUDA environments are Linux-only.
+Other environments exist (`sam3-native`, `gs2`, `yolo`) but are not actively used. Platform is Linux-only (CUDA 12.6).
 
 ## Running Scripts
 
@@ -37,7 +39,7 @@ CUDA_VISIBLE_DEVICES=1 pixi run test-sam3-hf-image  # Single image inference
 CUDA_VISIBLE_DEVICES=1 pixi run test-sam3-hf-video  # Video chunking test
 ```
 
-Tests are standalone scripts in `test/`, not pytest-based.
+Tests are standalone scripts in `src/test/`, not pytest-based. Pixi tasks invoke them as `python -m test.<name>` (the `src/` package root is on the module path).
 
 ## Architecture
 
@@ -47,16 +49,24 @@ script/sam3/
 
 src/
   utils.py                  # Config/logging/output dirs, chunking, parquet export, video annotation
+  processing.py             # Mask/bbox/point extraction, tracking output normalization
+  grounding.py              # Text-prompt grounding, best-frame selection, ID matching
   metrics.py                # Tracking metrics: mask-based, per-frame, per-id, per-run, summary
   viz.py                    # Visualizations: ID timeline, dashboard, score plots, mask evolution, prompt points
   chunk_boundaries.py       # Per-frame metrics, occlusion detection, separation windows, adaptive chunking
   yolo_scan.py              # YOLO inference only (run_yolo_scan); re-exports src.chunk_boundaries for compat
+  ethogram.py               # Behavior label parsing from Excel registration protocols
+  preprocessing.py          # Behavior label alignment, tracking-behavior dataset construction
+  debug/                    # Interactive debugging utilities and standalone grounding test script
 
 script/
   compute_chunk_boundaries.py  # User script: recompute metrics + boundaries from existing yolo_tracking.parquet
+  dlc2yolo/                    # DLC-to-YOLO format converter for pose dataset creation
+  convert_video_clean.py       # Video format/resolution conversion utility
 
 config/                     # YAML configs (OmegaConf)
-test/                       # Test scripts (run via pixi tasks)
+  video_specific/            # Per-video configs with tuned manual_chunk_frames
+src/test/                   # Test scripts (run via pixi tasks)
 notebook/                   # Jupyter notebooks for EDA and demos
 ```
 
@@ -69,7 +79,7 @@ notebook/                   # Jupyter notebooks for EDA and demos
 - **Two model phases**: `Sam3VideoModel` (text→segmentation) for initialization, `Sam3TrackerVideoModel` (point→tracking) for propagation. Each chunk loads its model fresh and cleans up GPU memory afterwards (`free_gpu_memory()` with triple `gc.collect` + CUDA cache clearing).
 - **Adaptive chunking (YOLO scan)**: When `use_adaptive_chunking: true`, `run_yolo_scan()` (in `src/yolo_scan.py`) runs YOLO tracking on the full video and returns a raw `yolo_df`. Analysis — `compute_yolo_per_frame_metrics()` → `identify_occlusion_periods()` → `find_high_separation_windows()` — lives in `src/chunk_boundaries.py`. `chunk_video_frames_adaptive()` refines boundaries in priority order — separation-first (highest separation_score inside a high-separation window), then occlusion avoidance (farthest from occlusion with 90%/50% directional penalties), validated against `adaptive_max_chunk_seconds`. Scan outputs saved as `yolo_tracking.parquet`, `yolo_scan_metrics.parquet`, `yolo_scan_summary.parquet`. A `yolo_scan:` config section controls model, thresholds, and tracker config. To reanalyse boundaries without re-running YOLO, use `script/compute_chunk_boundaries.py`.
 - **Manual chunking**: Set `manual_chunk_frames` to a list of `[start, end]` pairs to override fixed/adaptive chunking entirely. First pair → `Sam3VideoModel`; subsequent → `Sam3TrackerVideoModel`. Disables `yolo_scan_only`/`use_adaptive_chunking` with warnings. See `build_manual_chunks()` in `src/utils.py` and `config/sam3_hf_manual_chunking.yaml`.
-- **Batch processing**: Set `video_dir` instead of `video_path` to process all videos in a directory. Each video gets its own subdirectory under a shared timestamped batch dir. Errors caught per-video. `manual_chunk_frames` accepts a dict keyed by **basename** (e.g. `"video1.mp4": [[0,375],...]`) for per-video boundaries; unlisted videos use fixed chunking. See `config/batch_mode.yaml`.
+- **Batch processing**: Set `video_dir` instead of `video_path` to process all videos in a directory. Each video gets its own subdirectory under a shared timestamped batch dir. Errors caught per-video. `manual_chunk_frames` accepts a dict keyed by **basename** (e.g. `"video1.mp4": [[0,375],...]`) for per-video boundaries; unlisted videos use fixed chunking.
 - **Device selection**: `Accelerator().device` from HuggingFace Accelerate.
 
 ### Metrics module (`src/metrics.py`)
@@ -146,8 +156,10 @@ Default thresholds (`occlusion_iou_threshold: 0.15`, `high_occlusion_threshold: 
 ### YOLO-Scan-Only Mode
 
 ```sh
-pixi run yolo-scan  # uses config/yolo_scan_only.yaml
+pixi run -e sam3-hf python -m script.sam3.run_sam3_hf --config config/sam3_hf_yolo_scan_only.yaml
 ```
+
+Note: the pixi task `yolo-prescan` exists but references a non-existent config (`prescan_only.yaml`); use the command above instead.
 
 Outputs saved to `{output_dir}/{timestamp}_yolo_scan/`.
 
@@ -157,9 +169,9 @@ Outputs saved to `{output_dir}/{timestamp}_yolo_scan/`.
 |--------|---------|
 | `config/sam3_hf_config.yaml` | Main production config (single video, adaptive chunking on) |
 | `config/sam3_hf_manual_chunking.yaml` | SAM3-HF: single video with explicit `manual_chunk_frames` list |
+| `config/sam3_hf_yolo_scan_only.yaml` | YOLO scan only, no SAM3 |
 | `config/gs2_manual_chunking.yaml` | GS2: single video with explicit `manual_chunk_frames` list |
-| `config/batch_mode.yaml` | Batch mode (`video_dir`) with per-video `manual_chunk_frames` dict |
-| `config/yolo_scan_only.yaml` | YOLO scan only, no SAM3 |
+| `config/video_specific/*.yaml` | Per-video configs with tuned chunk boundaries (e.g., C1G1 day 28, C5G2 day 28) |
 
 ## TO-DO
 
@@ -175,5 +187,16 @@ Outputs saved to `{output_dir}/{timestamp}_yolo_scan/`.
   - Possible solution: placeholder name has `_incomplete` suffix, until completed, in which case the suffix is stripped.
 - Benchmark tracking performance using frame streaming vs frame preloading
 
-# Misc. notes
-- For whatever reason, Sam3 both hf-transformers and the native implementations are extremely unstable when being run in Jupyter Notebooks, and frequently kernel
+## Linting
+
+Ruff is available as a workspace dependency:
+
+```sh
+pixi run ruff check src/ script/
+pixi run ruff format src/ script/
+```
+
+## Misc. notes
+
+- SAM3 (both HF-transformers and native) is extremely unstable when run in Jupyter notebooks and frequently crashes the kernel. Prefer running SAM3 via scripts; for notebooks, load SAM3 first, free GPU memory, then load lighter models (e.g., DINOv3).
+- YOLO tracker configs live in `data/yolo/` (botsort, bytetrack variants); selected via `yolo_scan.tracker_config` in the YAML config.
