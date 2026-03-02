@@ -8,14 +8,10 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
-from src.processing import (
+from src.masks import (
     _normalize_frame_dict,
-    to_numpy,)
-
-
-# ---------------------------------------------------------------------------
-# Low-level metric helpers (moved from src.processing and src.yolo_scan)
-# ---------------------------------------------------------------------------
+    to_numpy,
+)
 
 
 def compute_bbox_iou(boxA, boxB) -> float:
@@ -318,7 +314,9 @@ def compute_per_frame_metrics(
 
         if n > 1:
             upper_dists = dist_matrix[np.triu_indices(n, k=1)]
-            min_dist = float(np.nanmin(upper_dists)) if len(upper_dists) else float("inf")
+            min_dist = (
+                float(np.nanmin(upper_dists)) if len(upper_dists) else float("inf")
+            )
             mean_dist = (
                 float(np.nanmean(upper_dists)) if len(upper_dists) else float("inf")
             )
@@ -326,7 +324,9 @@ def compute_per_frame_metrics(
             min_dist = float("inf")
             mean_dist = float("inf")
 
-        clust_coef = compute_clustering_coefficient(centroids, clustering_distance_threshold)
+        clust_coef = compute_clustering_coefficient(
+            centroids, clustering_distance_threshold
+        )
 
         # Mask IoU
         iou_matrix = compute_pairwise_maskcompute_bbox_iou(masks)
@@ -536,9 +536,7 @@ def compute_per_id_metrics(
         low_frac = low_total / span if span > 0 else 0.0
         self_iou = float(np.mean(id_self_ious[uid])) if id_self_ious.get(uid) else None
         spatial_continuity_iou = (
-            float(np.mean(id_spatial_ious[uid]))
-            if id_spatial_ious.get(uid)
-            else None
+            float(np.mean(id_spatial_ious[uid])) if id_spatial_ious.get(uid) else None
         )
         mean_area = (
             float(np.mean(id_bbox_areas[uid])) if id_bbox_areas.get(uid) else None
@@ -682,9 +680,9 @@ def compute_summary_metrics(
 
     summary = {
         "n_frames": int(n_frames),
-        "avg_detections_per_frame": float(np.mean(dets_per_frame))
-        if dets_per_frame
-        else 0.0,
+        "avg_detections_per_frame": (
+            float(np.mean(dets_per_frame)) if dets_per_frame else 0.0
+        ),
         "total_unique_ids": int(len(id_to_frames)),
         "mean_track_length": mean_track_length,
         f"persistence_rate_>={persistence_k}": persistence_rate,
