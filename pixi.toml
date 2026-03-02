@@ -68,6 +68,7 @@ test-sam3-hf-video = "python -m test.sam3_hf_basic_video"
 test-sam3-native-video = "python -m test.sam3_native_video"
 sam3-hf-tracker = "python -m script.sam3.run_sam3_hf"
 yolo-prescan = "python -m script.sam3.run_sam3_hf --config config/prescan_only.yaml"
+preprocess = "python -m script.preprocess"
 
 # ======= SAM3-native dependencies ======
 [feature.sam3-native.pypi-dependencies]
