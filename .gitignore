@@ -1,9 +1,3 @@
-model
-ext-data
-video-data
-*.pt
-.DS_Store
-sandbox/
 # Python-generated files
 __pycache__/
 *.py[oc]
@@ -12,8 +6,28 @@ dist/
 wheels/
 *.egg-info
 
+# VSCode settings
+*.code-workspace
+.vscode/
+
 # Virtual environments
 .venv
 # pixi environments
 .pixi/*
 !.pixi/config.toml
+
+# Models
+model/
+
+# Data
+ext-data/
+video-data/
+*.pt
+.DS_Store/
+sandbox/
+tracking/
+
+# Notes
+tmp/
+drafts*.ipynb
+notes/
