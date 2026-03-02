@@ -1,0 +1,132 @@
+[
+    {
+        "type": "trim",
+        "cause": "overlap",
+        "from": 0,
+        "to": 168,
+        "id": 3,
+        "_time": "00:00.00-00:08.00"
+    },
+    {
+        "type": "trim",
+        "cause": "low_score",
+        "from": 696,
+        "to": 768,
+        "id": 3,
+        "_time": "00:27.84-00:30.72"
+    },
+    {
+        "type": "trim",
+        "cause": "low_score",
+        "from": 912,
+        "to": 1152,
+        "id": 3,
+        "_time": "00:36.48-00:46.08"
+    },
+    {
+        "type": "trim",
+        "cause": "merged_object",
+        "from": 1488,
+        "to": 1560,
+        "id": 2,
+        "_time": "00:59.52-01:02.40"
+    },
+    {
+        "type": "trim",
+        "cause": "merged_object",
+        "from": 2208,
+        "to": 2322,
+        "id": 2,
+        "_time": "01:28.32-01:32.88"
+    },
+    {
+        "type": "trim",
+        "cause": "merged_object",
+        "from": 2952,
+        "to": 3120,
+        "id": 2,
+        "_time": "01:58.08-02:04.80"
+    },
+    {
+        "type": "trim",
+        "cause": "merged_object",
+        "from": 8880,
+        "to": 9264,
+        "id": 2,
+        "_time": "05:55.20-06:10.56"
+    },
+    {
+        "type": "trim",
+        "cause": "merged_object",
+        "from": 9504,
+        "to": 9720,
+        "id": 2,
+        "_time": "06:20.16-06:28.80"
+    },
+    {
+        "type": "id_switch",
+        "frame": 10306,
+        "from": 3,
+        "to": 0,
+        "_time": "06:52.25"
+    },
+    {
+        "type": "id_switch",
+        "frame": 13720,
+        "from": 2,
+        "to": 3,
+        "_time": "09:08.81"
+    },
+    {
+        "type": "trim",
+        "cause": "low_score",
+        "from": 13993,
+        "to": 14032,
+        "id": 4,
+        "_time": "09:19.73-09:21.29"
+    },
+    {
+        "type": "trim",
+        "cause": "overlap",
+        "from": 18216,
+        "to": 18576,
+        "id": 0,
+        "_time": "12:08.64-12:23.04"
+    },
+    {
+        "type": "trim",
+        "cause": "overlap",
+        "from": 19210,
+        "to": 19680,
+        "id": 0,
+        "_time": "12:48.41-13:07.21"
+    },
+    {
+        "type": "id_switch",
+        "frame": 19746,
+        "from": 3,
+        "to": 1,
+        "_time": "13:09.85"
+    },
+    {
+        "type": "id_match",
+        "protocol_id": 2678,
+        "description": "Blue right wing",
+        "tracking_id": 1,
+        "frame": null
+    },
+    {
+        "type": "id_match",
+        "protocol_id": 2772,
+        "description": "Pink right wing",
+        "tracking_id": 4,
+        "frame": null
+    },
+    {
+        "type": "id_match",
+        "protocol_id": 2774,
+        "description": "Dark brown",
+        "tracking_id": 0,
+        "frame": null
+    }
+]

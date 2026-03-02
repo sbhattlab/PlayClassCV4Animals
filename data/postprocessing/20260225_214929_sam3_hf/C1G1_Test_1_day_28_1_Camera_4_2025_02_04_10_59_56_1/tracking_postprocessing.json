@@ -1,0 +1,104 @@
+[
+    {
+        "type": "trim",
+        "cause": "overlap",
+        "from": 0,
+        "to": 1592,
+        "id": 4,
+        "_time": "00:04.24-01:03.67"
+    },
+    {
+        "type": "id_switch",
+        "frame": 1592,
+        "from": 7,
+        "to": 0,
+        "_time": "01:03.67"
+    },
+    {
+        "type": "id_switch",
+        "frame": 1592,
+        "from": 5,
+        "to": 4,
+        "_time": "01:03.67"
+    },
+    {
+        "type": "trim",
+        "cause": "low_score",
+        "from": 6000,
+        "to": 7025,
+        "id": 0,
+        "_time": "04:00.00-04:41.00"
+    },
+    {
+        "type": "trim",
+        "cause": "low_score",
+        "from": 12868,
+        "to": 13320,
+        "id": 5,
+        "_time": "08:34.60-08:52.68"
+    },
+    {
+        "type": "trim",
+        "cause": "low_score",
+        "from": 13332,
+        "to": 13361,
+        "id": 0,
+        "_time": "08:53.16-08:54.32"
+    },
+    {
+        "type": "trim",
+        "cause": "low_score",
+        "from": 18836,
+        "to": 18916,
+        "id": 0,
+        "_time": "12:33.26-12:35.18"
+    },
+    {
+        "type": "trim",
+        "cause": "overlap",
+        "from": 18916,
+        "to": 19671,
+        "id": 0,
+        "_time": "12:36.46-13:06.66"
+    },
+    {
+        "type": "id_switch",
+        "frame": 19672,
+        "from": 5,
+        "to": 0,
+        "_time": "13:06.70"
+    },
+    {
+        "type": "id_switch",
+        "frame": 19672,
+        "from": 0,
+        "to": 1,
+        "_time": "13:06.70"
+    },
+    {
+        "type": "trim",
+        "cause": "overlap",
+        "from": 22353,
+        "to": 22530,
+        "id": 4,
+        "_time": "14:53.91-15:00.99"
+    },
+    {
+        "type": "id_match",
+        "protocol_id": "2664",
+        "description": "White, blue head",
+        "tracking_id": 0
+    },
+    {
+        "type": "id_match",
+        "protocol_id": "2670",
+        "description": "Black",
+        "tracking_id": 1
+    },
+    {
+        "type": "id_match",
+        "protocol_id": "2780",
+        "description": "White, black head",
+        "tracking_id": 4
+    }
+]

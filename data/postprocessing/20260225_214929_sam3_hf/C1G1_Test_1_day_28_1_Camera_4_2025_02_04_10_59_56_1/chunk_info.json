@@ -1,0 +1,979 @@
+{
+  "chunks": [
+    {
+      "chunk_idx": 0,
+      "frame_range": [
+        0,
+        1547
+      ],
+      "model_type": "Sam3TrackerVideoModel",
+      "prompt_points": {
+        "4": [
+          [
+            555.0,
+            502.0
+          ],
+          [
+            581.0,
+            512.0
+          ],
+          [
+            607.0,
+            440.0
+          ]
+        ],
+        "5": [
+          [
+            508.0,
+            427.0
+          ],
+          [
+            535.0,
+            468.0
+          ],
+          [
+            560.0,
+            486.0
+          ]
+        ],
+        "7": [
+          [
+            472.0,
+            430.0
+          ],
+          [
+            498.0,
+            472.0
+          ],
+          [
+            532.0,
+            502.0
+          ]
+        ]
+      },
+      "num_objects_tracked": 3,
+      "source_frame_idx": null,
+      "fallback_reason": null,
+      "grounding_used": true,
+      "grounding_source_frame_idx": 77,
+      "grounding_num_objects": 3,
+      "grounding_fallback_reason": null,
+      "timing": {
+        "elapsed_seconds": 314.948,
+        "avg_seconds_per_frame": 0.2036,
+        "fps": 4.91,
+        "num_frames": 1547
+      }
+    },
+    {
+      "chunk_idx": 1,
+      "frame_range": [
+        1547,
+        3063
+      ],
+      "model_type": "Sam3TrackerVideoModel",
+      "prompt_points": {
+        "0": [
+          [
+            306.0,
+            184.0
+          ],
+          [
+            371.0,
+            183.0
+          ],
+          [
+            443.0,
+            225.0
+          ]
+        ],
+        "4": [
+          [
+            193.0,
+            348.0
+          ],
+          [
+            235.0,
+            266.0
+          ],
+          [
+            286.0,
+            249.0
+          ]
+        ],
+        "5": [
+          [
+            274.0,
+            442.0
+          ],
+          [
+            310.0,
+            476.0
+          ],
+          [
+            335.0,
+            482.0
+          ]
+        ]
+      },
+      "num_objects_tracked": 3,
+      "source_frame_idx": null,
+      "fallback_reason": null,
+      "grounding_used": true,
+      "grounding_source_frame_idx": 1592,
+      "grounding_num_objects": 3,
+      "grounding_fallback_reason": null,
+      "timing": {
+        "elapsed_seconds": 316.922,
+        "avg_seconds_per_frame": 0.2091,
+        "fps": 4.78,
+        "num_frames": 1516
+      }
+    },
+    {
+      "chunk_idx": 2,
+      "frame_range": [
+        3063,
+        4329
+      ],
+      "model_type": "Sam3TrackerVideoModel",
+      "prompt_points": {
+        "4": [
+          [
+            592.0,
+            246.0
+          ],
+          [
+            625.0,
+            299.0
+          ],
+          [
+            666.0,
+            315.0
+          ]
+        ],
+        "5": [
+          [
+            467.0,
+            126.0
+          ],
+          [
+            517.0,
+            160.0
+          ],
+          [
+            559.0,
+            160.0
+          ]
+        ],
+        "0": [
+          [
+            297.0,
+            316.0
+          ],
+          [
+            380.0,
+            275.0
+          ],
+          [
+            458.0,
+            272.0
+          ]
+        ]
+      },
+      "num_objects_tracked": 3,
+      "source_frame_idx": null,
+      "fallback_reason": null,
+      "grounding_used": true,
+      "grounding_source_frame_idx": 3063,
+      "grounding_num_objects": 3,
+      "grounding_fallback_reason": null,
+      "timing": {
+        "elapsed_seconds": 279.237,
+        "avg_seconds_per_frame": 0.2206,
+        "fps": 4.53,
+        "num_frames": 1266
+      }
+    },
+    {
+      "chunk_idx": 3,
+      "frame_range": [
+        4329,
+        6040
+      ],
+      "model_type": "Sam3TrackerVideoModel",
+      "prompt_points": {
+        "5": [
+          [
+            82.0,
+            154.0
+          ],
+          [
+            101.0,
+            147.0
+          ],
+          [
+            124.0,
+            141.0
+          ]
+        ],
+        "4": [
+          [
+            121.0,
+            251.0
+          ],
+          [
+            175.0,
+            278.0
+          ],
+          [
+            234.0,
+            318.0
+          ]
+        ],
+        "0": [
+          [
+            207.0,
+            149.0
+          ],
+          [
+            285.0,
+            141.0
+          ],
+          [
+            360.0,
+            173.0
+          ]
+        ]
+      },
+      "num_objects_tracked": 3,
+      "source_frame_idx": null,
+      "fallback_reason": null,
+      "grounding_used": true,
+      "grounding_source_frame_idx": 4329,
+      "grounding_num_objects": 3,
+      "grounding_fallback_reason": null,
+      "timing": {
+        "elapsed_seconds": 363.728,
+        "avg_seconds_per_frame": 0.2126,
+        "fps": 4.7,
+        "num_frames": 1711
+      }
+    },
+    {
+      "chunk_idx": 4,
+      "frame_range": [
+        6040,
+        7456
+      ],
+      "model_type": "Sam3TrackerVideoModel",
+      "prompt_points": {
+        "5": [
+          [
+            81.0,
+            123.0
+          ],
+          [
+            106.0,
+            124.0
+          ],
+          [
+            125.0,
+            141.0
+          ]
+        ],
+        "4": [
+          [
+            43.0,
+            133.0
+          ],
+          [
+            63.0,
+            150.0
+          ],
+          [
+            84.0,
+            132.0
+          ]
+        ],
+        "0": [
+          [
+            60.0,
+            91.0
+          ],
+          [
+            109.0,
+            88.0
+          ],
+          [
+            168.0,
+            103.0
+          ]
+        ]
+      },
+      "num_objects_tracked": 3,
+      "source_frame_idx": 6039,
+      "fallback_reason": null,
+      "grounding_used": false,
+      "grounding_source_frame_idx": null,
+      "grounding_num_objects": 0,
+      "grounding_fallback_reason": "insufficient_objects",
+      "timing": {
+        "elapsed_seconds": 303.089,
+        "avg_seconds_per_frame": 0.214,
+        "fps": 4.67,
+        "num_frames": 1416
+      }
+    },
+    {
+      "chunk_idx": 5,
+      "frame_range": [
+        7456,
+        8847
+      ],
+      "model_type": "Sam3TrackerVideoModel",
+      "prompt_points": {
+        "5": [
+          [
+            228.0,
+            319.0
+          ],
+          [
+            285.0,
+            344.0
+          ],
+          [
+            342.0,
+            406.0
+          ]
+        ],
+        "0": [
+          [
+            533.0,
+            319.0
+          ],
+          [
+            569.0,
+            365.0
+          ],
+          [
+            592.0,
+            338.0
+          ]
+        ],
+        "4": [
+          [
+            429.0,
+            495.0
+          ],
+          [
+            462.0,
+            439.0
+          ],
+          [
+            498.0,
+            429.0
+          ]
+        ]
+      },
+      "num_objects_tracked": 3,
+      "source_frame_idx": null,
+      "fallback_reason": null,
+      "grounding_used": true,
+      "grounding_source_frame_idx": 7456,
+      "grounding_num_objects": 3,
+      "grounding_fallback_reason": null,
+      "timing": {
+        "elapsed_seconds": 302.357,
+        "avg_seconds_per_frame": 0.2174,
+        "fps": 4.6,
+        "num_frames": 1391
+      }
+    },
+    {
+      "chunk_idx": 6,
+      "frame_range": [
+        8847,
+        10413
+      ],
+      "model_type": "Sam3TrackerVideoModel",
+      "prompt_points": {
+        "4": [
+          [
+            379.0,
+            165.0
+          ],
+          [
+            426.0,
+            145.0
+          ],
+          [
+            471.0,
+            95.0
+          ]
+        ],
+        "0": [
+          [
+            366.0,
+            361.0
+          ],
+          [
+            405.0,
+            274.0
+          ],
+          [
+            438.0,
+            288.0
+          ]
+        ],
+        "5": [
+          [
+            98.0,
+            178.0
+          ],
+          [
+            156.0,
+            160.0
+          ],
+          [
+            211.0,
+            160.0
+          ]
+        ]
+      },
+      "num_objects_tracked": 3,
+      "source_frame_idx": null,
+      "fallback_reason": null,
+      "grounding_used": true,
+      "grounding_source_frame_idx": 8856,
+      "grounding_num_objects": 3,
+      "grounding_fallback_reason": null,
+      "timing": {
+        "elapsed_seconds": 334.15,
+        "avg_seconds_per_frame": 0.2134,
+        "fps": 4.69,
+        "num_frames": 1566
+      }
+    },
+    {
+      "chunk_idx": 7,
+      "frame_range": [
+        10413,
+        11895
+      ],
+      "model_type": "Sam3TrackerVideoModel",
+      "prompt_points": {
+        "5": [
+          [
+            522.0,
+            161.0
+          ],
+          [
+            564.0,
+            180.0
+          ],
+          [
+            609.0,
+            227.0
+          ]
+        ],
+        "0": [
+          [
+            328.0,
+            280.0
+          ],
+          [
+            393.0,
+            263.0
+          ],
+          [
+            464.0,
+            229.0
+          ]
+        ],
+        "4": [
+          [
+            383.0,
+            381.0
+          ],
+          [
+            420.0,
+            389.0
+          ],
+          [
+            449.0,
+            419.0
+          ]
+        ]
+      },
+      "num_objects_tracked": 3,
+      "source_frame_idx": null,
+      "fallback_reason": null,
+      "grounding_used": true,
+      "grounding_source_frame_idx": 10413,
+      "grounding_num_objects": 3,
+      "grounding_fallback_reason": null,
+      "timing": {
+        "elapsed_seconds": 319.787,
+        "avg_seconds_per_frame": 0.2158,
+        "fps": 4.63,
+        "num_frames": 1482
+      }
+    },
+    {
+      "chunk_idx": 8,
+      "frame_range": [
+        11895,
+        13377
+      ],
+      "model_type": "Sam3TrackerVideoModel",
+      "prompt_points": {
+        "4": [
+          [
+            121.0,
+            254.0
+          ],
+          [
+            144.0,
+            264.0
+          ],
+          [
+            170.0,
+            236.0
+          ]
+        ],
+        "0": [
+          [
+            43.0,
+            254.0
+          ],
+          [
+            80.0,
+            203.0
+          ],
+          [
+            113.0,
+            165.0
+          ]
+        ],
+        "5": [
+          [
+            43.0,
+            108.0
+          ],
+          [
+            91.0,
+            94.0
+          ],
+          [
+            142.0,
+            131.0
+          ]
+        ]
+      },
+      "num_objects_tracked": 3,
+      "source_frame_idx": null,
+      "fallback_reason": null,
+      "grounding_used": true,
+      "grounding_source_frame_idx": 11930,
+      "grounding_num_objects": 3,
+      "grounding_fallback_reason": null,
+      "timing": {
+        "elapsed_seconds": 312.463,
+        "avg_seconds_per_frame": 0.2108,
+        "fps": 4.74,
+        "num_frames": 1482
+      }
+    },
+    {
+      "chunk_idx": 9,
+      "frame_range": [
+        13377,
+        15096
+      ],
+      "model_type": "Sam3TrackerVideoModel",
+      "prompt_points": {
+        "0": [
+          [
+            504.0,
+            489.0
+          ],
+          [
+            557.0,
+            455.0
+          ],
+          [
+            612.0,
+            393.0
+          ]
+        ],
+        "4": [
+          [
+            303.0,
+            355.0
+          ],
+          [
+            367.0,
+            305.0
+          ],
+          [
+            434.0,
+            285.0
+          ]
+        ],
+        "5": [
+          [
+            295.0,
+            66.0
+          ],
+          [
+            361.0,
+            109.0
+          ],
+          [
+            411.0,
+            92.0
+          ]
+        ]
+      },
+      "num_objects_tracked": 3,
+      "source_frame_idx": null,
+      "fallback_reason": null,
+      "grounding_used": true,
+      "grounding_source_frame_idx": 13378,
+      "grounding_num_objects": 3,
+      "grounding_fallback_reason": null,
+      "timing": {
+        "elapsed_seconds": 364.676,
+        "avg_seconds_per_frame": 0.2121,
+        "fps": 4.71,
+        "num_frames": 1719
+      }
+    },
+    {
+      "chunk_idx": 10,
+      "frame_range": [
+        15096,
+        16455
+      ],
+      "model_type": "Sam3TrackerVideoModel",
+      "prompt_points": {
+        "5": [
+          [
+            154.0,
+            86.0
+          ],
+          [
+            197.0,
+            132.0
+          ],
+          [
+            230.0,
+            154.0
+          ]
+        ],
+        "4": [
+          [
+            87.0,
+            132.0
+          ],
+          [
+            116.0,
+            127.0
+          ],
+          [
+            144.0,
+            142.0
+          ]
+        ],
+        "0": [
+          [
+            225.0,
+            99.0
+          ],
+          [
+            299.0,
+            136.0
+          ],
+          [
+            370.0,
+            133.0
+          ]
+        ]
+      },
+      "num_objects_tracked": 3,
+      "source_frame_idx": null,
+      "fallback_reason": null,
+      "grounding_used": true,
+      "grounding_source_frame_idx": 15096,
+      "grounding_num_objects": 3,
+      "grounding_fallback_reason": null,
+      "timing": {
+        "elapsed_seconds": 296.25,
+        "avg_seconds_per_frame": 0.218,
+        "fps": 4.59,
+        "num_frames": 1359
+      }
+    },
+    {
+      "chunk_idx": 11,
+      "frame_range": [
+        16455,
+        18142
+      ],
+      "model_type": "Sam3TrackerVideoModel",
+      "prompt_points": {
+        "4": [
+          [
+            79.0,
+            440.0
+          ],
+          [
+            102.0,
+            497.0
+          ],
+          [
+            130.0,
+            468.0
+          ]
+        ],
+        "5": [
+          [
+            53.0,
+            232.0
+          ],
+          [
+            75.0,
+            218.0
+          ],
+          [
+            97.0,
+            231.0
+          ]
+        ],
+        "0": [
+          [
+            112.0,
+            108.0
+          ],
+          [
+            178.0,
+            121.0
+          ],
+          [
+            245.0,
+            107.0
+          ]
+        ]
+      },
+      "num_objects_tracked": 3,
+      "source_frame_idx": null,
+      "fallback_reason": null,
+      "grounding_used": true,
+      "grounding_source_frame_idx": 16455,
+      "grounding_num_objects": 3,
+      "grounding_fallback_reason": null,
+      "timing": {
+        "elapsed_seconds": 358.739,
+        "avg_seconds_per_frame": 0.2126,
+        "fps": 4.7,
+        "num_frames": 1687
+      }
+    },
+    {
+      "chunk_idx": 12,
+      "frame_range": [
+        18142,
+        19672
+      ],
+      "model_type": "Sam3TrackerVideoModel",
+      "prompt_points": {
+        "4": [
+          [
+            489.0,
+            415.0
+          ],
+          [
+            516.0,
+            410.0
+          ],
+          [
+            555.0,
+            467.0
+          ]
+        ],
+        "5": [
+          [
+            411.0,
+            467.0
+          ],
+          [
+            459.0,
+            483.0
+          ],
+          [
+            506.0,
+            482.0
+          ]
+        ],
+        "0": [
+          [
+            138.0,
+            234.0
+          ],
+          [
+            199.0,
+            200.0
+          ],
+          [
+            274.0,
+            198.0
+          ]
+        ]
+      },
+      "num_objects_tracked": 3,
+      "source_frame_idx": null,
+      "fallback_reason": null,
+      "grounding_used": true,
+      "grounding_source_frame_idx": 18142,
+      "grounding_num_objects": 3,
+      "grounding_fallback_reason": null,
+      "timing": {
+        "elapsed_seconds": 328.324,
+        "avg_seconds_per_frame": 0.2146,
+        "fps": 4.66,
+        "num_frames": 1530
+      }
+    },
+    {
+      "chunk_idx": 13,
+      "frame_range": [
+        19672,
+        20988
+      ],
+      "model_type": "Sam3TrackerVideoModel",
+      "prompt_points": {
+        "0": [
+          [
+            614.0,
+            165.0
+          ],
+          [
+            635.0,
+            214.0
+          ],
+          [
+            659.0,
+            163.0
+          ]
+        ],
+        "1": [
+          [
+            550.0,
+            471.0
+          ],
+          [
+            604.0,
+            454.0
+          ],
+          [
+            644.0,
+            485.0
+          ]
+        ],
+        "4": [
+          [
+            511.0,
+            379.0
+          ],
+          [
+            545.0,
+            365.0
+          ],
+          [
+            576.0,
+            297.0
+          ]
+        ]
+      },
+      "num_objects_tracked": 3,
+      "source_frame_idx": null,
+      "fallback_reason": null,
+      "grounding_used": true,
+      "grounding_source_frame_idx": 19672,
+      "grounding_num_objects": 3,
+      "grounding_fallback_reason": null,
+      "timing": {
+        "elapsed_seconds": 288.904,
+        "avg_seconds_per_frame": 0.2195,
+        "fps": 4.56,
+        "num_frames": 1316
+      }
+    },
+    {
+      "chunk_idx": 14,
+      "frame_range": [
+        20988,
+        22531
+      ],
+      "model_type": "Sam3TrackerVideoModel",
+      "prompt_points": {
+        "1": [
+          [
+            358.0,
+            518.0
+          ],
+          [
+            412.0,
+            449.0
+          ],
+          [
+            466.0,
+            425.0
+          ]
+        ],
+        "4": [
+          [
+            52.0,
+            492.0
+          ],
+          [
+            103.0,
+            484.0
+          ],
+          [
+            143.0,
+            476.0
+          ]
+        ],
+        "0": [
+          [
+            225.0,
+            387.0
+          ],
+          [
+            293.0,
+            407.0
+          ],
+          [
+            353.0,
+            373.0
+          ]
+        ]
+      },
+      "num_objects_tracked": 3,
+      "source_frame_idx": null,
+      "fallback_reason": null,
+      "grounding_used": true,
+      "grounding_source_frame_idx": 20988,
+      "grounding_num_objects": 3,
+      "grounding_fallback_reason": null,
+      "timing": {
+        "elapsed_seconds": 332.089,
+        "avg_seconds_per_frame": 0.2152,
+        "fps": 4.65,
+        "num_frames": 1543
+      }
+    }
+  ]
+}

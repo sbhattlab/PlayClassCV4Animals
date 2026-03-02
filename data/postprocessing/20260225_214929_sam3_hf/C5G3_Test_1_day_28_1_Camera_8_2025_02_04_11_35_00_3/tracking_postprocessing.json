@@ -1,0 +1,141 @@
+[
+    {
+        "type": "trim",
+        "cause": "low_score",
+        "from": 216,
+        "to": 324,
+        "id": 0,
+        "_time": "00:08.64-00:12.96"
+    },
+    {
+        "type": "trim",
+        "cause": "low_score",
+        "from": 768,
+        "to": 1032,
+        "id": 0,
+        "_time": "00:30.72-00:41.28"
+    },
+    {
+        "type": "trim",
+        "cause": "low_score",
+        "from": 1224,
+        "to": 1494,
+        "id": 6,
+        "_time": "00:48.96-00:59.76"
+    },
+    {
+        "type": "trim",
+        "cause": "low_score",
+        "from": 1243,
+        "to": 1364,
+        "id": 3,
+        "_time": "00:49.72-00:54.56"
+    },
+    {
+        "type": "trim",
+        "cause": "low_score",
+        "from": 1467,
+        "to": 1562,
+        "id": 3,
+        "_time": "00:58.68-01:02.48"
+    },
+    {
+        "type": "id_switch",
+        "frame": 1562,
+        "from": 3,
+        "to": 7,
+        "_time": "01:02.48"
+    },
+    {
+        "type": "trim",
+        "cause": "low_score",
+        "from": 1562,
+        "to": 1713,
+        "id": 3,
+        "_time": "01:02.48-01:08.52"
+    },
+    {
+        "type": "trim",
+        "cause": "low_score",
+        "from": 1562,
+        "to": 1713,
+        "id": 7,
+        "_time": "01:02.48-01:08.52"
+    },
+    {
+        "type": "id_switch",
+        "frame": 1776,
+        "from": 6,
+        "to": 2,
+        "_time": "01:11.04"
+    },
+    {
+        "type": "trim",
+        "cause": "low_score",
+        "from": 6656,
+        "to": 7139,
+        "id": 0,
+        "_time": "04:26.25-04:45.58"
+    },
+    {
+        "type": "trim",
+        "cause": "overlap",
+        "from": 11819,
+        "to": 12150,
+        "id": 7,
+        "_time": "07:52.79-08:06.03"
+    },
+    {
+        "type": "trim",
+        "cause": "low_score",
+        "from": 11853,
+        "to": 11922,
+        "id": 0,
+        "_time": "07:54.15-07:56.91"
+    },
+    {
+        "type": "trim",
+        "cause": "low_score",
+        "from": 12410,
+        "to": 12471,
+        "id": 0,
+        "_time": "08:16.43-08:18.87"
+    },
+    {
+        "type": "trim",
+        "cause": "low_score",
+        "from": 19195,
+        "to": 19353,
+        "id": 7,
+        "_time": "12:47.84-12:54.16"
+    },
+    {
+        "type": "trim",
+        "cause": "low_score",
+        "from": 19382,
+        "to": 21075,
+        "id": 7,
+        "_time": "12:55.32-14:03.05"
+    },
+    {
+        "type": "id_match",
+        "protocol_id": 2662,
+        "description": "Dark brown",
+        "tracking_id": 0,
+        "frame": null
+    },
+    {
+        "type": "id_match",
+        "protocol_id": 2690,
+        "description": "Blue left wing",
+        "tracking_id": 2,
+        "frame": null
+    },
+    {
+        "type": "id_match",
+        "protocol_id": 2779,
+        "description": "Green left wing",
+        "tracking_id": 7,
+        "frame": null
+    }
+]
