@@ -31,3 +31,19 @@ class TemporalCNN(nn.Module):
         x = self.drop(F.relu(self.bn2(self.conv2(x))))  # Conv block 2
         x = x.mean(dim=2)  # (B, d_hidden)
         return self.head(x)  # (B, n_classes)
+
+
+class TemporalGRU(nn.Module):
+    def __init__(self, d_model, n_classes, d_hidden=128, dropout=0.3):
+        super().__init__()
+        self.proj = nn.Linear(d_model, d_hidden)
+        self.gru = nn.GRU(d_hidden, d_hidden, batch_first=True)
+        self.drop = nn.Dropout(dropout)
+        self.head = nn.Linear(d_hidden, n_classes)
+
+    def forward(self, x):
+        # x: (B, F, D)
+        x = self.proj(x)  # (B, F, d_hidden)
+        _, h = self.gru(x)  # h: (1, B, d_hidden)
+        h = h.squeeze(0)  # (B, d_hidden)
+        return self.head(self.drop(h))  # (B, n_classes)
