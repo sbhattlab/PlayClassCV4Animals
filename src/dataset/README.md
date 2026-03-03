@@ -12,6 +12,9 @@
                   |                           |          |
                   v                           v          v
          [tracking_issues.json]            labels    bird_info
+                                              |
+                                              v
+                                     resolve_dual_groups()    <behav_label>
                   |
                   v
          prefill_postprocessing()
@@ -35,7 +38,24 @@
             assign_windows()             <bird_id> + <window>
                   |
                   v
+         filter_incomplete_windows()    drop windows below coverage threshold
+                  |
+                  v
+         extract_mask_features()        spatial + temporal + pairwise
+                  |
+                  v
+         summarize_features_by_window()    per (video_id, bird_id, window)
+                  |
+                  v
          [dataset_tracks.parquet] + [dataset_labels.parquet]
+         [all_features.parquet]  + [dataset_features.parquet]
+
+                  |  (GPU step, separate script)
+                  v
+         extract_embeddings()              DINOv3 CLS-token per frame
+                  |
+                  v
+         [all_embeddings.pt]
 ```
 
 ### Column naming
@@ -111,20 +131,39 @@ Edit `tracking_postprocessing.json`:
    reference `frame` before applying. Renames the column from `tracking_id` to
    `bird_id`.
 
-### Step 5: Align labels & assign windows (automatic)
+### Step 5: Align labels, assign windows & extract features (automatic)
 
-After postprocessing, the build script aligns labels with tracks and assigns
-temporal windows:
+After postprocessing, the build script aligns labels with tracks, assigns
+temporal windows, and extracts features:
 
-1. **`align_labels()`** — computes the min/max frame per `(video_id, bird_id)` in
+1. **`resolve_dual_groups()`** — resolves multi-valued `behav_group` entries
+   (e.g. `"locomotor, worm"`) to a single class in a new `behav_label` column.
+   Picks the rarest component class, since rare behaviours are more informative
+   as classification targets.
+
+2. **`align_labels()`** — computes the min/max frame per `(video_id, bird_id)` in
    the tracks, converts to time, and drops any label rows that fall outside that
    range or have no matching bird. This removes labels for time periods where no
    tracking data exists.
 
-2. **`assign_windows()`** — each label defines a temporal window `(prev_time, time]`.
+3. **`assign_windows()`** — each label defines a temporal window `(prev_time, time]`.
    Track frames whose time falls in that interval share the same `window` index.
    Both tracks and labels receive a `window` column, numbered per
    `(video_id, bird_id)` starting from 0.
+
+4. **`filter_incomplete_windows()`** — computes the actual vs expected frame count
+   per `(video_id, bird_id, window)` and drops windows below a coverage fraction
+   (default 50%). Expected frames are derived from the median label spacing and
+   per-video FPS. This prevents meaningless feature statistics from windows left
+   with very few frames after trimming. Controlled by `--min-window-coverage`.
+
+5. **`extract_mask_features()`** — extracts spatial (mask area, bbox, centroid),
+   temporal (velocity, area change), and pairwise (nearest-neighbor distance)
+   features per frame. Saved as `all_features.parquet`.
+
+6. **`summarize_features_by_window()`** — aggregates per-frame features into
+   per-window summary statistics (mean, std, min, max, median) plus frame count.
+   Saved as `dataset_features.parquet` (one row per video/bird/window).
 
 ## Known issues
 
@@ -158,7 +197,20 @@ pixi run -e sam3-hf build_dataset \
     --label-dir data/labels
 ```
 
-Output: `dataset_tracks.parquet` and `dataset_labels.parquet` saved to the tracking dir.
+Output: `dataset_tracks.parquet`, `dataset_labels.parquet`, `all_features.parquet`, and `dataset_features.parquet` saved to the tracking dir.
+
+### Embedding extraction (GPU)
+
+After the main pipeline completes, run the embedding extraction script separately
+(requires GPU + DINOv3 model):
+
+```sh
+pixi run -e sam3-hf extract-embeddings \
+    --tracking-dir data/tracking/20260225_214929_sam3_hf \
+    --video-dir video-data/batch
+```
+
+Output: `all_embeddings.pt` (per-frame, per-bird embeddings) saved to the tracking dir.
 
 ## Module overview
 
@@ -166,9 +218,9 @@ Output: `dataset_tracks.parquet` and `dataset_labels.parquet` saved to the track
 |------------------------------|---------------------------------------------------------|
 | `tracking_issues.py`        | Detection: ID switches, mask overlaps, low-score periods |
 | `tracking_postprocessing.py` | Remediation: prefill, trim, ID remap, match; label alignment & windowing |
-| `labels.py`                  | Parse behaviour labels + bird info from Excel            |
+| `labels.py`                  | Parse behaviour labels + bird info from Excel; resolve dual groups |
 | `features.py`                | Handcrafted mask features (spatial, temporal, pairwise)  |
-| `embeddings.py`              | DINOv3 CLS-token embedding extraction                   |
+| `embeddings.py`              | DINOv3 CLS-token embedding extraction + window summarization |
 | `utils.py`                   | Shared helpers: `fmt_time`, `get_video_fps`, `_decode_rle_mask` |
 
 ## Example `tracking_postprocessing.json`

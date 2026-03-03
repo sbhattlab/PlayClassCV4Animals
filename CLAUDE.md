@@ -37,9 +37,10 @@ pixi run -e sam3-hf python -m script.sam3.run_sam3_hf --config config/sam3_hf_ma
 ```sh
 CUDA_VISIBLE_DEVICES=1 pixi run test-sam3-hf-image  # Single image inference
 CUDA_VISIBLE_DEVICES=1 pixi run test-sam3-hf-video  # Video chunking test
+pixi run -e sam3-hf test_features                    # Dataset feature extraction tests (pytest)
 ```
 
-Tests are standalone scripts in `src/test/`, not pytest-based. Pixi tasks invoke them as `python -m test.<name>` (the `src/` package root is on the module path).
+SAM3 tests are standalone scripts in `src/test/`, not pytest-based. Pixi tasks invoke them as `python -m test.<name>` (the `src/` package root is on the module path). Dataset tests in `tests/` use pytest.
 
 ## Architecture
 
@@ -62,19 +63,22 @@ src/
     tracking_issues.py      # Detection: ID switches, mask overlaps, low-score periods
     tracking_postprocessing.py  # Remediation: prefill from issues, ID-scoped trims, ID remaps, process_tracks
     labels.py               # Behaviour label parsing from Excel registration protocols
-    features.py             # Handcrafted mask features: spatial, temporal, pairwise, summarization
-    embeddings.py           # DINOv3 CLS-token embedding extraction from tracked objects
+    features.py             # Handcrafted mask features: spatial, temporal, pairwise, window summarization (vectorized)
+    embeddings.py           # DINOv3 CLS-token embedding extraction from bbox crops of tracked objects
   debug/                    # Interactive debugging utilities and standalone grounding test script
 
 script/
-  preprocess.py                # Detect issues, apply postprocessing, build dataset parquets (single-pass)
+  build_dataset.py             # Labels, postprocessing, windowing → dataset_tracks + dataset_labels parquets
+  extract_features.py          # Mask feature extraction + window summarization (CPU-only, ~7 min)
+  extract_embeddings.py        # DINOv3 CLS-token embeddings from bbox crops (GPU required)
   compute_chunk_boundaries.py  # User script: recompute metrics + boundaries from existing yolo_tracking.parquet
   dlc2yolo/                    # DLC-to-YOLO format converter for pose dataset creation
   convert_video_clean.py       # Video format/resolution conversion utility
 
 config/                     # YAML configs (OmegaConf)
   video_specific/            # Per-video configs with tuned manual_chunk_frames
-src/test/                   # Test scripts (run via pixi tasks)
+tests/                      # pytest tests (dataset features, labels, postprocessing)
+src/test/                   # Test scripts for SAM3 inference (run via pixi tasks, not pytest)
 notebook/                   # Jupyter notebooks for EDA and demos
 ```
 
@@ -103,12 +107,33 @@ Computes tracking quality post-hoc from `outputs_per_frame`. Four levels:
 
 Auto-generated on each run, saved to `run_dir/visualizations/`: ID timeline (tracker score color-coded), per-frame dashboard (5-panel timeseries), per-ID tracker scores, mask evolution at chunk boundaries, prompt points at boundaries, YOLO scan overview (when adaptive chunking enabled). All plots use MM:SS x-axis when FPS is available.
 
+### Features module (`src/dataset/features.py`)
+
+Extracts handcrafted features from tracking masks. All functions are vectorized (no row-by-row iteration):
+
+- **`extract_spatial_features`**: Batch `pycocotools.mask.area()` for mask areas, numpy array math for bbox metrics, batch `mask_util.decode()` + `scipy.ndimage.center_of_mass` for centroids. Masks grouped by `size` (pycocotools requirement) and chunked at 500 to cap memory.
+- **`extract_temporal_features`**: `pandas.groupby().diff()` / `.shift()` for frame-to-frame deltas.
+- **`extract_pairwise_features`**: Numpy broadcasting for `(M, M)` distance matrices per frame.
+- **`summarize_features_by_window`**: Single `groupby().agg()` call with `[mean, std, min, max, median]`.
+
+Feature set (`_FEATURE_COLS`): `mask_area`, `aspect_ratio`, `velocity`, `area_change_rate`, `min_dist_to_other`, `mean_dist_to_other`. Additionally `bbox_area` is output by spatial features as a debugging column (not in `_FEATURE_COLS`) for detecting saltatory bbox spikes.
+
+### Embeddings module (`src/dataset/embeddings.py`)
+
+Extracts DINOv3 CLS-token embeddings from bbox crops of tracked objects. Output is `{(video_id, bird_id, window): Tensor(F_w, D)}` — one variable-length sequence per window, aligned with the feature summarization grouping. `D` depends on the model (768 for ViT-B, 1024 for ViT-L), read from `model.config.hidden_size`. Crops are plain bbox cutouts (no mask-based background attenuation). Bboxes are clamped to frame dimensions to handle SAM3 bbox overshoot (known upstream issue where center+size→corner conversion produces coordinates slightly outside the image). Extraction script: `script/extract_embeddings.py` (GPU required, run via `pixi run -e sam3-hf extract-embeddings`).
+
 ### Output schemas
 
 - **`tracking_outputs.parquet`**: One row per (frame, object). MultiIndex `["frame_idx", "object_id"]`. Includes bbox, RLE mask, scores, tracker_score, chunk_idx, model_type.
 - **`chunk_info.json`**: Per-chunk metadata: frame range, model type, prompt points, timing. Keys: `grounding_used`, `grounding_source_frame_idx`, `grounding_num_objects`, `grounding_fallback_reason`.
 - **YOLO scan outputs**: `yolo_tracking.parquet`, `metrics/yolo_scan_metrics.parquet`, `metrics/yolo_scan_summary.parquet`, `visualizations/yolo_scan_overview.png`.
 - **Metrics parquets**: `per_frame_metrics`, `per_id_metrics`, `summary_metrics`.
+- **Dataset outputs** (saved to tracking dir by the dataset pipeline):
+  - `dataset_tracks.parquet` — cleaned tracks with window column
+  - `dataset_labels.parquet` — aligned behaviour labels
+  - `all_features.parquet` — per-frame mask features
+  - `dataset_features.parquet` — per-window feature summaries
+  - `dataset_embeddings.pt` — DINOv3 embeddings keyed by `(video_id, bird_id, window)`
 - **Run directory**: `{timestamp}_{job_type}/` with config copy, log, parquets, `metrics/`, `visualizations/`. Batch mode: `{timestamp}_{job_type}/{sanitized_stem}/` per video.
 
 ## Data Layout
@@ -130,31 +155,48 @@ Auto-generated on each run, saved to `run_dir/visualizations/`: ID timeline (tra
 - ultralytics (YOLO scan)
 - scikit-learn (legacy KMeans in `src/utils.py`, used only by `viz.py`)
 
-## Preprocessing Pipeline
+## Dataset Pipeline
 
-`script/preprocess.py` builds the dataset from tracking outputs in two passes:
+Three-step pipeline. Steps 2 and 3 are independent and can run in parallel (different resources).
 
 ```sh
-# Pass 1: detect issues, generate tracking_postprocessing.json templates
-pixi run -e sam3-hf preprocess \
+# 1. Labels, postprocessing, windows (fast, ~seconds)
+pixi run -e sam3-hf build_dataset \
     --tracking-dir data/tracking/20260225_214929_sam3_hf \
     --label-dir data/labels
 
-# Manually fill in "to" (id_switch) and "tracking_id" (id_match) fields
-# in each tracking_postprocessing.json
+# 2. Mask features (slow, ~7 min, CPU-only)
+pixi run -e sam3-hf extract_features \
+    --tracking-dir data/tracking/20260225_214929_sam3_hf
 
-# Pass 2: validate, apply postprocessing, save dataset
-pixi run -e sam3-hf preprocess \
+# 3. DINOv3 embeddings (slow, GPU required)
+pixi run -e sam3-hf extract_embeddings \
     --tracking-dir data/tracking/20260225_214929_sam3_hf \
-    --label-dir data/labels
+    --video-dir video-data/batch
 ```
+
+### Step 1: `build_dataset`
+
+`script/build_dataset.py` discovers tracking subdirs, parses labels from Excel, detects issues, applies postprocessing, assigns windows, and filters incomplete windows. On first run it generates `tracking_postprocessing.json` templates; manually fill in `to` (id_switch) and `tracking_id` (id_match) fields, then rerun.
 
 Per-video JSON files (`tracking_postprocessing.json`) support three entry types:
 - **`trim`** — Remove track rows in a frame range, optionally scoped to one ID. Causes: `overlap`, `low_score`, `merged_object`.
 - **`id_switch`** — Remap `from` ID to `to` ID for all rows before `frame` (merges split tracks).
 - **`id_match`** — Rename tracker `tracking_id` to real `protocol_id` (bird identity).
 
-Output: `dataset_tracks.parquet` + `dataset_labels.parquet` saved to the tracking dir. JSON files are copied to `data/postprocessing/` for version control.
+Output: `dataset_tracks.parquet` + `dataset_labels.parquet`. JSON files are copied to `data/postprocessing/` for version control.
+
+### Step 2: `extract_features`
+
+`script/extract_features.py` reads `dataset_tracks.parquet`, decodes RLE masks, computes per-frame spatial/temporal/pairwise features, then summarizes per window.
+
+Output: `all_features.parquet` (per-frame) + `dataset_features.parquet` (per-window summaries).
+
+### Step 3: `extract_embeddings`
+
+`script/extract_embeddings.py` reads `dataset_tracks.parquet`, crops bbox regions from video frames, and extracts DINOv3 CLS-token embeddings per (video_id, bird_id, window).
+
+Output: `dataset_embeddings.pt` — dict keyed by `(video_id, bird_id, window)` with `Tensor(F_w, D)` values.
 
 ## Utilities
 
