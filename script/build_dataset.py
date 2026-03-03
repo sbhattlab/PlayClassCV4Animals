@@ -41,12 +41,13 @@ from pathlib import Path
 import pandas as pd
 from loguru import logger
 
-from src._config import DEFAULT_LABEL_DIR
-from src.dataset.labels import process_labels
+from src._config import DEFAULT_LABEL_DIR, DEFAULT_MIN_WINDOW_COVERAGE
+from src.dataset.labels import process_labels, resolve_dual_groups
 from src.dataset.tracking_issues import detect_tracking_issues
 from src.dataset.tracking_postprocessing import (
     align_labels,
     assign_windows,
+    filter_incomplete_windows,
     prefill_postprocessing,
     process_tracks,
 )
@@ -164,6 +165,18 @@ def process_tracking_subdir(tracking_dir, bird_info):
     }
 
 
+def save_data(save_dict, tracking_dir):
+    for fname, data in save_dict.items():
+        path = tracking_dir / fname
+        if path.suffix == ".json":
+            _save_json(path, data)
+        elif path.suffix == ".parquet":
+            data.to_parquet(path)
+        else:
+            raise ValueError(f"Unsupported file type for {fname}, skipping save")
+        logger.info(f"Saved: {path}")
+
+
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
@@ -185,6 +198,18 @@ def parse_args():
         default=DEFAULT_LABEL_DIR,
         help="Path to directory containing Registration protocols Excel files",
     )
+    parser.add_argument(
+        "--tracking-fname",
+        type=str,
+        default="tracking_outputs.parquet",
+        help="Filename to look for in each tracking subdirectory",
+    )
+    parser.add_argument(
+        "--min-window-coverage",
+        type=float,
+        default=DEFAULT_MIN_WINDOW_COVERAGE,
+        help="Minimum fraction of expected frames for a window to be kept (default: %(default)s)",
+    )
     return parser.parse_args()
 
 
@@ -200,13 +225,14 @@ def main():
 
     # 2. Parse labels + bird info
     labels, bird_info = process_labels(label_files)
+    labels = resolve_dual_groups(labels)
 
     # 3. Discover tracking subdirs
     tracking_dirs = sorted(
-        [p.parent for p in args.tracking_dir.rglob("tracking_outputs.parquet")]
+        [p.parent for p in args.tracking_dir.rglob(f"{args.tracking_fname}")]
     )
     if not tracking_dirs:
-        logger.error(f"No tracking_outputs.parquet found under {args.tracking_dir}")
+        logger.error(f"No {args.tracking_fname} found under {args.tracking_dir}")
         return
     logger.info(f"Found {len(tracking_dirs)} tracking subdirectory(ies)")
 
@@ -245,15 +271,19 @@ def main():
     # 5c. Assign temporal windows
     tracks, labels = assign_windows(tracks, labels, fps_lookup)
 
+    # 5d. Filter incomplete windows
+    tracks, labels = filter_incomplete_windows(
+        tracks, labels, fps_lookup, min_coverage=args.min_window_coverage
+    )
+
     logger.info(f"Dataset built: {len(tracks)} track rows, {len(labels)} label rows")
 
     # 6. Save dataset
-    tracks.to_parquet(args.tracking_dir / "dataset_tracks.parquet")
-    labels.to_parquet(args.tracking_dir / "dataset_labels.parquet")
-    logger.info(
-        f"Saved dataset_tracks.parquet and dataset_labels.parquet "
-        f"to {args.tracking_dir}"
-    )
+    output_data = {
+        "dataset_tracks.parquet": tracks,
+        "dataset_labels.parquet": labels,
+    }
+    save_data(output_data, args.tracking_dir)
 
 
 if __name__ == "__main__":

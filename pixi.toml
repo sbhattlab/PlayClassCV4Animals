@@ -70,7 +70,10 @@ test-sam3-native-video = "python -m test.sam3_native_video"
 sam3-hf-tracker = "python -m script.sam3.run_sam3_hf"
 yolo-prescan = "python -m script.sam3.run_sam3_hf --config config/prescan_only.yaml"
 build_dataset = "python -m script.build_dataset"
-test-postprocessing = "python -m pytest tests/test_tracking_postprocessing.py -v"
+test_postprocessing = "python -m pytest tests/test_tracking_postprocessing.py -v"
+test_features = "python -m pytest tests/test_features.py -v"
+extract_features = "python -m script.extract_features"
+extract_embeddings = "python -m script.extract_embeddings"
 
 # ======= SAM3-native dependencies ======
 [feature.sam3-native.pypi-dependencies]
