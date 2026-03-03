@@ -132,3 +132,41 @@ def process_labels(label_files):
     ]
 
     return labels, bird_info
+
+
+def resolve_dual_groups(labels: pd.DataFrame) -> pd.DataFrame:
+    """Resolve multi-valued ``behav_group`` entries to a single class.
+
+    When a label row has active behaviours in multiple merged classes,
+    ``behav_group`` contains a comma-separated string (e.g. ``"locomotor,
+    worm"``).  This function picks the rarest component class (across all
+    rows) as the resolved label, since rare behaviours are more informative
+    as classification targets.
+
+    Parameters
+    ----------
+    labels : pd.DataFrame
+        Must contain a ``behav_group`` column.
+
+    Returns
+    -------
+    pd.DataFrame
+        Same DataFrame with a new ``behav_label`` column.
+    """
+    # Count frequency of each individual group across all rows
+    from collections import Counter
+
+    counts: Counter[str] = Counter()
+    for bg in labels["behav_group"]:
+        for part in bg.split(", "):
+            counts[part.strip()] += 1
+
+    def _resolve(behav_group: str) -> str:
+        parts = [p.strip() for p in behav_group.split(", ")]
+        if len(parts) == 1:
+            return parts[0]
+        # Pick the rarest component
+        return min(parts, key=lambda p: counts[p])
+
+    labels["behav_label"] = labels["behav_group"].apply(_resolve)
+    return labels

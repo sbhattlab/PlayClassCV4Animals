@@ -4,6 +4,8 @@ import numpy as np
 import pandas as pd
 from loguru import logger
 
+from src._config import DEFAULT_MIN_WINDOW_COVERAGE
+
 from .utils import fmt_time
 
 
@@ -339,6 +341,75 @@ def align_labels(tracks, labels, fps_lookup):
         f"with matching track coverage"
     )
     return labels
+
+
+def filter_incomplete_windows(tracks, labels, fps_lookup, *, min_coverage=DEFAULT_MIN_WINDOW_COVERAGE):
+    """Drop windows where actual frame count is below a coverage threshold.
+
+    After trimming, some windows may have very few frames remaining. Feature
+    statistics (std, velocity) from 2 frames are meaningless, and a temporal
+    model seeing 2 frames instead of ~125 is problematic.
+
+    Assumes constant FPS per video and constant window duration (label spacing)
+    throughout the dataset.
+
+    Parameters
+    ----------
+    tracks : pd.DataFrame
+        Tracks with ``video_id``, ``bird_id``, ``frame_idx``, ``window``.
+    labels : pd.DataFrame
+        Labels with ``video_id``, ``bird_id``, ``window``.
+    fps_lookup : dict[str, float]
+        Maps ``video_id`` to frames-per-second.
+    min_coverage : float
+        Minimum fraction of expected frames a window must have to be kept.
+        Default 0.5 (50%).
+
+    Returns
+    -------
+    tuple[pd.DataFrame, pd.DataFrame]
+        ``(tracks, labels)`` with incomplete windows removed from both.
+    """
+    # Derive window duration from median consecutive label time delta
+    deltas = []
+    for _, grp in labels.groupby(["video_id", "bird_id"]):
+        times = grp["time"].sort_values().values
+        if len(times) >= 2:
+            deltas.extend(np.diff(times).tolist())
+    if not deltas:
+        logger.info("Window filter: only single-window groups, nothing to filter")
+        return tracks, labels
+    window_duration = float(np.median(deltas))
+
+    # Count actual frames per window
+    actual = (
+        tracks.groupby(["video_id", "bird_id", "window"])["frame_idx"]
+        .count()
+        .rename("actual_frames")
+        .reset_index()
+    )
+    actual["expected_frames"] = actual["video_id"].map(
+        lambda vid: window_duration * fps_lookup[vid]
+    )
+    actual["coverage"] = actual["actual_frames"] / actual["expected_frames"]
+
+    drop = actual.query("coverage < @min_coverage")
+    keep = actual.query("coverage >= @min_coverage")
+
+    drop_keys = set(zip(drop["video_id"], drop["bird_id"], drop["window"]))
+    tracks_key = list(zip(tracks["video_id"], tracks["bird_id"], tracks["window"]))
+    labels_key = list(zip(labels["video_id"], labels["bird_id"], labels["window"]))
+
+    tracks = tracks[[k not in drop_keys for k in tracks_key]]
+    labels = labels[[k not in drop_keys for k in labels_key]]
+
+    logger.info(
+        f"Window filter (min_coverage={min_coverage:.0%}): "
+        f"window_duration={window_duration:.1f}s, "
+        f"dropped {len(drop)}/{len(drop) + len(keep)} windows"
+    )
+
+    return tracks, labels
 
 
 def assign_windows(tracks, labels, fps_lookup):
