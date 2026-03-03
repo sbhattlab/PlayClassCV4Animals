@@ -241,3 +241,6 @@ tmp/
 drafts*.py
 drafts*.ipynb
 notes/
+
+# Claude local stuff
+.claude/
