@@ -2,62 +2,126 @@
 
 import numpy as np
 import pandas as pd
+import pycocotools.mask as mask_util
+from scipy.ndimage import center_of_mass
+from tqdm.auto import tqdm
 
-from .utils import _decode_rle_mask
+# Maximum masks to decode at once per size-group (caps memory ~1 GB at 1080p)
+_DECODE_CHUNK_SIZE = 500
+
+_ID_COLS = ["video_id", "bird_id"]
+_KEY_COLS = ["video_id", "bird_id", "frame_idx"]
+_FRAME_COLS = ["video_id", "frame_idx"]
+
+
+def _prepare_rle_list(tracks):
+    """Convert counts/size columns to list-of-dicts for pycocotools batch ops."""
+    rle_list = []
+    for counts, size in zip(tracks["counts"], tracks["size"]):
+        # pycocotools requires bytes, but parquet can deserialize counts as str
+        if isinstance(counts, str):
+            counts = counts.encode("utf-8")
+        rle_list.append({"counts": counts, "size": size})
+    return rle_list
+
+
+def _centroids_from_masks(masks_3d):
+    """Compute centroids from a batch of decoded binary masks.
+
+    Parameters
+    ----------
+    masks_3d : np.ndarray
+        (H, W, N) uint8 array of binary masks (from ``mask_util.decode``).
+
+    Returns
+    -------
+    cx, cy : np.ndarray
+        (N,) centroid coordinates. NaN for empty masks.
+    """
+    N = masks_3d.shape[2]
+    cx = np.full(N, np.nan)
+    cy = np.full(N, np.nan)
+    for k in range(N):
+        if masks_3d[:, :, k].any():
+            cy[k], cx[k] = center_of_mass(masks_3d[:, :, k])
+    return cx, cy
 
 
 def extract_spatial_features(tracks: pd.DataFrame) -> pd.DataFrame:
-    """Compute per-object per-frame spatial features from masks and bboxes.
+    """Compute per-object per-frame spatial features from masks.
 
     Parameters
     ----------
     tracks : pd.DataFrame
-        Tracking outputs with MultiIndex ``["frame_idx", "object_id"]`` and columns
+        Flat DataFrame with columns ``video_id``, ``bird_id``, ``frame_idx``,
         ``bbox`` (list ``[x1, y1, x2, y2]``), ``counts``, ``size``.
 
     Returns
     -------
     pd.DataFrame
-        Same MultiIndex as *tracks*, with columns:
+        Flat DataFrame with key columns (``video_id``, ``bird_id``,
+        ``frame_idx``) plus:
 
         - ``mask_area``: pixel count of the mask
         - ``bbox_area``: bounding box area in pixels
-        - ``aspect_ratio``: bbox width / height (NaN if height == 0)
+          (not a feature — useful for detecting bbox spikes vs mask_area)
+        - ``aspect_ratio``: bbox width / height (may capture posture)
         - ``centroid_x``, ``centroid_y``: mask centroid coordinates
+          (intermediates for temporal/pairwise features, not used as features)
     """
-    rows = []
-    for (fidx, oid), row in tracks.iterrows():
-        mask = _decode_rle_mask(row["counts"], row["size"])
-        mask_area = int(mask.sum())
+    n = len(tracks)
 
-        bbox = row["bbox"]
-        x1, y1, x2, y2 = bbox[0], bbox[1], bbox[2], bbox[3]
-        w = x2 - x1
-        h = y2 - y1
-        bbox_area = w * h
-        aspect_ratio = w / h if h > 0 else np.nan
+    # --- Mask areas ---
+    rle_list = _prepare_rle_list(tracks)
+    mask_areas = np.array(mask_util.area(rle_list), dtype=np.float64)
 
-        y_coords, x_coords = np.where(mask)
-        if len(y_coords) > 0:
-            cx = float(np.mean(x_coords))
-            cy = float(np.mean(y_coords))
-        else:
-            cx, cy = np.nan, np.nan
+    # --- Aspect ratio from bbox ---
+    bbox_arr = np.array(tracks["bbox"].tolist(), dtype=np.float64)
+    w = bbox_arr[:, 2] - bbox_arr[:, 0]
+    h = bbox_arr[:, 3] - bbox_arr[:, 1]
+    bbox_areas = w * h
+    aspect_ratios = np.full_like(w, np.nan)
+    np.divide(w, h, out=aspect_ratios, where=h > 0)
 
-        rows.append(
-            {
-                "frame_idx": fidx,
-                "object_id": oid,
-                "mask_area": mask_area,
-                "bbox_area": float(bbox_area),
-                "aspect_ratio": float(aspect_ratio),
-                "centroid_x": cx,
-                "centroid_y": cy,
-            }
-        )
+    # --- Centroids (needed for velocity and pairwise distances) ---
+    centroid_x = np.full(n, np.nan)
+    centroid_y = np.full(n, np.nan)
 
-    df = pd.DataFrame(rows).set_index(["frame_idx", "object_id"])
-    return df
+    # pycocotools.mask.decode requires all masks to share the same size,
+    # so group by size first, then decode in chunks to cap memory.
+    sizes = tracks["size"].apply(tuple)
+    for _size, group in tqdm(tracks.groupby(sizes), desc="Decoding masks"):
+        indices = group.index
+        group_rles = [rle_list[i] for i in indices]
+
+        for chunk_start in tqdm(
+            range(0, len(group_rles), _DECODE_CHUNK_SIZE), leave=False
+        ):
+            chunk_end = chunk_start + _DECODE_CHUNK_SIZE
+            chunk_rles = group_rles[chunk_start:chunk_end]
+            chunk_indices = indices[chunk_start:chunk_end]
+
+            # Batch decode: (H, W, N) binary array, one mask per N slice
+            masks_3d = mask_util.decode(chunk_rles)
+            if masks_3d.ndim == 2:  # single mask returns (H, W)
+                masks_3d = masks_3d[:, :, np.newaxis]
+
+            cx, cy = _centroids_from_masks(masks_3d)
+            centroid_x[chunk_indices] = cx
+            centroid_y[chunk_indices] = cy
+
+    return pd.DataFrame(
+        {
+            "video_id": tracks["video_id"].values,
+            "bird_id": tracks["bird_id"].values,
+            "frame_idx": tracks["frame_idx"].values,
+            "mask_area": mask_areas,
+            "bbox_area": bbox_areas,  # not a feature — for detecting bbox spikes
+            "aspect_ratio": aspect_ratios,
+            "centroid_x": centroid_x,
+            "centroid_y": centroid_y,
+        }
+    )
 
 
 def extract_temporal_features(spatial: pd.DataFrame) -> pd.DataFrame:
@@ -66,59 +130,47 @@ def extract_temporal_features(spatial: pd.DataFrame) -> pd.DataFrame:
     Parameters
     ----------
     spatial : pd.DataFrame
-        Output of :func:`extract_spatial_features` (MultiIndex
-        ``["frame_idx", "object_id"]``).
+        Output of :func:`extract_spatial_features` (flat DataFrame).
 
     Returns
     -------
     pd.DataFrame
-        Same MultiIndex, with columns:
+        Flat DataFrame with key columns plus:
 
-        - ``velocity_x``, ``velocity_y``: centroid displacement from previous frame
-        - ``velocity``: Euclidean displacement magnitude
-        - ``area_change``: absolute mask area change from previous frame
+        - ``velocity``: Euclidean centroid displacement from previous frame
         - ``area_change_rate``: relative mask area change (NaN if previous area == 0)
 
-        First frame per object has NaN for all temporal features.
+        First frame per (video_id, bird_id) has NaN for all temporal features.
     """
-    records = []
-    for oid, group in spatial.groupby("object_id"):
-        group = group.sort_index(level="frame_idx")
-        cx = group["centroid_x"].values
-        cy = group["centroid_y"].values
-        area = group["mask_area"].values
-        fidxs = group.index.get_level_values("frame_idx").values
+    # Sort so diff() operates in correct frame order within each group
+    spatial = spatial.sort_values(_KEY_COLS)
 
-        for i in range(len(group)):
-            if i == 0:
-                vx, vy, vel, darea, darea_rate = (
-                    np.nan,
-                    np.nan,
-                    np.nan,
-                    np.nan,
-                    np.nan,
-                )
-            else:
-                vx = cx[i] - cx[i - 1]
-                vy = cy[i] - cy[i - 1]
-                vel = np.sqrt(vx**2 + vy**2)
-                darea = float(area[i] - area[i - 1])
-                darea_rate = darea / area[i - 1] if area[i - 1] > 0 else np.nan
+    grouped = spatial.groupby(_ID_COLS, sort=False)
 
-            records.append(
-                {
-                    "frame_idx": fidxs[i],
-                    "object_id": oid,
-                    "velocity_x": float(vx),
-                    "velocity_y": float(vy),
-                    "velocity": float(vel),
-                    "area_change": float(darea),
-                    "area_change_rate": float(darea_rate),
-                }
-            )
+    # Velocity
+    velocity_x = grouped["centroid_x"].diff()
+    velocity_y = grouped["centroid_y"].diff()
+    velocity = np.sqrt(velocity_x**2 + velocity_y**2)
 
-    df = pd.DataFrame(records).set_index(["frame_idx", "object_id"])
-    return df
+    # Relative area change: (current - prev) / prev
+    area_prev = grouped["mask_area"].shift(1)
+    area_change_rate = np.full(len(spatial), np.nan)
+    np.divide(
+        (spatial["mask_area"] - area_prev).values,
+        area_prev.values,
+        out=area_change_rate,
+        where=(area_prev > 0).values,
+    )
+
+    return pd.DataFrame(
+        {
+            "video_id": spatial["video_id"].values,
+            "bird_id": spatial["bird_id"].values,
+            "frame_idx": spatial["frame_idx"].values,
+            "velocity": velocity.values,
+            "area_change_rate": area_change_rate,
+        }
+    )
 
 
 def extract_pairwise_features(spatial: pd.DataFrame) -> pd.DataFrame:
@@ -127,52 +179,67 @@ def extract_pairwise_features(spatial: pd.DataFrame) -> pd.DataFrame:
     Parameters
     ----------
     spatial : pd.DataFrame
-        Output of :func:`extract_spatial_features`.
+        Output of :func:`extract_spatial_features` (flat DataFrame).
 
     Returns
     -------
     pd.DataFrame
-        Same MultiIndex, with columns:
+        Flat DataFrame with key columns plus:
 
-        - ``min_dist_to_other``: min centroid distance to any other object (inf if alone)
-        - ``mean_dist_to_other``: mean centroid distance to all other objects (inf if alone)
-        - ``nearest_neighbor_id``: object_id of nearest neighbor (NaN if alone)
+        - ``min_dist_to_other``: min centroid distance to any other bird (NaN if alone)
+        - ``mean_dist_to_other``: mean centroid distance to all other birds (NaN if alone)
+        - ``nearest_neighbor_id``: bird_id of nearest neighbor (NaN if alone)
     """
-    records = []
-    for fidx, group in spatial.groupby("frame_idx"):
-        oids = group.index.get_level_values("object_id").values
+    n = len(spatial)
+
+    # Min distance to nearest neighbor
+    min_dist = np.full(n, np.nan)
+    # Mean distance to all other birds (may capture crowding)
+    mean_dist = np.full(n, np.nan)
+    # ID of nearest neighbor (categorical feature, may capture social interactions)
+    nn_id = np.full(n, np.nan, dtype=object)
+
+    frame_groups = spatial.groupby(_FRAME_COLS)
+    for _key, group in tqdm(frame_groups, desc="Pairwise distances", unit="frame"):
+        idx = group.index.values
+        # Skip frames with only one bird (no pairwise features to compute)
+        M = len(group)
+        if M < 2:
+            continue
+
         cxs = group["centroid_x"].values
         cys = group["centroid_y"].values
+        bird_ids = group["bird_id"].values
 
-        for i, oid in enumerate(oids):
-            if len(oids) < 2:
-                records.append(
-                    {
-                        "frame_idx": fidx,
-                        "object_id": oid,
-                        "min_dist_to_other": np.inf,
-                        "mean_dist_to_other": np.inf,
-                        "nearest_neighbor_id": np.nan,
-                    }
-                )
-                continue
+        # Skip birds with NaN centroids (empty masks)
+        valid = ~(np.isnan(cxs) | np.isnan(cys))
+        if valid.sum() < 2:
+            continue
 
-            dists = np.sqrt((cxs - cxs[i]) ** 2 + (cys - cys[i]) ** 2)
-            dists[i] = np.inf  # exclude self
-            min_idx = np.argmin(dists)
+        # (M, M) distance matrix; NaN on diagonal to exclude self
+        dx = cxs[:, None] - cxs[None, :]
+        dy = cys[:, None] - cys[None, :]
+        dist_matrix = np.sqrt(dx**2 + dy**2)
+        np.fill_diagonal(dist_matrix, np.nan)
 
-            records.append(
-                {
-                    "frame_idx": fidx,
-                    "object_id": oid,
-                    "min_dist_to_other": float(dists[min_idx]),
-                    "mean_dist_to_other": float(np.mean(dists[dists < np.inf])),
-                    "nearest_neighbor_id": int(oids[min_idx]),
-                }
-            )
+        # Only compute for rows with valid centroids
+        valid_idx = idx[valid]
+        valid_rows = np.where(valid)[0]
+        min_indices = np.nanargmin(dist_matrix[valid_rows], axis=1)
+        min_dist[valid_idx] = dist_matrix[valid_rows, min_indices]
+        nn_id[valid_idx] = bird_ids[min_indices]
+        mean_dist[valid_idx] = np.nanmean(dist_matrix[valid_rows], axis=1)
 
-    df = pd.DataFrame(records).set_index(["frame_idx", "object_id"])
-    return df
+    return pd.DataFrame(
+        {
+            "video_id": spatial["video_id"].values,
+            "bird_id": spatial["bird_id"].values,
+            "frame_idx": spatial["frame_idx"].values,
+            "min_dist_to_other": min_dist,
+            "mean_dist_to_other": mean_dist,
+            "nearest_neighbor_id": nn_id,
+        }
+    )
 
 
 def extract_mask_features(tracks: pd.DataFrame) -> pd.DataFrame:
@@ -180,22 +247,27 @@ def extract_mask_features(tracks: pd.DataFrame) -> pd.DataFrame:
 
     Convenience wrapper that calls :func:`extract_spatial_features`,
     :func:`extract_temporal_features`, and :func:`extract_pairwise_features`,
-    then joins them into a single DataFrame.
+    then merges them into a single DataFrame.
 
     Parameters
     ----------
     tracks : pd.DataFrame
-        Tracking outputs with MultiIndex ``["frame_idx", "object_id"]``.
+        Flat DataFrame with ``video_id``, ``bird_id``, ``frame_idx``,
+        ``bbox``, ``counts``, ``size``.
 
     Returns
     -------
     pd.DataFrame
-        Same MultiIndex, with all spatial + temporal + pairwise columns.
+        Flat DataFrame with all spatial + temporal + pairwise columns.
     """
+    # Spatial: mask area, aspect ratio
     spatial = extract_spatial_features(tracks)
+    # Temporal: velocity, area change rate
     temporal = extract_temporal_features(spatial)
+    # Pairwise: min and mean distance to nearest neighbor
     pairwise = extract_pairwise_features(spatial)
-    return spatial.join(temporal).join(pairwise)
+    # Merge all relevant features
+    return spatial.merge(temporal, on=_KEY_COLS).merge(pairwise, on=_KEY_COLS)
 
 
 _SUMMARY_AGGS = ["mean", "std", "min", "max", "median"]
@@ -203,99 +275,36 @@ _SUMMARY_AGGS = ["mean", "std", "min", "max", "median"]
 # Columns that are numeric features (exclude nearest_neighbor_id which is categorical)
 _FEATURE_COLS = [
     "mask_area",
-    "bbox_area",
     "aspect_ratio",
-    "centroid_x",
-    "centroid_y",
-    "velocity_x",
-    "velocity_y",
     "velocity",
-    "area_change",
     "area_change_rate",
     "min_dist_to_other",
     "mean_dist_to_other",
 ]
 
 
-def summarize_features_per_object(features: pd.DataFrame) -> pd.DataFrame:
-    """Aggregate per-frame features into per-object summary statistics.
+def summarize_features_by_window(features: pd.DataFrame) -> pd.DataFrame:
+    """Aggregate per-frame features using label-aligned ``window`` column.
 
     Parameters
     ----------
     features : pd.DataFrame
-        Output of :func:`extract_mask_features` (MultiIndex
-        ``["frame_idx", "object_id"]``).
+        Output of :func:`extract_mask_features` with an additional ``window``
+        column (from :func:`assign_windows`).
 
     Returns
     -------
     pd.DataFrame
-        Indexed by ``object_id``. Columns are ``{feature}_{agg}`` for each
-        feature and aggregation (mean, std, min, max, median), plus
-        ``n_frames`` (frame count per object).
+        One row per ``(video_id, bird_id, window)``. Columns are
+        ``{feature}_{agg}`` for each feature and aggregation (mean, std, min,
+        max, median), plus ``n_frames`` (frame count per window).
     """
-    cols = [c for c in _FEATURE_COLS if c in features.columns]
-    grouped = features[cols].groupby("object_id")
-    summary = grouped.agg(_SUMMARY_AGGS)
-    # Flatten MultiIndex columns: ("velocity", "mean") -> "velocity_mean"
-    summary.columns = [f"{col}_{agg}" for col, agg in summary.columns]
-    summary["n_frames"] = grouped.size()
-    return summary
+    group_cols = _ID_COLS + ["window"]
+    grouped = features.groupby(group_cols)
 
+    agg_dict = {col: _SUMMARY_AGGS for col in _FEATURE_COLS}
+    agg_result = grouped[_FEATURE_COLS].agg(agg_dict)
+    agg_result.columns = [f"{col}_{agg}" for col, agg in agg_result.columns]
+    agg_result["n_frames"] = grouped.size()
 
-def summarize_features_per_window(
-    features: pd.DataFrame,
-    window_frames: int = 125,
-    step_frames: int | None = None,
-) -> pd.DataFrame:
-    """Aggregate per-frame features into fixed-size temporal windows.
-
-    Parameters
-    ----------
-    features : pd.DataFrame
-        Output of :func:`extract_mask_features`.
-    window_frames : int
-        Window size in frames (default 125 = 5 s at 25 fps).
-    step_frames : int | None
-        Step between windows. Defaults to *window_frames* (non-overlapping).
-
-    Returns
-    -------
-    pd.DataFrame
-        MultiIndex ``["object_id", "window_start"]``. Columns are
-        ``{feature}_{agg}`` plus ``n_frames`` (actual frames in window).
-    """
-    if step_frames is None:
-        step_frames = window_frames
-
-    cols = [c for c in _FEATURE_COLS if c in features.columns]
-    all_frames = features.index.get_level_values("frame_idx")
-    f_min, f_max = int(all_frames.min()), int(all_frames.max())
-
-    records = []
-    for oid, obj_feat in features.groupby("object_id"):
-        obj_frames = obj_feat.index.get_level_values("frame_idx")
-
-        for win_start in range(f_min, f_max + 1, step_frames):
-            win_end = win_start + window_frames
-            mask = (obj_frames >= win_start) & (obj_frames < win_end)
-            window = obj_feat.loc[mask, cols]
-
-            if len(window) == 0:
-                continue
-
-            row = {"object_id": oid, "window_start": win_start, "n_frames": len(window)}
-            for col in cols:
-                vals = window[col].dropna()
-                if len(vals) == 0:
-                    for agg in _SUMMARY_AGGS:
-                        row[f"{col}_{agg}"] = np.nan
-                else:
-                    row[f"{col}_mean"] = float(vals.mean())
-                    row[f"{col}_std"] = float(vals.std())
-                    row[f"{col}_min"] = float(vals.min())
-                    row[f"{col}_max"] = float(vals.max())
-                    row[f"{col}_median"] = float(vals.median())
-            records.append(row)
-
-    df = pd.DataFrame(records).set_index(["object_id", "window_start"])
-    return df
+    return agg_result.reset_index()
