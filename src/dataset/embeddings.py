@@ -2,13 +2,12 @@
 
 from pathlib import Path
 
-import numpy as np
 import torch
 from loguru import logger
 from PIL import Image
+from tqdm import tqdm
 
 from src.utils import load_video_frames_range
-from .utils import _decode_rle_mask
 
 
 def extract_embeddings(
@@ -18,15 +17,15 @@ def extract_embeddings(
     processor,
     *,
     batch_size: int = 32,
-    bg_attenuation: float = 0.9,
-) -> dict[int, torch.Tensor]:
-    """Extract DINOv3 CLS-token embeddings for all tracked objects across all frames.
+) -> dict[tuple, torch.Tensor]:
+    """Extract DINOv3 CLS-token embeddings for tracked objects, grouped by window.
 
     Parameters
     ----------
     tracks : pd.DataFrame
-        Tracking outputs with MultiIndex ``["frame_idx", "object_id"]`` and columns
-        ``bbox`` (list ``[x1, y1, x2, y2]``), ``counts``, ``size``.
+        Flat DataFrame with columns ``bird_id``, ``frame_idx``, ``window``,
+        ``bbox`` (list ``[x1, y1, x2, y2]``).
+        Must be pre-filtered to a single video.
     video_path : str | Path
         Path to the source video file.
     model : transformers.AutoModel
@@ -35,100 +34,108 @@ def extract_embeddings(
         DINOv3 image processor.
     batch_size : int
         Number of crops to process per forward pass.
-    bg_attenuation : float
-        Factor applied to background pixels (outside mask). 0.9 dims background to
-        ~90% brightness, preserving context for the ViT.
 
     Returns
     -------
-    dict[int, torch.Tensor]
-        Mapping ``{object_id: Tensor(F_i, 768)}`` where ``F_i`` is the number of
-        frames in which object_id appears.
+    dict[tuple, torch.Tensor]
+        ``{(video_id, bird_id, window): Tensor(F_w, D)}`` where ``F_w`` is the
+        number of frames with valid crops in that window and ``D`` is the
+        embedding dimension (768 for ViT-B, 1024 for ViT-L).
     """
-    frame_indices = tracks.index.get_level_values("frame_idx")
-    min_frame = int(frame_indices.min())
-    max_frame = int(frame_indices.max())
+    min_frame = int(tracks["frame_idx"].min())
+    max_frame = int(tracks["frame_idx"].max())
 
     logger.info(
         f"Loading video frames [{min_frame}, {max_frame}] from {Path(video_path).name}"
     )
     frames = load_video_frames_range(video_path, min_frame, max_frame + 1)
-    logger.info(f"Loaded {len(frames)} frames")
+    n_expected = max_frame - min_frame + 1
+    n_loaded = len(frames)
+    logger.info(f"Loaded {n_loaded} frames")
+    if n_loaded < n_expected:
+        n_skipped = n_expected - n_loaded
+        last_valid = min_frame + n_loaded - 1
+        logger.warning(
+            f"Video decoder returned {n_loaded}/{n_expected} frames — "
+            f"last {n_skipped} frames (>{last_valid}) will be skipped"
+        )
 
-    object_ids = sorted(tracks.index.get_level_values("object_id").unique())
-    logger.info(f"Extracting crops for {len(object_ids)} objects")
+    # Collect crops in (video_id, bird_id, window) order
+    groups = sorted(tracks.groupby(["video_id", "bird_id", "window"]).groups.keys())
+    logger.info(f"Extracting crops for {len(groups)} (video, bird, window) groups")
 
-    # Collect crops per object, maintaining order
-    crops_per_object: dict[int, list[Image.Image]] = {oid: [] for oid in object_ids}
+    crops_per_group: dict[tuple, int] = {}
     all_crops: list[Image.Image] = []
-    # Map from flat index in all_crops -> (object_id, per-object index)
-    crop_mapping: list[tuple[int, int]] = []
 
-    for oid in object_ids:
-        obj_frames = tracks.xs(oid, level="object_id")
-        for fidx in sorted(obj_frames.index):
-            row = obj_frames.loc[fidx]
+    for video_id, bird_id, window in groups:
+        group_rows = tracks[
+            (tracks["video_id"] == video_id)
+            & (tracks["bird_id"] == bird_id)
+            & (tracks["window"] == window)
+        ].sort_values("frame_idx")
+        n_before = len(all_crops)
 
-            # Decode mask
-            mask = _decode_rle_mask(row["counts"], row["size"])
+        for _, row in group_rows.iterrows():
+            frame_idx = int(row["frame_idx"])
 
-            # Get bbox [x1, y1, x2, y2]
             bbox = row["bbox"]
             x1, y1, x2, y2 = int(bbox[0]), int(bbox[1]), int(bbox[2]), int(bbox[3])
 
-            # Clamp to frame bounds
-            frame_np = frames[fidx - min_frame]
+            # Skip frames that the decoder failed to load
+            local_idx = frame_idx - min_frame
+            if local_idx >= len(frames):
+                continue
+
+            # Clamp bbox to frame dimensions (SAM3 bboxes can slightly overshoot),
+            # skip if it collapses to zero area
+            frame_np = frames[local_idx]
             h, w = frame_np.shape[:2]
             x1, y1 = max(0, x1), max(0, y1)
             x2, y2 = min(w, x2), min(h, y2)
             if x2 <= x1 or y2 <= y1:
                 continue
 
-            # Crop + attenuate background
-            crop = frame_np[y1:y2, x1:x2].astype(np.float32)
-            mask_crop = mask[y1:y2, x1:x2]
-            crop[~mask_crop] *= bg_attenuation
+            all_crops.append(Image.fromarray(frame_np[y1:y2, x1:x2]))
 
-            pil_crop = Image.fromarray(crop.astype(np.uint8))
-            crops_per_object[oid].append(pil_crop)
-            crop_mapping.append((oid, len(crops_per_object[oid]) - 1))
-            all_crops.append(pil_crop)
+        crops_per_group[(video_id, bird_id, window)] = len(all_crops) - n_before
 
-    total_crops = len(all_crops)
-    logger.info(f"Total crops: {total_crops}")
-
-    if total_crops == 0:
-        return {oid: torch.empty(0, 768) for oid in object_ids}
+    n_crops = len(all_crops)
+    assert (
+        n_crops > 0
+    ), "No valid crops extracted — check video loading and bbox validity"
+    logger.info(f"Total crops: {n_crops}")
 
     # Determine model device/dtype from its parameters
     param = next(model.parameters())
     device = param.device
     model_dtype = param.dtype
+    d_model = model.config.hidden_size
 
     # Batch inference
     all_embeddings = []
-    with torch.no_grad():
-        for i in range(0, total_crops, batch_size):
+    with torch.inference_mode():
+        for i in tqdm(
+            range(0, n_crops, batch_size),
+            total=(n_crops + batch_size - 1) // batch_size,
+            desc="Extracting embeddings",
+        ):
             batch = all_crops[i : i + batch_size]
             inputs = processor(images=batch, return_tensors="pt").to(device)
             inputs["pixel_values"] = inputs["pixel_values"].to(dtype=model_dtype)
             outputs = model(**inputs)
             all_embeddings.append(outputs.pooler_output.float().cpu())
 
-    flat_embeddings = torch.cat(all_embeddings, dim=0)  # (total_crops, 768)
+    flat_embeddings = torch.cat(all_embeddings, dim=0)  # (n_crops, d_model)
 
-    # Split back into per-object tensors
-    result: dict[int, torch.Tensor] = {}
+    # Split back into per-(bird, window) tensors
+    embeddings: dict[tuple, torch.Tensor] = {}
     offset = 0
-    for oid in object_ids:
-        n = len(crops_per_object[oid])
+    for key in groups:
+        n = crops_per_group[key]
         if n > 0:
-            result[oid] = flat_embeddings[offset : offset + n]
+            embeddings[key] = flat_embeddings[offset : offset + n]
         else:
-            result[oid] = torch.empty(0, 768)
+            embeddings[key] = torch.empty(0, d_model)
         offset += n
 
-    for oid, emb in result.items():
-        logger.debug(f"  object {oid}: {emb.shape[0]} embeddings")
-
-    return result
+    return embeddings
