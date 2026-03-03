@@ -41,21 +41,17 @@
          filter_incomplete_windows()    drop windows below coverage threshold
                   |
                   v
-         extract_mask_features()        spatial + temporal + pairwise
-                  |
-                  v
-         summarize_features_by_window()    per (video_id, bird_id, window)
-                  |
-                  v
          [dataset_tracks.parquet] + [dataset_labels.parquet]
-         [all_features.parquet]  + [dataset_features.parquet]
-
-                  |  (GPU step, separate script)
-                  v
-         extract_embeddings()              DINOv3 CLS-token per frame
                   |
-                  v
-         [all_embeddings.pt]
+          --------+--------
+          |                |
+          v                v    (separate scripts, can run in parallel)
+  extract_mask_features()  extract_embeddings()
+  summarize_by_window()    DINOv3 CLS-token per frame
+          |                |
+          v                v
+  [all_features.parquet]   [dataset_embeddings.pt]
+  [dataset_features.parquet]
 ```
 
 ### Column naming
@@ -131,10 +127,10 @@ Edit `tracking_postprocessing.json`:
    reference `frame` before applying. Renames the column from `tracking_id` to
    `bird_id`.
 
-### Step 5: Align labels, assign windows & extract features (automatic)
+### Step 5: Align labels & assign windows (automatic)
 
-After postprocessing, the build script aligns labels with tracks, assigns
-temporal windows, and extracts features:
+After postprocessing, the build script aligns labels with tracks and assigns
+temporal windows:
 
 1. **`resolve_dual_groups()`** — resolves multi-valued `behav_group` entries
    (e.g. `"locomotor, worm"`) to a single class in a new `behav_label` column.
@@ -157,13 +153,21 @@ temporal windows, and extracts features:
    per-video FPS. This prevents meaningless feature statistics from windows left
    with very few frames after trimming. Controlled by `--min-window-coverage`.
 
-5. **`extract_mask_features()`** — extracts spatial (mask area, bbox, centroid),
-   temporal (velocity, area change), and pairwise (nearest-neighbor distance)
-   features per frame. Saved as `all_features.parquet`.
+### Step 6: Extract features (separate scripts)
 
-6. **`summarize_features_by_window()`** — aggregates per-frame features into
-   per-window summary statistics (mean, std, min, max, median) plus frame count.
-   Saved as `dataset_features.parquet` (one row per video/bird/window).
+Feature extraction and embedding extraction are separate scripts that read
+`dataset_tracks.parquet` and can run in parallel.
+
+- **`extract_mask_features()`** — extracts spatial (mask area, bbox, centroid),
+  temporal (velocity, area change), and pairwise (nearest-neighbor distance)
+  features per frame. Saved as `all_features.parquet`.
+
+- **`summarize_features_by_window()`** — aggregates per-frame features into
+  per-window summary statistics (mean, std, min, max, median) plus frame count.
+  Saved as `dataset_features.parquet` (one row per video/bird/window).
+
+- **`extract_embeddings()`** — extracts DINOv3 CLS-token embeddings from bbox
+  crops per (video_id, bird_id, window). Saved as `dataset_embeddings.pt`.
 
 ## Known issues
 
@@ -197,20 +201,26 @@ pixi run -e sam3-hf build_dataset \
     --label-dir data/labels
 ```
 
-Output: `dataset_tracks.parquet`, `dataset_labels.parquet`, `all_features.parquet`, and `dataset_features.parquet` saved to the tracking dir.
+Output: `dataset_tracks.parquet` and `dataset_labels.parquet` saved to the tracking dir.
+
+### Feature extraction (CPU)
+
+```sh
+pixi run -e sam3-hf extract_features \
+    --tracking-dir data/tracking/20260225_214929_sam3_hf
+```
+
+Output: `all_features.parquet` (per-frame) and `dataset_features.parquet` (per-window) saved to the tracking dir.
 
 ### Embedding extraction (GPU)
 
-After the main pipeline completes, run the embedding extraction script separately
-(requires GPU + DINOv3 model):
-
 ```sh
-pixi run -e sam3-hf extract-embeddings \
+pixi run -e sam3-hf extract_embeddings \
     --tracking-dir data/tracking/20260225_214929_sam3_hf \
     --video-dir video-data/batch
 ```
 
-Output: `all_embeddings.pt` (per-frame, per-bird embeddings) saved to the tracking dir.
+Output: `dataset_embeddings.pt` saved to the tracking dir.
 
 ## Module overview
 

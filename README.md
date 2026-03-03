@@ -30,11 +30,27 @@ ln -s "/mnt/birds/rebecca2025/" ext-data
 
 ### Dataset
 
-Built by `script/build_dataset.py` from tracking outputs + registration protocol Excel files.
+Built from tracking outputs + registration protocol Excel files in three steps
+(see `src/dataset/README.md` for full details):
+
+```sh
+# 1. Labels, postprocessing, windows (fast, ~seconds)
+pixi run -e sam3-hf build_dataset --tracking-dir data/tracking/... --label-dir data/labels
+
+# 2. Mask features (slow, ~7 min, CPU-only)
+pixi run -e sam3-hf extract_features --tracking-dir data/tracking/...
+
+# 3. DINOv3 embeddings (slow, GPU required)
+pixi run -e sam3-hf extract_embeddings --tracking-dir data/tracking/... --video-dir data/video/...
+```
+
 Outputs saved to the tracking batch directory:
 
-- `dataset_tracks.parquet` — postprocessed tracks with protocol bird IDs
-- `dataset_labels.parquet` — behaviour labels aligned to tracking frames
+- `dataset_tracks.parquet` — postprocessed tracks with protocol bird IDs and window column
+- `dataset_labels.parquet` — behaviour labels aligned to tracking windows
+- `all_features.parquet` — per-frame mask features (spatial, temporal, pairwise)
+- `dataset_features.parquet` — per-window feature summaries
+- `dataset_embeddings.pt` — DINOv3 CLS-token embeddings per (video, bird, window)
 
 ## Environment
 
@@ -94,9 +110,11 @@ pixi run sam3-hf-yolo-scan
 
 ## Post-tracking pipelines
 
+- script/build_dataset.py         -> Postprocess tracking outputs, match bird IDs, build dataset parquets
+- script/extract_features.py      -> Extract mask features + window summaries from dataset tracks (CPU)
+- script/extract_embeddings.py    -> Extract DINOv3 embeddings from dataset tracks (GPU)
 - script/viz_chunk_boundaries.py  -> Visualize chunk boundary frames from a config file or yolo scan run directory
 - script/viz_grounding.py         -> Render grounding phase outputs onto the original video
-- script/build_dataset.py         -> Postprocess tracking outputs, match bird IDs, build dataset parquets
 
 ## Test scripts
 
@@ -137,5 +155,4 @@ pixi run test-gs2
 
 ## Future work
 
-- DINOv2/v3-derived features
-  - Possibly adding trad. object detector or segmenter as preprocessing step to isolate subjects
+- Behaviour classifier training (TemporalCNN / TemporalGRU on features + embeddings)
