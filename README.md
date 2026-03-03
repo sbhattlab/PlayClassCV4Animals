@@ -1,33 +1,51 @@
-# Data directory
-- Small and tabular data in `data` directory
-- Larger video data in symlinked to `video-data-dir`
+# Chicken behaviour classification
+
+Multi-object tracking and segmentation of chickens in video data using SAM3,
+with postprocessing, feature extraction, and behaviour classification.
+
+## Data directory
+
+- Small and tabular data in `data/` directory
+- Larger video data symlinked to `video-data/`
+
 ```sh
 # ku-01
 ln -s "/mnt/birds/rebecca2025/raw" video-data
 ln -s "/mnt/birds/rebecca2025/" ext-data
 ```
 
-## Overview of test data
-- Small (<=1 min) in `data/img` and `data/video`
-    - 10 sec, 15 sec, 30 sec, 1 min clips
-- Medium (>=5 min) at `/mnt/birds/rebecca2025/`
-    - 5 min
+### Test data
 
-## Overview of `ext-data` directory
-```
+- Small (<=1 min) in `data/img` and `data/video` — 10 sec, 15 sec, 30 sec, 1 min clips
+- Medium (>=5 min) at `/mnt/birds/rebecca2025/` — 5 min
+
+### `ext-data` directory
+
+```sh
 ├── imgs    : video sequences converted to images (durations vary from 15 sec to 15 mins)
 ├── output  : results from runs
 ├── raw     : raw video files
 └── test    : *longer* video files (i.e. > 1 min)
 ```
 
-# Environment
-- Fetch git submodules:
+### Dataset
+
+Built by `script/build_dataset.py` from tracking outputs + registration protocol Excel files.
+Outputs saved to the tracking batch directory:
+
+- `dataset_tracks.parquet` — postprocessed tracks with protocol bird IDs
+- `dataset_labels.parquet` — behaviour labels aligned to tracking frames
+
+## Environment
+
+Fetch git submodules:
+
 ```sh
-git submodule update --init --recursivegit
+git submodule update --init --recursive
 ```
 
-- Install environments (currently supported: `sam3-hf` and `gs2`)
+Install environments (currently supported: `sam3-hf` and `gs2`):
+
 ```sh
 # Install main (default) environment
 pixi install
@@ -44,40 +62,47 @@ export PYTHONPATH="/path/to/submodule/chicken-behaviour-classifier/Grounded-SAM-
 pixi shell -e sam3-hf
 ```
 
-## Supported platforms
-In general, environments assume Linux. 
+### Supported platforms
+
+In general, environments assume Linux.
 
 Currently the following environments are supported in addition to Linux, on macOS:
+
 - SAM3 (huggingface transformers - the native implementation isn't officially supported on macOS)
 - grounded-sam-2 (the git submodule contains a gs2 fork which allows frame streaming, which reduces GPU memory usage for longer runs)
 
-# How to run tracking pipelines
-> [!IMPORTANT] 
+## How to run tracking pipelines
+
+> [!IMPORTANT]
 > Please read base config file usually named (`config/<tool name>_config.yaml`), and modify appropriately (e.g. which CUDA device to run)
 
 - Scripts are organized as: executable scripts in `script/`, reusable library modules in `src/`.
 
 - Run scripts as Python modules, e.g.:
+
 ```sh
-python -m script.sam3.run_sam3_hf 
+python -m script.sam3.run_sam3_hf
 ```
 
 - *OR* check whether a dedicated pixi task has been created for it, e.g.:
-```sh 
+
+```sh
 pixi run sam3-hf-default
 pixi run sam3-hf-manual
 pixi run sam3-hf-yolo-scan
 ```
 
-# Post-tracking pipelines
-```
-- `script/viz_chunk_boundaries.py` - Visualize chunk boundary frames from a config file or yolo scan run directory
-- `script/viz_grounding.py` - Render grounding phase outputs onto the original video
-```
+## Post-tracking pipelines
 
-# Overview of currently implemented test scripts
+- script/viz_chunk_boundaries.py  -> Visualize chunk boundary frames from a config file or yolo scan run directory
+- script/viz_grounding.py         -> Render grounding phase outputs onto the original video
+- script/build_dataset.py         -> Postprocess tracking outputs, match bird IDs, build dataset parquets
+
+## Test scripts
+
 > [!IMPORTANT]
 > Set `CUDA_VISIBLE_DEVICES` explicitly before running the commands below, e.g.:
+
 ```sh
 CUDA_VISIBLE_DEVICES=1 pixi run test-sam3-hf-image
 ```
@@ -91,24 +116,26 @@ pixi run -e sam3-native python -c "import torch; print(f'PyTorch is installed: {
 pixi run test-sam3-hf-image
 pixi run test-sam3-hf-video
 
-# SAM3-native 
-pixi run test-sam3-native-video  
+# SAM3-native
+pixi run test-sam3-native-video
 
 # grounded-sam-2
 pixi run test-gs2
 ```
 
-# Methods tested
-- Object detection 
-    - YOLO (yolo8n, yolo11x)
-- Pose-estimation (w/ fine-tuning from manually-labelled data)
-    - DeepLabCut
-    - YOLO model (yolo11x-pose)
-- Segmenter
-    - OpenCV + SciPy (i.e. "pure" computer vision, virtually no pre-trained model-based prediction)
-    - Grounded-SAM-2  
-    - SAM3 (huggingface (hf) and native implementations)
+## Methods tested
 
-# Future methods to implemented
+- Object detection
+  - YOLO (yolo8n, yolo11x)
+- Pose-estimation (w/ fine-tuning from manually-labelled data)
+  - DeepLabCut
+  - YOLO model (yolo11x-pose)
+- Segmenter
+  - OpenCV + SciPy (i.e. "pure" computer vision, virtually no pre-trained model-based prediction)
+  - Grounded-SAM-2
+  - SAM3 (huggingface (hf) and native implementations)
+
+## Future work
+
 - DINOv2/v3-derived features
-    - Possibly adding trad. object detector or segmenter as preprocessing step to isolate subjects
+  - Possibly adding trad. object detector or segmenter as preprocessing step to isolate subjects
