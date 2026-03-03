@@ -41,10 +41,12 @@ from pathlib import Path
 import pandas as pd
 from loguru import logger
 
+from src._config import DEFAULT_LABEL_DIR
 from src.dataset.labels import process_labels
 from src.dataset.tracking_issues import detect_tracking_issues
 from src.dataset.tracking_postprocessing import (
-    check_postprocessing,
+    align_labels,
+    assign_windows,
     prefill_postprocessing,
     process_tracks,
 )
@@ -115,7 +117,8 @@ def process_tracking_subdir(tracking_dir, bird_info):
     logger.info(f"Processing {tracking_dir.name}")
 
     fps = get_video_fps(tracking_dir)
-    tracks = pd.read_parquet(tracking_dir / "tracking_outputs.parquet")
+    tracks = pd.read_parquet(tracking_dir / "tracking_outputs.parquet").reset_index()
+    tracks = tracks.rename(columns={"object_id": "tracking_id"})
     logger.info(f"  FPS: {fps:.2f}, {len(tracks)} tracking rows")
 
     issues = detect_tracking_issues(tracks, fps)
@@ -124,9 +127,11 @@ def process_tracking_subdir(tracking_dir, bird_info):
     _save_json(tracking_dir / "tracking_issues.json", issues)
 
     # Match subdir name to video_id (e.g. "C1G1_day28" starts with "C1G1")
+    video_id = None
     video_birds = {}
-    for video_id, birds in bird_info.items():
-        if tracking_dir.name.startswith(video_id):
+    for vid, birds in bird_info.items():
+        if tracking_dir.name.startswith(vid):
+            video_id = vid
             video_birds = birds
             break
     if video_birds:
@@ -151,19 +156,11 @@ def process_tracking_subdir(tracking_dir, bird_info):
             f"{len(postprocessing)} template(s)"
         )
 
-    # Check readiness
-    try:
-        check_postprocessing(postprocessing)
-        ready = True
-    except ValueError as e:
-        logger.warning(f"  {tracking_dir.name}: {e}")
-        ready = False
-
     return {
         "tracks": tracks,
         "postprocessing": postprocessing,
+        "video_id": video_id,
         "fps": fps,
-        "ready": ready,
     }
 
 
@@ -185,7 +182,7 @@ def parse_args():
     parser.add_argument(
         "--label-dir",
         type=Path,
-        required=True,
+        default=DEFAULT_LABEL_DIR,
         help="Path to directory containing Registration protocols Excel files",
     )
     return parser.parse_args()
@@ -216,26 +213,38 @@ def main():
     # 4. Detect issues + prefill remaps per subdir (keeps data in memory)
     results = [process_tracking_subdir(d, bird_info) for d in tracking_dirs]
 
-    if not all(r["ready"] for r in results):
-        logger.warning(
-            "Cannot build dataset — fill in 'to' (id_switch) and "
-            "'tracking_id' (id_match) fields, then re-run."
-        )
-        return
-
     # 5. Build dataset from in-memory data
-    logger.info("All remaps validated. Building dataset...")
+    logger.info("Building dataset...")
     all_tracks = []
+    fps_lookup = {}
     for r in results:
-        tracks_clean, labels = process_tracks(
-            tracks=r["tracks"],
-            labels=labels,
-            postprocessing=r["postprocessing"],
-            fps=r["fps"],
-        )
+        try:
+            tracks_clean, labels = process_tracks(
+                tracks=r["tracks"],
+                labels=labels,
+                postprocessing=r["postprocessing"],
+                fps=r["fps"],
+            )
+        except ValueError as e:
+            logger.error(f"Cannot build dataset: {e}")
+            return
+
+        tracks_clean["video_id"] = r["video_id"]
+        fps_lookup[r["video_id"]] = r["fps"]
         all_tracks.append(tracks_clean)
 
-    tracks = pd.concat(all_tracks, ignore_index=True)
+    tracks = pd.concat(all_tracks)
+
+    # Canonical column order: video_id, bird_id, frame_idx, then the rest
+    leading = ["video_id", "bird_id", "frame_idx"]
+    tracks = tracks[leading + [c for c in tracks.columns if c not in leading]]
+
+    # 5b. Align labels to track coverage per (video_id, bird_id)
+    labels = align_labels(tracks, labels, fps_lookup)
+
+    # 5c. Assign temporal windows
+    tracks, labels = assign_windows(tracks, labels, fps_lookup)
+
     logger.info(f"Dataset built: {len(tracks)} track rows, {len(labels)} label rows")
 
     # 6. Save dataset

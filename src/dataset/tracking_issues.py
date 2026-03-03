@@ -12,9 +12,7 @@ def detect_id_switches(tracks, fps):
     Returns a dict of transition events keyed by "transition0", "transition1", etc.
     Each event has: frame, time, ids_before, ids_after, lost, gained.
     """
-    ids_per_frame = tracks.groupby("frame_idx").apply(
-        lambda g: set(g.index.get_level_values("object_id"))
-    )
+    ids_per_frame = tracks.groupby("frame_idx")["tracking_id"].apply(set)
 
     transitions = []
     for (prev_frame, prev_ids), (curr_frame, curr_ids) in zip(
@@ -55,7 +53,7 @@ def detect_overlaps(tracks, fps, iou_threshold=0.7, merge_gap_seconds=1.0):
         if len(group) < 2:
             continue
 
-        obj_ids = group.index.get_level_values("object_id").tolist()
+        obj_ids = group["tracking_id"].tolist()
         rles = []
         for _, row in group.iterrows():
             rle = {"counts": row["counts"], "size": row["size"]}
@@ -130,12 +128,12 @@ def detect_low_score_periods(
     events = {}
     idx = 0
 
-    for obj_id, grp in tracks.groupby(level="object_id"):
-        low = grp[grp["tracker_score"] < score_threshold]
+    for obj_id, grp in tracks.groupby("tracking_id"):
+        low = grp.query("tracker_score < @score_threshold")
         if low.empty:
             continue
 
-        frames = sorted(low.index.get_level_values("frame_idx"))
+        frames = sorted(low["frame_idx"])
 
         # Build consecutive blocks
         blocks = []
@@ -160,7 +158,7 @@ def detect_low_score_periods(
             if end - start + 1 < min_frames:
                 continue
             n_low = sum(1 for f in frames if start <= f <= end)
-            total = len(grp.loc[start:end])
+            in_range = grp.query("@start <= frame_idx <= @end")
             events[f"low_score{idx}"] = {
                 "start": int(start),
                 "end": int(end),
@@ -168,8 +166,8 @@ def detect_low_score_periods(
                 "end_time": round(end / fps, 2),
                 "id": int(obj_id),
                 "low_score_rows": n_low,
-                "total_rows": total,
-                "min_score": round(float(grp.loc[start:end, "tracker_score"].min()), 3),
+                "total_rows": len(in_range),
+                "min_score": round(float(in_range["tracker_score"].min()), 3),
             }
             idx += 1
 

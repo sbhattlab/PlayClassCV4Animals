@@ -3,32 +3,52 @@
 ## Workflow
 
 ```
-                    tracking_outputs.parquet     Registration protocols (.xlsx)
-                              |                            |
-                              v                            v
-                    detect_tracking_issues()       process_labels()
-                              |                      |          |
-                              v                      v          v
-                    tracking_issues.json         labels_df   bird_info
-                         |    |
-                         |    v
-                         |  prefill_postprocessing(issues, tracks, fps)
-                         |    |
-                         |    v
-                         |  tracking_postprocessing.json  <--- USER REVIEWS & EDITS
-                         |    |
-                         v    v
-                    process_tracks(tracks, labels, postprocessing, fps)
-                       |                    |                    |
-                       v                    v                    v
-                    trim()        merge_id_on_switch()    match_bird_ids()
-                       |                    |                    |
-                       v                    v                    v
-                    cleaned tracks      remapped tracks    protocol IDs
-                              \             |              /
-                               v            v             v
-                             (tracks, labels)   -> downstream (features, embeddings, ...)
+    [file]  function()  <column>
+
+      [tracking_outputs.parquet]      [Registration protocols (.xlsx)]
+                  |                                |
+                  v                                v
+         detect_tracking_issues()           process_labels()
+                  |                           |          |
+                  v                           v          v
+         [tracking_issues.json]            labels    bird_info
+                  |
+                  v
+         prefill_postprocessing()
+                  |
+                  v
+      [tracking_postprocessing.json]  <--- USER REVIEWS & EDITS
+                  |
+                  v
+            process_tracks()
+                  |
+               trim()                       <tracking_id>
+                  |
+            merge_id_on_switch()            <tracking_id>
+                  |
+            match_bird_ids()          <tracking_id> → <bird_id>
+                  |
+                  v
+            align_labels()                    <bird_id>
+                  |
+                  v
+            assign_windows()             <bird_id> + <window>
+                  |
+                  v
+         [dataset_tracks.parquet] + [dataset_labels.parquet]
 ```
+
+### Column naming
+
+The pipeline uses two ID columns:
+
+| Column | Used by | Meaning |
+|--------|---------|---------|
+| `tracking_id` | `trim`, `merge_id_on_switch`, `match_bird_ids` | Tracker-assigned integer ID |
+| `bird_id` | `align_labels`, `assign_windows`, dataset parquets | Protocol ID (real bird identity) |
+
+`match_bird_ids()` is the boundary: it remaps `tracking_id` values to protocol
+IDs and renames the column to `bird_id`.
 
 ### Step 1: Detect issues (automatic)
 
@@ -44,8 +64,8 @@ Output: `tracking_issues.json` (read-only diagnostic, not consumed by postproces
 
 ### Step 2: Prefill actions (automatic)
 
-`prefill_postprocessing(issues, tracks, fps)` converts each detected issue into a
-postprocessing entry in `tracking_postprocessing.json`:
+`prefill_postprocessing()` converts each detected issue into a postprocessing entry
+in `tracking_postprocessing.json`:
 
 | Issue             | Prefilled action                                              |
 |-------------------|---------------------------------------------------------------|
@@ -76,18 +96,35 @@ Edit `tracking_postprocessing.json`:
 `process_tracks()` reads the JSON and applies three operations in order:
 
 1. **`trim()`** — drops track rows within each trim's `[from, to]` frame range.
-   If `id` is present, only rows for that object ID are dropped; otherwise all
+   If `id` is present, only rows for that tracking ID are dropped; otherwise all
    rows in the range are removed. Labels whose time falls in the range are always
    dropped. The `cause` field is logged but does not affect behaviour.
 
 2. **`merge_id_on_switch()`** — for each `id_switch` entry, renames rows with
-   `object_id == from` **before** the switch `frame` to `to`. Remaps at the same
-   frame are grouped and applied simultaneously (masks computed before renames)
-   so that swaps work correctly. Across frames, groups are applied earliest-first.
+   `tracking_id == from` **before** the switch `frame` to `to`. Remaps at the
+   same frame are grouped and applied simultaneously (masks computed before
+   renames) so that swaps work correctly. Across frames, groups are applied
+   earliest-first.
 
 3. **`match_bird_ids()`** — for each `id_match` entry, renames all rows with the
    post-merge `tracking_id` to the `protocol_id`. Verifies the ID exists at the
-   reference `frame` before applying.
+   reference `frame` before applying. Renames the column from `tracking_id` to
+   `bird_id`.
+
+### Step 5: Align labels & assign windows (automatic)
+
+After postprocessing, the build script aligns labels with tracks and assigns
+temporal windows:
+
+1. **`align_labels()`** — computes the min/max frame per `(video_id, bird_id)` in
+   the tracks, converts to time, and drops any label rows that fall outside that
+   range or have no matching bird. This removes labels for time periods where no
+   tracking data exists.
+
+2. **`assign_windows()`** — each label defines a temporal window `(prev_time, time]`.
+   Track frames whose time falls in that interval share the same `window` index.
+   Both tracks and labels receive a `window` column, numbered per
+   `(video_id, bird_id)` starting from 0.
 
 ## Known issues
 
@@ -109,24 +146,26 @@ cap.release()
 
 ```sh
 # First run: generates tracking_issues.json + tracking_postprocessing.json
-pixi run -e sam3-hf python -m script.preprocess \
+pixi run -e sam3-hf build_dataset \
     --tracking-dir data/tracking/20260225_214929_sam3_hf \
     --label-dir data/labels
 
 # User fills in "to" values and reviews trim entries
 
 # Second run: applies postprocessing, builds dataset
-pixi run -e sam3-hf python -m script.preprocess \
+pixi run -e sam3-hf build_dataset \
     --tracking-dir data/tracking/20260225_214929_sam3_hf \
     --label-dir data/labels
 ```
+
+Output: `dataset_tracks.parquet` and `dataset_labels.parquet` saved to the tracking dir.
 
 ## Module overview
 
 | Module                       | Role                                                    |
 |------------------------------|---------------------------------------------------------|
 | `tracking_issues.py`        | Detection: ID switches, mask overlaps, low-score periods |
-| `tracking_postprocessing.py` | Remediation: prefill, trim, ID remap, process_tracks    |
+| `tracking_postprocessing.py` | Remediation: prefill, trim, ID remap, match; label alignment & windowing |
 | `labels.py`                  | Parse behaviour labels + bird info from Excel            |
 | `features.py`                | Handcrafted mask features (spatial, temporal, pairwise)  |
 | `embeddings.py`              | DINOv3 CLS-token embedding extraction                   |
