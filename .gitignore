@@ -230,6 +230,7 @@ model/
 
 # Data
 ext-data/
+data/eval/
 data/video/
 video-data/
 *.pt

@@ -1,5 +1,6 @@
 from typing import Final
 
 DEFAULT_DATA_DIR: Final = "data"
+DEFAULT_CHECKPOINT_DIR: Final = f"{DEFAULT_DATA_DIR}/eval"
 DEFAULT_LABEL_DIR: Final = f"{DEFAULT_DATA_DIR}/labels"
 DEFAULT_MIN_WINDOW_COVERAGE: Final = 0.5
