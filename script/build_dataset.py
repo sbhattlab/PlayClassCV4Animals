@@ -276,6 +276,15 @@ def main():
         tracks, labels, fps_lookup, min_coverage=args.min_window_coverage
     )
 
+    # Check that tracks and labels cover the same (video_id, bird_id, window) keys
+    _key_cols = ["video_id", "bird_id", "window"]
+    track_keys = set(tracks[_key_cols].itertuples(index=False, name=None))
+    label_keys = set(labels[_key_cols].itertuples(index=False, name=None))
+    assert track_keys == label_keys, (
+        f"Window key mismatch: {len(track_keys - label_keys)} in tracks only, "
+        f"{len(label_keys - track_keys)} in labels only"
+    )
+
     logger.info(f"Dataset built: {len(tracks)} track rows, {len(labels)} label rows")
 
     # 6. Save dataset

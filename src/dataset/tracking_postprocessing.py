@@ -408,12 +408,12 @@ def filter_incomplete_windows(
     n_too_short = (actual["coverage"] < min_coverage).sum()
     n_too_long = (actual["coverage"] > max_coverage).sum()
 
-    drop_keys = set(zip(drop["video_id"], drop["bird_id"], drop["window"]))
+    keep_keys = set(zip(keep["video_id"], keep["bird_id"], keep["window"]))
     tracks_key = list(zip(tracks["video_id"], tracks["bird_id"], tracks["window"]))
     labels_key = list(zip(labels["video_id"], labels["bird_id"], labels["window"]))
 
-    tracks = tracks[[k not in drop_keys for k in tracks_key]]
-    labels = labels[[k not in drop_keys for k in labels_key]]
+    tracks = tracks[[k in keep_keys for k in tracks_key]]
+    labels = labels[[k in keep_keys for k in labels_key]]
 
     logger.info(
         f"Window filter (coverage={min_coverage:.0%}–{max_coverage:.0%}): "
