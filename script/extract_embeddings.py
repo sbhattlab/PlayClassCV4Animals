@@ -101,10 +101,10 @@ def main():
     # Load model + processor once
     logger.info(f"Loading model: {args.model_name}")
     processor = AutoImageProcessor.from_pretrained(args.model_name)
-    model = AutoModel.from_pretrained(args.model_name, torch_dtype=torch.float16)
+    model = AutoModel.from_pretrained(args.model_name, dtype=torch.bfloat16)
     device = torch.device(f"cuda:{args.device}")
     model = model.to(device).eval()
-    logger.info(f"Model loaded on {device} (float16)")
+    logger.info(f"Model loaded on {device} (bfloat16)")
 
     # Check that window column exists
     if "window" not in tracks.columns:
