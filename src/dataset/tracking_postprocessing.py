@@ -237,9 +237,7 @@ def match_bird_ids(tracks, id_matches):
 
         # Verify tracking_id exists (optionally at a specific frame)
         if frame is not None:
-            at_frame = tracks.query(
-                "frame_idx == @frame and tracking_id == @tid"
-            )
+            at_frame = tracks.query("frame_idx == @frame and tracking_id == @tid")
             if at_frame.empty:
                 logger.warning(
                     f"ID match: tracking_id {tid} not found at frame {frame} "
@@ -343,12 +341,20 @@ def align_labels(tracks, labels, fps_lookup):
     return labels
 
 
-def filter_incomplete_windows(tracks, labels, fps_lookup, *, min_coverage=DEFAULT_MIN_WINDOW_COVERAGE):
-    """Drop windows where actual frame count is below a coverage threshold.
+def filter_incomplete_windows(
+    tracks,
+    labels,
+    fps_lookup,
+    *,
+    min_coverage=DEFAULT_MIN_WINDOW_COVERAGE,
+    max_coverage=1.02,
+):
+    """Drop windows where actual frame count is outside a coverage threshold.
 
     After trimming, some windows may have very few frames remaining. Feature
     statistics (std, velocity) from 2 frames are meaningless, and a temporal
-    model seeing 2 frames instead of ~125 is problematic.
+    model seeing 2 frames instead of ~125 is problematic. Windows with too
+    many frames indicate a windowing bug and are also dropped.
 
     Assumes constant FPS per video and constant window duration (label spacing)
     throughout the dataset.
@@ -364,6 +370,9 @@ def filter_incomplete_windows(tracks, labels, fps_lookup, *, min_coverage=DEFAUL
     min_coverage : float
         Minimum fraction of expected frames a window must have to be kept.
         Default 0.5 (50%).
+    max_coverage : float
+        Maximum fraction of expected frames a window may have to be kept.
+        Default 1.02 (102%) — allows 1–2 extra frames from fps rounding.
 
     Returns
     -------
@@ -393,8 +402,11 @@ def filter_incomplete_windows(tracks, labels, fps_lookup, *, min_coverage=DEFAUL
     )
     actual["coverage"] = actual["actual_frames"] / actual["expected_frames"]
 
-    drop = actual.query("coverage < @min_coverage")
-    keep = actual.query("coverage >= @min_coverage")
+    drop = actual.query("coverage < @min_coverage or coverage > @max_coverage")
+    keep = actual.query("coverage >= @min_coverage and coverage <= @max_coverage")
+
+    n_too_short = (actual["coverage"] < min_coverage).sum()
+    n_too_long = (actual["coverage"] > max_coverage).sum()
 
     drop_keys = set(zip(drop["video_id"], drop["bird_id"], drop["window"]))
     tracks_key = list(zip(tracks["video_id"], tracks["bird_id"], tracks["window"]))
@@ -404,9 +416,10 @@ def filter_incomplete_windows(tracks, labels, fps_lookup, *, min_coverage=DEFAUL
     labels = labels[[k not in drop_keys for k in labels_key]]
 
     logger.info(
-        f"Window filter (min_coverage={min_coverage:.0%}): "
+        f"Window filter (coverage={min_coverage:.0%}–{max_coverage:.0%}): "
         f"window_duration={window_duration:.1f}s, "
-        f"dropped {len(drop)}/{len(drop) + len(keep)} windows"
+        f"dropped {len(drop)}/{len(drop) + len(keep)} windows "
+        f"({n_too_short} too short, {n_too_long} too long)"
     )
 
     return tracks, labels
@@ -442,13 +455,18 @@ def assign_windows(tracks, labels, fps_lookup):
         track_mask = (tracks["video_id"] == vid) & (tracks["bird_id"] == bid)
         frame_times = tracks.loc[track_mask, "frame_idx"].values / fps_lookup[vid]
         window_idx = np.searchsorted(label_times, frame_times, side="left")
-        window_idx = np.clip(window_idx, 0, len(label_times) - 1)
-        tracks.loc[track_mask, "window"] = lbl_group["window"].values[window_idx]
+        # Frames past the last label time get index == len(label_times);
+        # mark them as unassigned (-1) instead of clipping into the last window
+        in_range = window_idx < len(label_times)
+        assigned = np.full(len(window_idx), -1, dtype=int)
+        assigned[in_range] = lbl_group["window"].values[window_idx[in_range]]
+        tracks.loc[track_mask, "window"] = assigned
 
     tracks["window"] = tracks["window"].astype(int)
     n_unmatched = (tracks["window"] == -1).sum()
     if n_unmatched:
-        logger.warning(f"{n_unmatched} track rows could not be assigned a window")
+        logger.info(f"Dropping {n_unmatched} track rows past the last label time")
+        tracks = tracks[tracks["window"] != -1].reset_index(drop=True)
     logger.info(
         f"Assigned {labels['window'].nunique()} unique windows "
         f"across {labels.groupby('video_id').ngroups} video(s)"

@@ -7,6 +7,7 @@ from src.dataset.tracking_postprocessing import (
     align_labels,
     assign_windows,
     check_postprocessing,
+    filter_incomplete_windows,
     match_bird_ids,
     merge_id_on_switch,
     process_tracks,
@@ -415,3 +416,109 @@ class TestAssignWindows:
         _, labels_out = assign_windows(tracks, labels, FPS_LOOKUP)
 
         assert labels_out["window"].tolist() == [0, 1, 2]
+
+    def test_frames_past_last_label_dropped(self):
+        """
+        Input: tracks 0–399 (0–15.96s), labels at [5, 10]s
+        Transform: assign_windows
+        Expected output: frames past 10.0s (frame 251+) are dropped.
+        """
+        rows = [
+            {"video_id": "v1", "bird_id": 1, "frame_idx": f, "tracker_score": 0.9}
+            for f in range(400)
+        ]
+        tracks = pd.DataFrame(rows)
+        labels = pd.DataFrame(
+            {
+                "video_id": ["v1", "v1"],
+                "bird_id": [1, 1],
+                "time": [5.0, 10.0],
+                "behav": ["idle", "walk"],
+            }
+        )
+
+        tracks_out, _ = assign_windows(tracks, labels, FPS_LOOKUP)
+
+        # No frames past 10.0s (frame 250)
+        assert tracks_out["frame_idx"].max() <= 250
+        # Frames within label range are kept
+        assert len(tracks_out) == 251  # frames 0–250 inclusive
+
+    def test_no_frames_dropped_when_within_range(self):
+        """
+        Input: tracks 0–249 (0–9.96s), labels at [5, 10]s
+        Expected output: all 250 frames kept (none past last label).
+        """
+        rows = [
+            {"video_id": "v1", "bird_id": 1, "frame_idx": f, "tracker_score": 0.9}
+            for f in range(250)
+        ]
+        tracks = pd.DataFrame(rows)
+        labels = pd.DataFrame(
+            {
+                "video_id": ["v1", "v1"],
+                "bird_id": [1, 1],
+                "time": [5.0, 10.0],
+                "behav": ["idle", "walk"],
+            }
+        )
+
+        tracks_out, _ = assign_windows(tracks, labels, FPS_LOOKUP)
+        assert len(tracks_out) == 250
+
+
+# ── filter_incomplete_windows ─────────────────────────────────────
+
+
+class TestFilterIncompleteWindowsMaxCoverage:
+    def test_drops_oversized_window(self):
+        """Window with 200/125 frames (160%) dropped at default max_coverage."""
+        tracks = pd.DataFrame(
+            {
+                "video_id": ["v1"] * 325,
+                "bird_id": [1] * 325,
+                "frame_idx": list(range(125)) + list(range(125, 325)),
+                "window": [0] * 125 + [1] * 200,
+            }
+        )
+        labels = pd.DataFrame(
+            {
+                "video_id": ["v1", "v1"],
+                "bird_id": [1, 1],
+                "window": [0, 1],
+                "time": [5.0, 10.0],
+            }
+        )
+
+        tracks_out, labels_out = filter_incomplete_windows(
+            tracks, labels, FPS_LOOKUP
+        )
+
+        assert set(tracks_out["window"].unique()) == {0}
+        assert set(labels_out["window"].unique()) == {0}
+
+    def test_keeps_normal_window(self):
+        """Window with 125/125 frames (100%) kept at default max_coverage."""
+        tracks = pd.DataFrame(
+            {
+                "video_id": ["v1"] * 125,
+                "bird_id": [1] * 125,
+                "frame_idx": list(range(125)),
+                "window": [0] * 125,
+            }
+        )
+        labels = pd.DataFrame(
+            {
+                "video_id": ["v1"],
+                "bird_id": [1],
+                "window": [0],
+                "time": [5.0],
+            }
+        )
+
+        tracks_out, labels_out = filter_incomplete_windows(
+            tracks, labels, FPS_LOOKUP
+        )
+
+        assert len(tracks_out) == 125
+        assert len(labels_out) == 1
