@@ -90,16 +90,20 @@ def extract_spatial_features(tracks: pd.DataFrame) -> pd.DataFrame:
     # pycocotools.mask.decode requires all masks to share the same size,
     # so group by size first, then decode in chunks to cap memory.
     sizes = tracks["size"].apply(tuple)
+    # Use positional indices (iloc-style) since rle_list is a plain 0-based list,
+    # but the DataFrame index may not be contiguous/0-based after filtering.
+    idx_to_pos = {idx: pos for pos, idx in enumerate(tracks.index)}
     for _size, group in tqdm(tracks.groupby(sizes), desc="Decoding masks"):
         indices = group.index
-        group_rles = [rle_list[i] for i in indices]
+        positions = [idx_to_pos[i] for i in indices]
+        group_rles = [rle_list[p] for p in positions]
 
         for chunk_start in tqdm(
             range(0, len(group_rles), _DECODE_CHUNK_SIZE), leave=False
         ):
             chunk_end = chunk_start + _DECODE_CHUNK_SIZE
             chunk_rles = group_rles[chunk_start:chunk_end]
-            chunk_indices = indices[chunk_start:chunk_end]
+            chunk_positions = positions[chunk_start:chunk_end]
 
             # Batch decode: (H, W, N) binary array, one mask per N slice
             masks_3d = mask_util.decode(chunk_rles)
@@ -107,8 +111,8 @@ def extract_spatial_features(tracks: pd.DataFrame) -> pd.DataFrame:
                 masks_3d = masks_3d[:, :, np.newaxis]
 
             cx, cy = _centroids_from_masks(masks_3d)
-            centroid_x[chunk_indices] = cx
-            centroid_y[chunk_indices] = cy
+            centroid_x[chunk_positions] = cx
+            centroid_y[chunk_positions] = cy
 
     return pd.DataFrame(
         {

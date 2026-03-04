@@ -70,6 +70,16 @@ def main():
         f"{len(features_windowed)} per-window features"
     )
 
+    # Check alignment with labels
+    labels = pd.read_parquet(args.tracking_dir / "dataset_labels.parquet")
+    _key_cols = ["video_id", "bird_id", "window"]
+    feature_keys = set(features_windowed[_key_cols].itertuples(index=False, name=None))
+    label_keys = set(labels[_key_cols].itertuples(index=False, name=None))
+    assert feature_keys == label_keys, (
+        f"Window key mismatch with labels: {len(feature_keys - label_keys)} in features only, "
+        f"{len(label_keys - feature_keys)} in labels only"
+    )
+
     # Save
     all_path = args.tracking_dir / "all_features.parquet"
     features.to_parquet(all_path)
