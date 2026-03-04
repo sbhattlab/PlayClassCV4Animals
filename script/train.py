@@ -37,11 +37,11 @@ from src.classification.trainer import BehaviourClassifier
 def parse_args():
     parser = ArgumentParser(description="Train behaviour classifier.")
     parser.add_argument("--tracking-dir", type=Path, required=True)
-    parser.add_argument("--model", type=str, choices=MODEL_REGISTRY, default="mlp")
+    parser.add_argument("--model", type=str, choices=MODEL_REGISTRY, required=True)
     parser.add_argument(
         "--exclude", type=str, default=None, help="Exclude videos with this substring"
     )
-    parser.add_argument("--epochs", type=int, default=10)
+    parser.add_argument("--epochs", type=int, default=50)
     parser.add_argument(
         "--patience", type=int, default=5, help="EarlyStopping patience"
     )
@@ -99,6 +99,7 @@ def train_fold(
     model: BehaviourClassifier,
     pl_logger,
     fold_dir: Path,
+    fold_idx: int = 0,
     **training_args,
 ) -> tuple[L.Trainer, BehaviourClassifier]:
     """Fit a model on the current DM split.
@@ -113,6 +114,7 @@ def train_fold(
         devices=training_args["devices"],
         max_epochs=training_args["epochs"],
         logger=pl_logger,
+        enable_model_summary=(fold_idx == 0),
         callbacks=[
             EarlyStopping(
                 monitor="val_loss", patience=training_args["patience"], mode="min"
@@ -131,29 +133,53 @@ def train_fold(
     return trainer, model
 
 
+def _collect_metrics(result, collection):
+    """Extract scalars and arrays from a MetricCollection into result dict."""
+    for k, v in collection.compute().items():
+        if v.ndim == 0:
+            result[k] = v.item()
+        else:
+            result[k] = v.cpu().numpy().astype(int)
+
+
+def _eval_dataloader(model, dataloader, metrics):
+    """Run model on a dataloader and update metrics (no grad)."""
+    metrics.reset()
+    model.eval()
+    with torch.no_grad():
+        for batch in dataloader:
+            batch = {k: v.to(model.device) for k, v in batch.items()}
+            logits = model.backbone(batch["data"])
+            metrics.update(logits, batch["label"])
+
+
 def evaluate_fold(
     trainer: L.Trainer,
     model: BehaviourClassifier,
     dm: BehaviourDataModule,
 ) -> dict:
-    """Collect all metrics for the fold (train, val, test)."""
+    """Collect all metrics for the fold (train, val, test).
+
+    Lightning resets epoch metrics after fit() and test(), so we
+    load the best checkpoint manually and re-evaluate all splits.
+    """
     result = {"test_video": dm.test_video, "val_video": dm.val_video}
 
-    # Train/val metrics (accumulated during fit)
-    for collection in (model.train_metrics, model.val_metrics):
-        for k, v in collection.compute().items():
-            if v.ndim == 0:
-                result[k] = v.item()
-            else:
-                result[k] = v.cpu().numpy().astype(int)
+    # Load best checkpoint (trainer.test resets metrics, so we do it manually)
+    best_path = trainer.checkpoint_callback.best_model_path
+    if best_path:
+        ckpt = torch.load(best_path, weights_only=True)
+        model.load_state_dict(ckpt["state_dict"])
 
-    # Test metrics
-    trainer.test(model, dm, ckpt_path="best")
-    for k, v in model.test_metrics.compute().items():
-        if v.ndim == 0:
-            result[k] = v.item()
-        else:
-            result[k] = v.cpu().numpy().astype(int)
+    # Evaluate all splits with best model
+    _eval_dataloader(model, dm.test_dataloader(), model.test_metrics)
+    _collect_metrics(result, model.test_metrics)
+
+    _eval_dataloader(model, dm.train_dataloader(), model.train_metrics)
+    _collect_metrics(result, model.train_metrics)
+
+    _eval_dataloader(model, dm.val_dataloader(), model.val_metrics)
+    _collect_metrics(result, model.val_metrics)
 
     return result
 

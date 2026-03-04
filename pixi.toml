@@ -18,6 +18,7 @@ sam3-hf = ["sam3-hf"]
 sam3-native = ["sam3-native"]
 gs2 = ["gs2"]
 yolo = ["yolo"]
+classifier = ["classifier"]
 
 # ======= Default dependencies ======
 [dependencies]
@@ -124,6 +125,16 @@ python -m script.gs2.chicken_tracking_demo --gs2-repo-path Grounded-SAM-2-fork -
 """ }
 
 gs2-manual-chunking = "python -m script.gs2.run_gs2_manual_chunking --config config/gs2_manual_chunking.yaml"
+
+# ======= Classifier dependencies ======
+[feature.classifier.pypi-dependencies]
+lightning = ">=2.5"
+wandb = ">=0.19"
+torchmetrics = ">=1.7"
+xgboost = ">=3.2.0, <4"
+
+[feature.classifier.tasks]
+train = "python -m script.train"
 
 # ======= YOLO dependencies ======
 [feature.yolo.pypi-dependencies]

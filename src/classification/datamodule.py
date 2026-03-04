@@ -131,7 +131,12 @@ class BehaviourDataset(Dataset):
             features_df = pd.read_parquet(
                 tracking_dir / "dataset_features.parquet"
             ).drop(columns=_SKIP_COLS, errors="ignore")
-            parts.append(torch.tensor(features_df.values, dtype=torch.float32))
+            features_df = features_df.fillna(features_df.median())
+            feat = torch.tensor(features_df.values, dtype=torch.float32)
+            self._feat_mean = feat.mean(dim=0)
+            self._feat_std = feat.std(dim=0).clamp(min=1e-8)
+            feat = (feat - self._feat_mean) / self._feat_std
+            parts.append(feat)
 
         assert parts, "At least one of use_features or use_embeddings must be True"
         return torch.cat(parts, dim=-1) if len(parts) > 1 else parts[0]

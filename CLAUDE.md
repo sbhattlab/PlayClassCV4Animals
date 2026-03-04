@@ -19,7 +19,7 @@ pixi install -e sam3-hf        # SAM3 HuggingFace (main pipeline)
 pixi shell -e sam3-hf          # Enter shell
 ```
 
-Other environments exist (`sam3-native`, `gs2`, `yolo`) but are not actively used. Platform is Linux-only (CUDA 12.6).
+Other environments exist (`sam3-native`, `gs2`, `yolo`) but are not actively used. The `classifier` environment adds PyTorch Lightning, wandb, and torchmetrics for classification training. Platform is Linux-only (CUDA 12.6).
 
 ## Running Scripts
 
@@ -65,12 +65,18 @@ src/
     labels.py               # Behaviour label parsing from Excel registration protocols
     features.py             # Handcrafted mask features: spatial, temporal, pairwise, window summarization (vectorized)
     embeddings.py           # DINOv3 CLS-token embedding extraction from bbox crops of tracked objects
+  classification/           # Behaviour classification package
+    models.py               # Backbones: LinearBaseline, TemporalCNN, TemporalGRU, FeatureMLP, CombinedMLP
+    datamodule.py           # BehaviourDataset + BehaviourDataModule (LOVO split, segment pooling)
+    trainer.py              # BehaviourClassifier LightningModule (weighted CE, AdamW, MetricCollection)
+    stats.py                # LOVO aggregation: scalar summary CSV, summed confusion matrices
   debug/                    # Interactive debugging utilities and standalone grounding test script
 
 script/
   build_dataset.py             # Labels, postprocessing, windowing → dataset_tracks + dataset_labels parquets
   extract_features.py          # Mask feature extraction + window summarization (CPU-only, ~7 min)
   extract_embeddings.py        # DINOv3 CLS-token embeddings from bbox crops (GPU required)
+  train.py                     # Classification training CLI (PyTorch Lightning)
   compute_chunk_boundaries.py  # User script: recompute metrics + boundaries from existing yolo_tracking.parquet
   dlc2yolo/                    # DLC-to-YOLO format converter for pose dataset creation
   convert_video_clean.py       # Video format/resolution conversion utility
@@ -120,7 +126,18 @@ Feature set (`_FEATURE_COLS`): `mask_area`, `aspect_ratio`, `velocity`, `area_ch
 
 ### Embeddings module (`src/dataset/embeddings.py`)
 
-Extracts DINOv3 CLS-token embeddings from bbox crops of tracked objects. Output is `{(video_id, bird_id, window): Tensor(F_w, D)}` — one variable-length sequence per window, aligned with the feature summarization grouping. `D` depends on the model (768 for ViT-B, 1024 for ViT-L), read from `model.config.hidden_size`. Crops are plain bbox cutouts (no mask-based background attenuation). Bboxes are clamped to frame dimensions to handle SAM3 bbox overshoot (known upstream issue where center+size→corner conversion produces coordinates slightly outside the image). Extraction script: `script/extract_embeddings.py` (GPU required, run via `pixi run -e sam3-hf extract-embeddings`).
+Extracts DINOv3 CLS-token embeddings from bbox crops of tracked objects. Output is `{(video_id, bird_id, window): Tensor(F_w, D)}` — one variable-length sequence per window, aligned with the feature summarization grouping. `D` depends on the model (768 for ViT-B, 1024 for ViT-L), read from `model.config.hidden_size`. Crops are plain bbox cutouts (no mask-based background attenuation). Bboxes are clamped to frame dimensions to handle SAM3 bbox overshoot (known upstream issue where center+size→corner conversion produces coordinates slightly outside the image). Extraction uses **bfloat16** (float16 produces all-NaN with DINOv3 ViT-L). Extraction script: `script/extract_embeddings.py` (GPU required, run via `pixi run -e sam3-hf extract-embeddings`).
+
+### Classification package (`src/classification/`)
+
+Behaviour classification from dataset outputs. Uses PyTorch Lightning (pixi env `classifier`).
+
+- **`models.py`**: Pure `nn.Module` backbones. `SimpleMLP` (features → MLP), `SimpleLinear` (mean-pool + linear), `TemporalMLP` (gated attention pool), `TemporalCNN` / `TemporalGRU` (sequence models for segment-pooled embeddings). All temporal models expect `(B, F, D)` input. `MODEL_REGISTRY` maps model names to `(backbone_cls, datamodule_flags)` — single source of truth for CLI choices and input requirements.
+- **`datamodule.py`**: `BehaviourDataModule` loads data once via `prepare_data()`, then re-splits per fold via `set_split_groups(test_video, val_video)` + `setup()`. Exposes `video_ids`, `class_weights` (inverse-sqrt from train split), `n_classes`, `data_dim`, `label_encoder`. Features are median-imputed (2 rows with NaN pairwise distances from solo-bird windows) then z-score normalized at load time. Embeddings are mean-pooled by default; when `temporal=True`, segment-pooled via adaptive average pooling.
+- **`trainer.py`**: `BehaviourClassifier(LightningModule)` wraps any backbone. Weighted CE loss, AdamW. Uses `torchmetrics.MetricCollection` with `MulticlassF1Score` (macro) + `MulticlassConfusionMatrix`, cloned with prefixes for train/val/test stages. `evaluate_fold` in `train.py` loads the best checkpoint manually and re-evaluates all splits (Lightning resets metrics after fit/test).
+- **`stats.py`**: LOVO aggregation. `aggregate_metrics()` dispatches to `aggregate_scalars()` (summary CSV with MEAN/STD rows) and `aggregate_confusion_matrices()` (summed CMs for train/val/test). Raises `ValueError` for unknown metric types.
+
+Label encoding: `LABEL_ORDER = ["none", "worm", "locomotor", "social"]`. `--exclude` removes a class. Training script: `script/train.py` (`pixi run -e classifier train`).
 
 ### Output schemas
 
@@ -154,6 +171,7 @@ Extracts DINOv3 CLS-token embeddings from bbox crops of tracked objects. Output 
 - supervision, loguru, OmegaConf, pycocotools, matplotlib
 - ultralytics (YOLO scan)
 - scikit-learn (legacy KMeans in `src/utils.py`, used only by `viz.py`)
+- PyTorch Lightning, torchmetrics, wandb (classifier environment)
 
 ## Dataset Pipeline
 
@@ -197,6 +215,55 @@ Output: `all_features.parquet` (per-frame) + `dataset_features.parquet` (per-win
 `script/extract_embeddings.py` reads `dataset_tracks.parquet`, crops bbox regions from video frames, and extracts DINOv3 CLS-token embeddings per (video_id, bird_id, window).
 
 Output: `dataset_embeddings.pt` — dict keyed by `(video_id, bird_id, window)` with `Tensor(F_w, D)` values.
+
+## Classification Training
+
+Runs in the `classifier` pixi environment. Requires dataset pipeline outputs (steps 1–3 above).
+
+Always runs full LOVO (Leave-One-Video-Out) cross-validation across all videos. Val video is auto-selected from the next cage (cage-aware rotation to avoid environment leakage). A fresh model is created per fold.
+
+```sh
+# Full LOVO cross-validation
+pixi run -e classifier train \
+    --tracking-dir data/tracking/20260225_214929_sam3_hf \
+    --model mlp
+
+# Dry run (first fold, 1 batch, no checkpoints)
+pixi run -e classifier train \
+    --tracking-dir data/tracking/20260225_214929_sam3_hf \
+    --model mlp --dry-run
+
+# Exclude a class (e.g. social, only 46 samples)
+pixi run -e classifier train \
+    --tracking-dir data/tracking/20260225_214929_sam3_hf \
+    --model mlp --exclude social
+```
+
+LOVO output structure:
+```
+data/eval/20260304_174946_mlp/
+├── cfg.json                          # CLI args for reproducibility
+├── fold_0_C1G1/                      # per-fold checkpoints + CSVLogger
+│   ├── checkpoints/                  # ModelCheckpoint (best val_loss)
+│   └── lightning_logs/version_0/     # CSVLogger (metrics.csv per epoch)
+├── fold_1_C1G3/
+├── ...
+├── lovo_summary.csv                  # scalar metrics per fold + MEAN/STD
+├── lovo_train_confusion_matrix.txt   # summed train CM
+├── lovo_val_confusion_matrix.txt     # summed val CM
+└── lovo_test_confusion_matrix.txt    # summed test CM (disjoint test sets)
+```
+
+| `--model` | Backbone | Input |
+|-----------|----------|-------|
+| `mlp` | `SimpleMLP` | 31-d handcrafted features |
+| `linear` | `SimpleLinear` | mean-pooled embeddings (D-d) |
+| `mlp_embed` | `SimpleMLP` | features + mean-pooled embeddings |
+| `temporal_mlp` | `TemporalMLP` | segment-pooled embedding sequences (gated attention pool) |
+| `temporal_cnn` | `TemporalCNN` | segment-pooled embedding sequences |
+| `temporal_gru` | `TemporalGRU` | segment-pooled embedding sequences |
+
+`mlp` only requires `dataset_features.parquet`; all other models also require `dataset_embeddings.pt`.
 
 ## Utilities
 

@@ -45,9 +45,7 @@ def aggregate_confusion_matrices(
         summed_cm = sum(r[key] for r in fold_results)
         cm_text = format_confusion_matrix(summed_cm, labels)
         cm_path = run_dir / f"lovo_{key}.txt"
-        cm_path.write_text(
-            f"Summed {key} (rows=true, cols=predicted):\n{cm_text}\n"
-        )
+        cm_path.write_text(f"# Summed {key} (rows=true, cols=predicted):\n{cm_text}\n")
         logger.info(f"Summed {key} saved to {cm_path}")
 
 
