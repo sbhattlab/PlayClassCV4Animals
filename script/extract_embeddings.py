@@ -147,6 +147,16 @@ def main():
     if not all_embeddings:
         raise ValueError("No embeddings extracted for any video.")
 
+    # Check alignment with labels
+    labels = pd.read_parquet(args.tracking_dir / "dataset_labels.parquet")
+    _key_cols = ["video_id", "bird_id", "window"]
+    embedding_keys = set(all_embeddings.keys())
+    label_keys = set(labels[_key_cols].itertuples(index=False, name=None))
+    assert embedding_keys == label_keys, (
+        f"Window key mismatch with labels: {len(embedding_keys - label_keys)} in embeddings only, "
+        f"{len(label_keys - embedding_keys)} in labels only"
+    )
+
     # Save embeddings keyed by (video_id, bird_id, window)
     raw_path = args.tracking_dir / "dataset_embeddings.pt"
     torch.save(all_embeddings, raw_path)
