@@ -894,7 +894,8 @@ def _run_single_video(cfg, run_dir: Path, config_path: Path | None = None):
             gs_chunk_df = gs_chunk_df.sort_index()
             if grounding_results_path.exists():
                 gs_existing_df = pd.read_parquet(grounding_results_path)
-                gs_chunk_df = pd.concat([gs_existing_df, gs_chunk_df]).sort_index()
+                gs_chunk_df = pd.concat([gs_existing_df, gs_chunk_df])
+                gs_chunk_df = gs_chunk_df[~gs_chunk_df.index.duplicated(keep="last")].sort_index()
                 del gs_existing_df
             gs_chunk_df.to_parquet(grounding_results_path)
             del gs_chunk_df
@@ -990,7 +991,8 @@ def _run_single_video(cfg, run_dir: Path, config_path: Path | None = None):
         chunk_df = chunk_df.sort_index()
         if results_path.exists():
             existing_df = pd.read_parquet(results_path)
-            chunk_df = pd.concat([existing_df, chunk_df]).sort_index()
+            chunk_df = pd.concat([existing_df, chunk_df])
+            chunk_df = chunk_df[~chunk_df.index.duplicated(keep="last")].sort_index()
             del existing_df
         chunk_df.to_parquet(results_path)
         del chunk_df
