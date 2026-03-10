@@ -1,0 +1,166 @@
+[
+  {
+    "type": "id_switch",
+    "frame": 49,
+    "from": null,
+    "to": 1,
+    "_time": "00:01.96"
+  },
+  {
+    "type": "id_switch",
+    "frame": 53,
+    "from": null,
+    "to": 2,
+    "_time": "00:02.12"
+  },
+  {
+    "type": "id_switch",
+    "frame": 1362,
+    "from": null,
+    "to": 2,
+    "_time": "00:54.47"
+  },
+  {
+    "type": "id_switch",
+    "frame": 6267,
+    "from": null,
+    "to": 2,
+    "_time": "04:10.64"
+  },
+  {
+    "type": "id_switch",
+    "frame": 9301,
+    "from": null,
+    "to": 3,
+    "_time": "06:11.98"
+  },
+  {
+    "type": "id_switch",
+    "frame": 10513,
+    "from": null,
+    "to": 3,
+    "_time": "07:00.45"
+  },
+  {
+    "type": "id_switch",
+    "frame": 12251,
+    "from": null,
+    "to": 0,
+    "_time": "08:09.96"
+  },
+  {
+    "type": "id_switch",
+    "frame": 12284,
+    "from": null,
+    "to": 3,
+    "_time": "08:11.27"
+  },
+  {
+    "type": "id_switch",
+    "frame": 15036,
+    "from": null,
+    "to": 3,
+    "_time": "10:01.34"
+  },
+  {
+    "type": "id_switch",
+    "frame": 16515,
+    "from": null,
+    "to": 4,
+    "_time": "11:00.49"
+  },
+  {
+    "type": "id_switch",
+    "frame": 16537,
+    "from": null,
+    "to": 3,
+    "_time": "11:01.37"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "from": 16957,
+    "to": 17174,
+    "id": 4,
+    "_time": "11:18.16-11:26.84"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "from": 17239,
+    "to": 17282,
+    "id": 3,
+    "_time": "11:29.44-11:31.16"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "from": 17332,
+    "to": 17361,
+    "id": 3,
+    "_time": "11:33.16-11:34.32"
+  },
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "from": 17755,
+    "to": 17801,
+    "id": 2,
+    "_time": "11:50.08-11:51.92"
+  },
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "from": 18017,
+    "to": 18102,
+    "id": 4,
+    "_time": "12:00.56-12:03.95"
+  },
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "from": 18132,
+    "to": 19259,
+    "id": 2,
+    "_time": "12:05.15-12:50.23"
+  },
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "from": 18847,
+    "to": 18886,
+    "id": 3,
+    "_time": "12:33.75-12:35.31"
+  },
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "from": 18847,
+    "to": 18870,
+    "id": 3,
+    "_time": "12:33.75-12:34.67"
+  },
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "from": 18929,
+    "to": 19259,
+    "id": 3,
+    "_time": "12:37.03-12:50.23"
+  },
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "from": 18930,
+    "to": 19259,
+    "id": 3,
+    "_time": "12:37.07-12:50.23"
+  },
+  {
+    "type": "id_switch",
+    "frame": 19260,
+    "from": null,
+    "to": 1,
+    "_time": "12:50.27"
+  }
+]

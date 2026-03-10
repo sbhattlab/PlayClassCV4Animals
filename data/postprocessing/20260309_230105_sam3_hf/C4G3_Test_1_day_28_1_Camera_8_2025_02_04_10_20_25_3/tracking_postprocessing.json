@@ -1,0 +1,161 @@
+[
+  {
+    "type": "id_switch",
+    "frame": 41,
+    "from": null,
+    "to": 1,
+    "_time": "00:01.64"
+  },
+  {
+    "type": "id_switch",
+    "frame": 52,
+    "from": null,
+    "to": 2,
+    "_time": "00:02.08"
+  },
+  {
+    "type": "id_switch",
+    "frame": 1351,
+    "from": null,
+    "to": 2,
+    "_time": "00:54.04"
+  },
+  {
+    "type": "id_switch",
+    "frame": 1352,
+    "from": null,
+    "to": 1,
+    "_time": "00:54.08"
+  },
+  {
+    "type": "id_switch",
+    "frame": 4557,
+    "from": null,
+    "to": 2,
+    "_time": "03:02.28"
+  },
+  {
+    "type": "id_switch",
+    "frame": 6110,
+    "from": null,
+    "to": 1,
+    "_time": "04:04.40"
+  },
+  {
+    "type": "id_switch",
+    "frame": 6171,
+    "from": null,
+    "to": 2,
+    "_time": "04:06.84"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "from": 14867,
+    "to": 15623,
+    "id": 2,
+    "_time": "09:54.69-10:24.93"
+  },
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "from": 16626,
+    "to": 16904,
+    "id": 2,
+    "_time": "11:05.05-11:16.17"
+  },
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "from": 17090,
+    "to": 18011,
+    "id": 2,
+    "_time": "11:23.61-12:00.45"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "from": 17816,
+    "to": 17848,
+    "id": 1,
+    "_time": "11:52.65-11:53.93"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "from": 17825,
+    "to": 17862,
+    "id": 2,
+    "_time": "11:53.01-11:54.49"
+  },
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "from": 18141,
+    "to": 18169,
+    "id": 2,
+    "_time": "12:05.65-12:06.77"
+  },
+  {
+    "type": "id_switch",
+    "frame": 18316,
+    "from": null,
+    "to": 1,
+    "_time": "12:12.65"
+  },
+  {
+    "type": "id_switch",
+    "frame": 18330,
+    "from": null,
+    "to": 2,
+    "_time": "12:13.21"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "from": 18940,
+    "to": 19693,
+    "id": 2,
+    "_time": "12:37.61-13:07.73"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "from": 19726,
+    "to": 20070,
+    "id": 2,
+    "_time": "13:09.05-13:22.81"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "from": 20126,
+    "to": 20212,
+    "id": 2,
+    "_time": "13:25.05-13:28.49"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "from": 20238,
+    "to": 20746,
+    "id": 2,
+    "_time": "13:29.53-13:49.85"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "from": 20775,
+    "to": 21123,
+    "id": 2,
+    "_time": "13:51.01-14:04.93"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "from": 21148,
+    "to": 21218,
+    "id": 2,
+    "_time": "14:05.93-14:08.73"
+  }
+]
