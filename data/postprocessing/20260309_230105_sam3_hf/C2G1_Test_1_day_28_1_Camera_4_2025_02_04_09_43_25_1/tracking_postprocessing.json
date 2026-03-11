@@ -133,7 +133,6 @@
     "to": 5,
     "_time": "00:56.35"
   },
-  {"placeholder": "here"},
   {
     "type": "trim",
     "cause" : "overlap",
@@ -281,7 +280,6 @@
     "id": 6,
     "_time": "04:30.02-04:35.46"
   },
-  {"placeholder": "here"},
   {
     "type": "overlap",
     "cause": "low_score",
