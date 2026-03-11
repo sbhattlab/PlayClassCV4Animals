@@ -189,13 +189,6 @@
     "_time": "01:00.11"
   },
   {
-    "type": "id_switch",
-    "frame": 1525,
-    "from": null,
-    "to": 2,
-    "_time": "01:00.99"
-  },
-  {
     "type": "trim",
     "cause": "low_score",
     "from": 1525,

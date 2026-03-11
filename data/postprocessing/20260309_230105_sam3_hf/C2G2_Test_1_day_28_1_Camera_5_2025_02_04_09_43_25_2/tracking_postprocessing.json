@@ -65,7 +65,7 @@
   {
     "type": "id_switch",
     "frame": 691,
-    "from": null,
+    "from": 1,
     "to": 4,
     "_time": "00:27.64"
   },
@@ -211,11 +211,20 @@
     "_time": "00:56.80"
   },
   {
-    "type": "id_switch",
-    "frame": 1545,
-    "from": null,
-    "to": 6,
-    "_time": "01:01.80"
+    "type": "trim",
+    "cause": "overlap",
+    "from": 1543,
+    "to": 1543,
+    "id": 3,
+    "_time": "00:00.00-00:00.00"
+  },
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "from": 1543,
+    "to": 1543,
+    "id": 7,
+    "_time": "00:00.00-00:00.00"
   },
   {
     "type": "trim",
