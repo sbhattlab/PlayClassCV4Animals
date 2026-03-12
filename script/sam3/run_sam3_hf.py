@@ -90,7 +90,7 @@ from src.utils import (
     free_system_memory,
     get_video_metadata,
     load_chunks_from_chunk_info,
-    load_video_frames_range,
+    load_video_frames_torchcodec,
     sanitize_filename,
     setup_logger,
 )
@@ -752,7 +752,7 @@ def _run_single_video(cfg, run_dir: Path, config_path: Path | None = None):
         # Load only this chunk's frames from disk — avoids holding the full video in RAM
         global_chunk_start = start_frame + start_idx
         global_chunk_end = start_frame + end_idx
-        chunk_frames = load_video_frames_range(
+        chunk_frames = load_video_frames_torchcodec(
             video_path, global_chunk_start, global_chunk_end
         )
         num_frames = len(chunk_frames)

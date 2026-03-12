@@ -83,6 +83,7 @@ def create_run_directory(base_output_dir: Path, job_type: str) -> Path:
     run_dir.mkdir(parents=True, exist_ok=True)
     return run_dir
 
+
 def sanitize_filename(name: str) -> str:
     """Sanitize a stem string for use as a directory name."""
     sanitized = re.sub(r"[^\w\-]", "_", name)
@@ -216,7 +217,12 @@ def get_video_metadata(video_path: str | Path) -> tuple[float, int]:
 def load_video_frames_range(
     video_path: str | Path, start_frame: int, end_frame: int
 ) -> list:
-    """Load frames [start_frame, end_frame) from a video file as a list of RGB numpy arrays."""
+    """Load frames [start_frame, end_frame) from a video file as a list of RGB numpy arrays.
+
+    Uses cv2 seek (CAP_PROP_POS_FRAMES). Note: seek-based indexing can be
+    unreliable on some codecs/containers — prefer load_video_frames_torchcodec
+    for frame-accurate results.
+    """
     import cv2
 
     cap = cv2.VideoCapture(str(video_path))
@@ -229,3 +235,20 @@ def load_video_frames_range(
         frames.append(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
     cap.release()
     return frames
+
+
+def load_video_frames_torchcodec(
+    video_path: str | Path, start_frame: int, end_frame: int
+) -> list:
+    """Load frames [start_frame, end_frame) as a list of RGB numpy arrays.
+
+    Uses torchcodec for frame-accurate decoding (seek_mode="exact").
+    The first call on a video incurs a ~18 s index scan; subsequent calls
+    (or calls after the OS has cached the file) are fast.
+    """
+    from torchcodec.decoders import VideoDecoder
+
+    decoder = VideoDecoder(str(video_path))
+    batch = decoder.get_frames_in_range(start=start_frame, stop=end_frame)
+    # batch.data shape: (N, C, H, W) uint8 tensor
+    return [frame.permute(1, 2, 0).numpy() for frame in batch.data]
