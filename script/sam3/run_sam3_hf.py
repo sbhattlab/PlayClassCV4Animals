@@ -792,17 +792,7 @@ def _run_single_video(cfg, run_dir: Path, config_path: Path | None = None):
         grounding_cfg = cfg.get("text_grounding", {})
         grounding_enabled = grounding_cfg.get("enabled", False)
 
-        if reused_prompt_points and chunk_idx in reused_prompt_points:
-            # --- Manual prompt points from reused chunk_info.json ---
-            all_prompt_points = reused_prompt_points[chunk_idx]
-            use_tracker = True
-            chunk_info["model_type"] = "Sam3TrackerVideoModel"
-            chunk_info["prompt_points"] = {str(k): v for k, v in all_prompt_points.items()}
-            chunk_info["num_objects_tracked"] = len(all_prompt_points)
-            chunk_info["manual_prompt_points"] = True
-            logger.info(f"  [manual] Using reused prompt_points ({len(all_prompt_points)} objects)")
-
-        elif grounding_enabled:
+        if grounding_enabled:
             # --- Text grounding drives EVERY chunk: grounding → tracker ---
             grounding_outputs = run_grounding(
                 chunk_frames,
@@ -954,6 +944,16 @@ def _run_single_video(cfg, run_dir: Path, config_path: Path | None = None):
 
             del grounding_outputs
             free_gpu_memory()
+
+        elif reused_prompt_points and chunk_idx in reused_prompt_points:
+            # --- Prompt points from reused chunk_info.json (grounding disabled) ---
+            all_prompt_points = reused_prompt_points[chunk_idx]
+            use_tracker = True
+            chunk_info["model_type"] = "Sam3TrackerVideoModel"
+            chunk_info["prompt_points"] = {str(k): v for k, v in all_prompt_points.items()}
+            chunk_info["num_objects_tracked"] = len(all_prompt_points)
+            chunk_info["manual_prompt_points"] = True
+            logger.info(f"  [manual] Using reused prompt_points ({len(all_prompt_points)} objects)")
 
         else:
             # --- Original logic (grounding disabled) ---
