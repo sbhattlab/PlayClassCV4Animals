@@ -89,6 +89,7 @@ from src.utils import (
     free_gpu_memory,
     free_system_memory,
     get_video_metadata,
+    load_chunks_from_chunk_info,
     load_video_frames_range,
     sanitize_filename,
     setup_logger,
@@ -481,18 +482,40 @@ def _run_single_video(cfg, run_dir: Path, config_path: Path | None = None):
     yolo_scan_only = cfg.get("yolo_scan_only", False)
     use_adaptive_chunking = cfg.get("use_adaptive_chunking", False)
 
+    # Reuse chunk boundaries from a previous run's chunk_info.json
+    reuse_chunk_info = cfg.get("reuse_chunk_info", False)
+    reuse_run_dir = cfg.get("reuse_run_dir", None)
+    reused_prompt_points: dict[int, dict[int, list]] = {}
+    if reuse_chunk_info:
+        if not reuse_run_dir:
+            raise ValueError("reuse_chunk_info requires reuse_run_dir to be set")
+        reuse_run_path = Path(reuse_run_dir)
+        logger.info(f"Reusing chunk boundaries from: {reuse_run_path}")
+        reused_frame_pairs, reused_prompt_points = load_chunks_from_chunk_info(reuse_run_path)
+        logger.info(f"Loaded {len(reused_frame_pairs)} chunks from previous run")
+        if reused_prompt_points:
+            logger.info(f"  {len(reused_prompt_points)} chunk(s) have stored prompt_points")
+        # Copy chunk_info.json to new run dir for provenance
+        src_chunk_info = reuse_run_path / "chunk_info.json"
+        dst_chunk_info = run_dir / "reused_chunk_info.json"
+        shutil.copy2(src_chunk_info, dst_chunk_info)
+        logger.info(f"Copied chunk_info.json to: {dst_chunk_info}")
+
     # Manual chunking override — supports both a flat list (all videos) and
     # a dict keyed by basename (per-video, e.g. {"video1.mp4": [[0,375],...], ...})
-    raw_manual_chunks = cfg.get("manual_chunk_frames", None)
-    if raw_manual_chunks is None:
-        manual_chunk_frames = None
+    if reuse_chunk_info:
+        manual_chunk_frames = reused_frame_pairs
     else:
-        converted = OmegaConf.to_container(raw_manual_chunks, resolve=True)
-        if isinstance(converted, dict):
-            video_basename = Path(video_path).name
-            manual_chunk_frames = converted.get(video_basename, None)
+        raw_manual_chunks = cfg.get("manual_chunk_frames", None)
+        if raw_manual_chunks is None:
+            manual_chunk_frames = None
         else:
-            manual_chunk_frames = converted
+            converted = OmegaConf.to_container(raw_manual_chunks, resolve=True)
+            if isinstance(converted, dict):
+                video_basename = Path(video_path).name
+                manual_chunk_frames = converted.get(video_basename, None)
+            else:
+                manual_chunk_frames = converted
     use_manual_chunking = manual_chunk_frames is not None
 
     if use_manual_chunking:
@@ -510,7 +533,8 @@ def _run_single_video(cfg, run_dir: Path, config_path: Path | None = None):
             logger.warning(
                 "run_parameter_sensitivity is invalid with manual_chunk_frames — ignoring"
             )
-        chunks = build_manual_chunks(manual_chunk_frames)
+        tracker_overrides = set(reused_prompt_points.keys()) if reused_prompt_points else None
+        chunks = build_manual_chunks(manual_chunk_frames, tracker_override_indices=tracker_overrides)
         logger.info(f"Manual chunking: {len(chunks)} chunks from config")
 
     # YOLO scan data (populated when scan or adaptive chunking is enabled)
@@ -635,6 +659,21 @@ def _run_single_video(cfg, run_dir: Path, config_path: Path | None = None):
             max_chunk_seconds=cfg.get("adaptive_max_chunk_seconds", 150),
         )
 
+    # Enforce max_frames_to_track: clip/drop chunks beyond total_frames
+    # (total_frames was already capped by max_frames_to_track above, so this
+    # ensures manual, reused, and adaptive chunks all respect the limit)
+    clipped_chunks = []
+    for s, e, mtype in chunks:
+        if s >= total_frames:
+            break
+        clipped_chunks.append((s, min(e, total_frames), mtype))
+    if len(clipped_chunks) < len(chunks):
+        logger.info(
+            f"max_frames_to_track: clipped chunks from {len(chunks)} to {len(clipped_chunks)} "
+            f"(total_frames={total_frames})"
+        )
+    chunks = clipped_chunks
+
     # Exit early if yolo-scan-only mode
     if yolo_scan_only:
         if not yolo_df.empty:
@@ -753,7 +792,17 @@ def _run_single_video(cfg, run_dir: Path, config_path: Path | None = None):
         grounding_cfg = cfg.get("text_grounding", {})
         grounding_enabled = grounding_cfg.get("enabled", False)
 
-        if grounding_enabled:
+        if reused_prompt_points and chunk_idx in reused_prompt_points:
+            # --- Manual prompt points from reused chunk_info.json ---
+            all_prompt_points = reused_prompt_points[chunk_idx]
+            use_tracker = True
+            chunk_info["model_type"] = "Sam3TrackerVideoModel"
+            chunk_info["prompt_points"] = {str(k): v for k, v in all_prompt_points.items()}
+            chunk_info["num_objects_tracked"] = len(all_prompt_points)
+            chunk_info["manual_prompt_points"] = True
+            logger.info(f"  [manual] Using reused prompt_points ({len(all_prompt_points)} objects)")
+
+        elif grounding_enabled:
             # --- Text grounding drives EVERY chunk: grounding → tracker ---
             grounding_outputs = run_grounding(
                 chunk_frames,
@@ -1135,6 +1184,9 @@ def _run_batch(cfg, video_dir: Path, job_type: str):
     batch_dir = create_run_directory(Path(cfg.output_dir), job_type)
     config_path = Path(_args.config)
 
+    reuse_chunk_info = cfg.get("reuse_chunk_info", False)
+    reuse_run_dir_base = Path(cfg.reuse_run_dir) if cfg.get("reuse_run_dir", None) else None
+
     for video_file in video_files:
         sanitized = sanitize_filename(video_file.stem)
         video_run_dir = batch_dir / sanitized
@@ -1145,6 +1197,17 @@ def _run_batch(cfg, video_dir: Path, job_type: str):
         video_cfg = OmegaConf.create(
             {**OmegaConf.to_container(cfg, resolve=True), "video_path": str(video_file)}
         )
+
+        # Resolve per-video reuse_run_dir in batch mode
+        if reuse_chunk_info and reuse_run_dir_base:
+            per_video_reuse = reuse_run_dir_base / sanitized
+            if (per_video_reuse / "chunk_info.json").exists():
+                video_cfg.reuse_run_dir = str(per_video_reuse)
+            else:
+                logger.warning(
+                    f"No chunk_info.json for {video_file.name} at {per_video_reuse}, skipping reuse"
+                )
+                video_cfg.reuse_chunk_info = False
 
         try:
             _run_single_video(video_cfg, video_run_dir, config_path=config_path)

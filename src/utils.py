@@ -90,15 +90,57 @@ def sanitize_filename(name: str) -> str:
     return sanitized.strip("_") or "video"
 
 
-def build_manual_chunks(frame_pairs: list[list[int]]) -> list[tuple[int, int, str]]:
+def build_manual_chunks(
+    frame_pairs: list[list[int]],
+    tracker_override_indices: set[int] | None = None,
+) -> list[tuple[int, int, str]]:
     """
-    Build chunk list from user-supplied (start_frame, end_frame) pairs
+    Build chunk list from user-supplied (start_frame, end_frame) pairs.
+
+    If tracker_override_indices is provided, those chunk indices are forced to
+    "tracker" type regardless of position (e.g. chunk 0 with manual prompts).
     """
     chunks = []
     for i, (start, end) in enumerate(frame_pairs):
-        model_type = "video" if i == 0 else "tracker"
+        if tracker_override_indices and i in tracker_override_indices:
+            model_type = "tracker"
+        else:
+            model_type = "video" if i == 0 else "tracker"
         chunks.append((int(start), int(end), model_type))
     return chunks
+
+
+def load_chunks_from_chunk_info(
+    run_dir: Path,
+) -> tuple[list[list[int]], dict[int, dict[int, list]]]:
+    """
+    Load chunk boundaries and optional prompt points from a previous run's
+    chunk_info.json.
+
+    Returns:
+        frame_pairs: list of [start_frame, end_frame] pairs
+        prompt_points: dict mapping chunk_idx → {obj_id: [[x,y], ...]} for
+            chunks that have non-empty prompt_points
+    """
+    import json
+
+    chunk_info_path = Path(run_dir) / "chunk_info.json"
+    if not chunk_info_path.exists():
+        raise FileNotFoundError(f"chunk_info.json not found in: {run_dir}")
+
+    with open(chunk_info_path) as f:
+        chunk_info = json.load(f)
+
+    frame_pairs = [chunk["frame_range"] for chunk in chunk_info["chunks"]]
+
+    prompt_points: dict[int, dict[int, list]] = {}
+    for i, chunk in enumerate(chunk_info["chunks"]):
+        pp = chunk.get("prompt_points")
+        if pp:
+            # JSON serializes dict keys as strings; convert to int
+            prompt_points[i] = {int(k): v for k, v in pp.items()}
+
+    return frame_pairs, prompt_points
 
 
 # ---------------------------------------------------------------------------
