@@ -1,130 +1,90 @@
-# SAM3 HuggingFace Tracking Pipeline Default Configuration
-# Override values via command line or by creating a separate config file.
+# SAM3 HuggingFace Tracking Pipeline
 
 # =============================================================================
-# Job Configuration
+# ENVIRONMENT
 # =============================================================================
-job_type: "sam3_hf" # Type of job to run
+CUDA_VISIBLE_DEVICES: "1"
+PYTORCH_ALLOC_CONF: "expandable_segments:True,garbage_collection_threshold:0.6"
 
 # =============================================================================
-# Environmental variables
+# INPUT / OUTPUT
 # =============================================================================
-CUDA_VISIBLE_DEVICES: "1" # Specify which GPU to use
-PYTORCH_ALLOC_CONF: "expandable_segments:True,garbage_collection_threshold:0.6" # Prevent OOM errors
-
-# =============================================================================
-# Video/IO Configuration
-# =============================================================================
-# Video input — specify exactly one:
-# video_path: null
-video_dir: "video-data/batch" # Uncomment to batch-process all videos in directory (mutually exclusive with video_path)
+job_type: "sam3_hf"
+# video_path: null # Path to single video file
+video_dir: "video-data/batch" # Batch-process all videos in directory (mutually exclusive with video_path)
 text_prompt: "bird"
-
-# Output directory - results will be saved to a timestamped subdirectory
-# Format: {output_dir}/{YYYYMMDD_HHMMSS}_{job_type}/
 output_dir: "ext-data/output/results/sam3-hf"
+start_frame: 0
+max_frames_to_track: 0
 
 # =============================================================================
-# Model Configuration
+# CHUNKING MODE  — only ONE of these should be active at a time
+#
+#   Priority order (highest wins):
+#     1. reuse_chunk_info    → load boundaries from a previous run
+#     2. manual_chunk_frames → explicit frame pairs (see sam3_hf_manual_chunking.yaml)
+#     3. use_adaptive_chunking: true   → YOLO scan to find boundaries
+#     4. use_adaptive_chunking: false  → fixed chunk_seconds
 # =============================================================================
-start_frame: 0 # Frame index to start processing from (0 = beginning)
-max_frames_to_track: 0 # Maximum number of frames to propagate (0 = all)
 
-# =============================================================================
-# Chunking Configuration
-# =============================================================================
-# YOLO-scan-only mode: run YOLO scan and exit without loading SAM3 models
+# --- Mode 1: Reuse a previous run's chunk boundaries ---
+reuse_chunk_info: false
+reuse_run_dir: null # e.g. "ext-data/output/results/sam3-hf/20260306_152733_sam3_hf"
+
+# --- Mode 3/4: Adaptive or fixed chunking (active when reuse_chunk_info: false) ---
 yolo_scan_only: false
-
-# Occlusion-aware adaptive chunking (YOLO-based scan)
-use_adaptive_chunking: true # Enable adaptive boundary placement via YOLO scan
-# Chunk sizes
-chunk_seconds: 60 # Base duration of each chunk in seconds
-# Chunk length limits
-adaptive_max_chunk_seconds: 120 # Hard VRAM cap — never exceed this
-adaptive_search_window_seconds: 10.0 # Search radius (±s) when refining each boundary
+use_adaptive_chunking: true
+chunk_seconds: 60
+adaptive_max_chunk_seconds: 120
+adaptive_search_window_seconds: 10.0
 
 # =============================================================================
-# YOLO scan configuration
-# These parameters drive compute_yolo_per_frame_metrics(), which computes a
-# separation_score per frame.  chunk_video_frames_adaptive() then picks the
-# highest-scoring frame in a ±adaptive_search_window_seconds window around
-# each nominal chunk boundary.
-#
-# A frame scores > 0 only when ALL three hard gates pass:
-#   1. num_objects >= separation_min_objects
-#   2. max_pairwise_bbox_iou < occlusion_iou_threshold   (no overlapping pairs)
-#   3. min_centroid_distance >= separation_min_distance
-# The actual score is: min(min_centroid_distance, 1) * (1 - clustering_coeff)
-#
-# To retune without re-running YOLO inference:
-#   1. Edit the params below
-#   2. pixi run -e sam3-hf python -m script.compute_chunk_boundaries \
-#          --run-dir <run_dir> --config config/yolo_scan_only.yaml
+# YOLO SCAN  (used only when use_adaptive_chunking: true)
 # =============================================================================
-# YOLO-based scan configuration (used when use_adaptive_chunking: true)
 yolo_scan:
-  # --- YOLO inference ---
   model: "model/yolo26x.pt"
   conf_thresh: 0.25
   iou_thresh: 0.45
   tracker_config: "data/yolo/botsort_alternative.yaml"
   allowed_classes: ["bird"]
-
-  # --- Separation scoring ---
-  # Gate 1: minimum number of birds that must be detected for a frame to qualify.
   separation_min_objects: 3
-
-  # Gate 2: hard IoU disqualifier — any bbox pair with IoU >= this value
-  # means the frame is considered too occluded to use as a chunk boundary.
-  # Keep this low (0.05–0.10); even slight overlap is a bad sign.
   occlusion_iou_threshold: 0.07
-
-  # Gate 3: minimum normalised centroid distance between any two birds.
-  # 0.10 ≈ 10% of frame width — a reasonable minimum for unambiguous tracking.
   separation_min_distance: 0.10
-
-  # Clustering coefficient threshold baked into the score formula
-  # (fraction of pairs within this distance counts against the score).
   clustering_distance_threshold: 0.15
 
 # =============================================================================
-# Multi-object Tracking Heuristics
+# TRACKING HEURISTICS
 # =============================================================================
-min_objects_for_tracking: 3 # Minimum objects to look for in previous chunk
-max_lookback_frames: 10 # Max frames to look back
+min_objects_for_tracking: 3
+max_lookback_frames: 10
 
 # =============================================================================
-# Text Grounding
-# Run Sam3VideoModel on first N frames of each tracker chunk for fresh
-# text-grounded detections, replacing drifted point prompts from prev chunk.
-# Cost: ~same as Chunk 0 per tracker chunk. Keep grounding_frames small.
+# TEXT GROUNDING
 # =============================================================================
 text_grounding:
   enabled: true
-  grounding_frames: 125 # Frames to ground (~5 s at 25 fps)
-  min_objects: 3 # Min detections to accept grounding result
-  best_frame_method: "combined" # "combined" | "min_occlusion" | "best_scores"
-  fallback_to_prev_chunk: true # Fall back to prev-chunk points if grounding fails
-  id_matching: true # Remap fresh IDs to previous chunk IDs
-  id_match_iou_threshold: 0.10 # Min mask IoU to accept an ID assignment
+  grounding_frames: 125
+  min_objects: 3
+  best_frame_method: "combined"
+  fallback_to_prev_chunk: true
+  id_matching: true
+  id_match_iou_threshold: 0.10
 
 # =============================================================================
-# Sam3VideoConfig Tracking Parameters
-# These help prevent identity loss and duplicate assignments
+# SAM3 TRACKER PARAMETERS
 # =============================================================================
 tracking:
-  init_trk_keep_alive: 60 # Keep tracks alive longer (default: 30)
-  max_trk_keep_alive: 60 # Higher ceiling for keep-alive (default: 30)
-  min_trk_keep_alive: 0 # Don't go negative as quickly (default: -1)
-  trk_assoc_iou_thresh: 0.3 # More lenient matching (default: 0.5)
-  hotstart_dup_thresh: 12 # Stricter duplicate detection (default: 8)
-  suppress_overlap_thresh: 0.8 # Stricter overlap suppression (default: 0.7)
-  recondition_every_nth_frame: 8 # More frequent reconditioning (default: 16)
+  init_trk_keep_alive: 60
+  max_trk_keep_alive: 60
+  min_trk_keep_alive: 0
+  trk_assoc_iou_thresh: 0.3
+  hotstart_dup_thresh: 12
+  suppress_overlap_thresh: 0.8
+  recondition_every_nth_frame: 8
 
 # =============================================================================
-# Metrics Configuration
+# METRICS
 # =============================================================================
 metrics:
-  occlusion_iou_threshold: 0.15 # IoU above this = objects overlapping
-  clustering_distance_threshold: 50.0 # pixels - objects closer than this are "clustered"
+  occlusion_iou_threshold: 0.15
+  clustering_distance_threshold: 50.0

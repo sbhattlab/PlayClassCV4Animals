@@ -83,6 +83,7 @@ def create_run_directory(base_output_dir: Path, job_type: str) -> Path:
     run_dir.mkdir(parents=True, exist_ok=True)
     return run_dir
 
+
 def sanitize_filename(name: str) -> str:
     """Sanitize a stem string for use as a directory name."""
     sanitized = re.sub(r"[^\w\-]", "_", name)
@@ -90,15 +91,57 @@ def sanitize_filename(name: str) -> str:
     return sanitized.strip("_") or "video"
 
 
-def build_manual_chunks(frame_pairs: list[list[int]]) -> list[tuple[int, int, str]]:
+def build_manual_chunks(
+    frame_pairs: list[list[int]],
+    tracker_override_indices: set[int] | None = None,
+) -> list[tuple[int, int, str]]:
     """
-    Build chunk list from user-supplied (start_frame, end_frame) pairs
+    Build chunk list from user-supplied (start_frame, end_frame) pairs.
+
+    If tracker_override_indices is provided, those chunk indices are forced to
+    "tracker" type regardless of position (e.g. chunk 0 with manual prompts).
     """
     chunks = []
     for i, (start, end) in enumerate(frame_pairs):
-        model_type = "video" if i == 0 else "tracker"
+        if tracker_override_indices and i in tracker_override_indices:
+            model_type = "tracker"
+        else:
+            model_type = "video" if i == 0 else "tracker"
         chunks.append((int(start), int(end), model_type))
     return chunks
+
+
+def load_chunks_from_chunk_info(
+    run_dir: Path,
+) -> tuple[list[list[int]], dict[int, dict[int, list]]]:
+    """
+    Load chunk boundaries and optional prompt points from a previous run's
+    chunk_info.json.
+
+    Returns:
+        frame_pairs: list of [start_frame, end_frame] pairs
+        prompt_points: dict mapping chunk_idx → {obj_id: [[x,y], ...]} for
+            chunks that have non-empty prompt_points
+    """
+    import json
+
+    chunk_info_path = Path(run_dir) / "chunk_info.json"
+    if not chunk_info_path.exists():
+        raise FileNotFoundError(f"chunk_info.json not found in: {run_dir}")
+
+    with open(chunk_info_path) as f:
+        chunk_info = json.load(f)
+
+    frame_pairs = [chunk["frame_range"] for chunk in chunk_info["chunks"]]
+
+    prompt_points: dict[int, dict[int, list]] = {}
+    for i, chunk in enumerate(chunk_info["chunks"]):
+        pp = chunk.get("prompt_points")
+        if pp:
+            # JSON serializes dict keys as strings; convert to int
+            prompt_points[i] = {int(k): v for k, v in pp.items()}
+
+    return frame_pairs, prompt_points
 
 
 # ---------------------------------------------------------------------------
@@ -174,7 +217,12 @@ def get_video_metadata(video_path: str | Path) -> tuple[float, int]:
 def load_video_frames_range(
     video_path: str | Path, start_frame: int, end_frame: int
 ) -> list:
-    """Load frames [start_frame, end_frame) from a video file as a list of RGB numpy arrays."""
+    """Load frames [start_frame, end_frame) from a video file as a list of RGB numpy arrays.
+
+    Uses cv2 seek (CAP_PROP_POS_FRAMES). Note: seek-based indexing can be
+    unreliable on some codecs/containers — prefer load_video_frames_torchcodec
+    for frame-accurate results.
+    """
     import cv2
 
     cap = cv2.VideoCapture(str(video_path))
@@ -187,3 +235,31 @@ def load_video_frames_range(
         frames.append(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
     cap.release()
     return frames
+
+
+_torchcodec_decoder_cache: dict[str, object] = {}
+
+
+def load_video_frames_torchcodec(
+    video_path: str | Path, start_frame: int, end_frame: int
+) -> list:
+    """Load frames [start_frame, end_frame) as a list of RGB numpy arrays.
+
+    Uses torchcodec for frame-accurate decoding (seek_mode="exact").
+    The decoder is cached per video path so the index scan (~18 s on first
+    access) only happens once across all chunks of the same video.
+    """
+    from torchcodec.decoders import VideoDecoder
+
+    key = str(video_path)
+    if key not in _torchcodec_decoder_cache:
+        logger.info(
+            "Building torchcodec index for '{}' — this may take ~18 s on first access.",
+            Path(video_path).name,
+        )
+        _torchcodec_decoder_cache[key] = VideoDecoder(key)
+
+    decoder = _torchcodec_decoder_cache[key]
+    batch = decoder.get_frames_in_range(start=start_frame, stop=end_frame)
+    # batch.data shape: (N, C, H, W) uint8 tensor
+    return [frame.permute(1, 2, 0).numpy() for frame in batch.data]
