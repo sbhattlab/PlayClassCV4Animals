@@ -25,8 +25,6 @@ data/
   tracking/        Symlinks to tracking run output dirs (gitignored)
   dataset/         Combined dataset outputs (tracks, labels, features, embeddings)
   postprocessing/  Version-controlled per-video postprocessing JSONs
-  video/           Symlink to raw video files (gitignored)
-  img/             Short test clips and diagnostic outputs (gitignored)
 ext-data/          Symlink to /mnt/birds/rebecca2025/ (results, image sequences)
 ```
 
@@ -71,7 +69,7 @@ Run via pixi tasks or as Python modules from the project root.
 > Read the base config file (`config/tracker.yaml`) and modify appropriately (e.g. video path, CUDA device).
 
 ```sh
-# Main SAM3-HF pipeline (defaults to config/tracker.yaml)
+# Main SAM3 Tracker pipeline (defaults to config/tracker.yaml)
 pixi run tracker
 
 # Custom config
