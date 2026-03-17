@@ -1,8 +1,12 @@
 """BehaviourDataset and BehaviourDataModule for classification training."""
 
+import warnings
 from pathlib import Path
 
 import lightning as L
+
+# Data is fully in-memory tensors; num_workers won't help
+warnings.filterwarnings("ignore", ".*does not have many workers.*")
 import numpy as np
 import pandas as pd
 import torch
@@ -10,10 +14,27 @@ import torch.nn.functional as F
 from loguru import logger
 from torch.utils.data import DataLoader, Dataset, Subset
 
-LABEL_ORDER = ["none", "worm", "locomotor", "social"]
+from src._config import LABEL_ORDER
 
 _KEY_COLS = {"video_id", "bird_id", "window"}
 _SKIP_COLS = _KEY_COLS | {"n_frames"}
+
+
+def select_val_video(test_video: str, all_videos: list[str]) -> str:
+    """Pick val video from the next cage (cage-aware rotation, group-matched).
+
+    Extracts cage prefix (first 2 chars), rotates to next cage in sorted order,
+    and matches the group index within that cage (e.g. C5G2 → C1G2).
+    """
+    cage_to_videos: dict[str, list[str]] = {}
+    for v in sorted(all_videos):
+        cage_to_videos.setdefault(v[:2], []).append(v)
+    cages = sorted(cage_to_videos)
+    test_cage = test_video[:2]
+    next_cage = cages[(cages.index(test_cage) + 1) % len(cages)]
+    test_group_idx = cage_to_videos[test_cage].index(test_video)
+    next_videos = cage_to_videos[next_cage]
+    return next_videos[test_group_idx % len(next_videos)]
 
 
 class LabelEncoder:
@@ -60,12 +81,12 @@ class BehaviourDataset(Dataset):
 
     Parameters
     ----------
-    tracking_dir : str | Path
+    dataset_dir : str | Path
         Directory containing the dataset files.
     use_features : bool
-        Load handcrafted features from ``dataset_features.parquet``.
+        Load handcrafted features from ``features_windowed.parquet``.
     use_embeddings : bool
-        Load embeddings from ``dataset_embeddings.pt``.
+        Load embeddings from ``embeddings.pt``.
     temporal : bool
         If True, keep embeddings as sequences for temporal models.
         If False, mean-pool to ``(D,)``.
@@ -78,21 +99,28 @@ class BehaviourDataset(Dataset):
 
     def __init__(
         self,
-        tracking_dir,
+        dataset_dir,
         use_features=True,
         use_embeddings=False,
         temporal=False,
         n_segments=12,
         exclude=None,
+        embeddings_file="embeddings.pt",
+        embeddings_files=None,
     ):
-        tracking_dir = Path(tracking_dir)
+        dataset_dir = Path(dataset_dir)
 
         self.n_segments = n_segments
+        # Support both single file (legacy) and list of files
+        if embeddings_files is not None:
+            self.embeddings_files = embeddings_files
+        else:
+            self.embeddings_files = [embeddings_file]
 
         # 1. Load data
-        labels_df = pd.read_parquet(tracking_dir / "dataset_labels.parquet")
-        self.data = self.load_data(
-            tracking_dir, labels_df, use_features, use_embeddings, temporal
+        labels_df = pd.read_parquet(dataset_dir / "labels.parquet")
+        self.data, self.flat = self.load_data(
+            dataset_dir, labels_df, use_features, use_embeddings, temporal
         )
 
         # 2. Exclude data from unwanted labels (if specified)
@@ -103,6 +131,8 @@ class BehaviourDataset(Dataset):
             mask = ~labels_df["behav_label"].isin(exclude_list)
             labels_df = labels_df[mask].reset_index(drop=True)
             self.data = self.data[mask.values]
+            if self.flat is not None:
+                self.flat = self.flat[mask.values]
 
         # 3. Encode labels
         self.label_encoder = LabelEncoder(label_order)
@@ -115,59 +145,133 @@ class BehaviourDataset(Dataset):
         )
         self.groups = labels_df["video_id"].tolist()  # for LOVO splitting
         self.data_dim = self.data.shape[-1]
+        self.flat_dim = self.flat.shape[-1] if self.flat is not None else 0
+
+    def _load_windowed_features(self, dataset_dir):
+        """Load windowed feature summaries as a flat (N, F) tensor."""
+        features_df = pd.read_parquet(
+            dataset_dir / "features_windowed.parquet"
+        ).drop(columns=_SKIP_COLS, errors="ignore")
+        features_df = features_df.fillna(features_df.median())
+        feat = torch.tensor(features_df.values, dtype=torch.float32)
+        self._feat_mean = feat.mean(dim=0)
+        self._feat_std = feat.std(dim=0).clamp(min=1e-8)
+        return (feat - self._feat_mean) / self._feat_std
 
     def load_data(
-        self, tracking_dir, labels_df, use_features, use_embeddings, temporal
+        self, dataset_dir, labels_df, use_features, use_embeddings, temporal
     ):
-        if temporal:
-            assert use_embeddings, "Temporal mode requires embeddings"
-            assert not use_features, "Temporal mode does not use features"
-            return self._load_embeddings(tracking_dir, labels_df, temporal)
+        """Load data and return (data, flat).
 
+        ``flat`` is non-None only in hybrid mode: temporal model with
+        windowed features alongside temporal embeddings.
+
+        Returns
+        -------
+        data : Tensor
+            Main input — flat (N, D) or temporal (N, K, D).
+        flat : Tensor | None
+            Windowed features (N, F) for hybrid mode, else None.
+        """
+        assert use_features or use_embeddings, (
+            "At least one of use_features or use_embeddings must be True"
+        )
+
+        if temporal:
+            # Temporal embeddings as main data
+            temporal_parts = []
+            if use_embeddings:
+                temporal_parts.append(
+                    self._load_embeddings(dataset_dir, labels_df, temporal)
+                )
+            if use_features and not use_embeddings:
+                # Features-only temporal: use binned features as main data
+                return self._load_temporal_features(dataset_dir, labels_df), None
+            if use_features and use_embeddings:
+                # Hybrid: temporal embeddings + flat windowed features
+                data = temporal_parts[0]
+                flat = self._load_windowed_features(dataset_dir)
+                return data, flat
+            return temporal_parts[0], None
+
+        # Non-temporal: everything is flat
         parts = []
         if use_embeddings:
-            parts.append(self._load_embeddings(tracking_dir, labels_df, temporal))
+            parts.append(self._load_embeddings(dataset_dir, labels_df, temporal))
         if use_features:
-            features_df = pd.read_parquet(
-                tracking_dir / "dataset_features.parquet"
-            ).drop(columns=_SKIP_COLS, errors="ignore")
-            features_df = features_df.fillna(features_df.median())
-            feat = torch.tensor(features_df.values, dtype=torch.float32)
-            self._feat_mean = feat.mean(dim=0)
-            self._feat_std = feat.std(dim=0).clamp(min=1e-8)
-            feat = (feat - self._feat_mean) / self._feat_std
-            parts.append(feat)
+            parts.append(self._load_windowed_features(dataset_dir))
 
-        assert parts, "At least one of use_features or use_embeddings must be True"
-        return torch.cat(parts, dim=-1) if len(parts) > 1 else parts[0]
+        data = torch.cat(parts, dim=-1) if len(parts) > 1 else parts[0]
+        return data, None
 
-    def _load_embeddings(self, tracking_dir, labels_df, temporal):
-        emb_path = tracking_dir / "dataset_embeddings.pt"
-        embeddings_dict = torch.load(emb_path, weights_only=False)
+    def _load_embeddings(self, dataset_dir, labels_df, temporal):
+        keys = list(
+            zip(labels_df["video_id"], labels_df["bird_id"], labels_df["window"])
+        )
+
+        all_emb_parts = []
+        for emb_file in self.embeddings_files:
+            emb_path = dataset_dir / emb_file
+            embeddings_dict = torch.load(emb_path, weights_only=False)
+
+            if temporal:
+                part = torch.stack(
+                    [
+                        adaptive_segment_pool1d(
+                            embeddings_dict[(v, b, w)].float(), self.n_segments
+                        )
+                        for v, b, w in keys
+                    ]
+                )
+            else:
+                def _pool(t):
+                    t = t.float()
+                    return t if t.ndim == 1 else t.mean(dim=0)
+                part = torch.stack([_pool(embeddings_dict[(v, b, w)]) for v, b, w in keys])
+
+            all_emb_parts.append(part)
+            del embeddings_dict
+
+        # Concatenate along feature dim: (N, D1) + (N, D2) → (N, D1+D2)
+        # or (N, K, D1) + (N, K, D2) → (N, K, D1+D2)
+        return torch.cat(all_emb_parts, dim=-1)
+
+    def _load_temporal_features(self, dataset_dir, labels_df):
+        """Load per-frame features as segment-pooled temporal sequences.
+
+        Z-score normalizes across all frames before pooling, matching
+        the normalization in the windowed features path.
+        """
+        feat_path = dataset_dir / "features_binned.pt"
+        feat_dict = torch.load(feat_path, weights_only=False)
 
         keys = list(
             zip(labels_df["video_id"], labels_df["bird_id"], labels_df["window"])
         )
-        if temporal:
-            # Adaptive segment pool: (F_w, D) → (K, D), then stack → (N, K, D)
-            return torch.stack(
-                [
-                    adaptive_segment_pool1d(
-                        embeddings_dict[(v, b, w)].float(), self.n_segments
-                    )
-                    for v, b, w in keys
-                ]
-            )
-        # Not temporal → mean-pool over windows: (F_w, D) → (D,)
+
+        # Compute global mean/std across all frames for normalization
+        all_frames = torch.cat([feat_dict[(v, b, w)].float() for v, b, w in keys])
+        feat_mean = all_frames.mean(dim=0)
+        feat_std = all_frames.std(dim=0).clamp(min=1e-8)
+
         return torch.stack(
-            [embeddings_dict[(v, b, w)].float().mean(dim=0) for v, b, w in keys]
+            [
+                adaptive_segment_pool1d(
+                    (feat_dict[(v, b, w)].float() - feat_mean) / feat_std,
+                    self.n_segments,
+                )
+                for v, b, w in keys
+            ]
         )
 
     def __len__(self):
         return len(self.labels)
 
     def __getitem__(self, idx):
-        return {"data": self.data[idx], "label": self.labels[idx]}
+        item = {"data": self.data[idx], "label": self.labels[idx]}
+        if self.flat is not None:
+            item["flat"] = self.flat[idx]
+        return item
 
 
 # ----------------------------------------------------------------------
@@ -205,11 +309,22 @@ def leave_one_group_out(dataset, test_group, val_group):
 # ----------------------------------------------------------------------
 
 
-def _compute_class_weights(dataset, indices, n_classes):
-    """Inverse-sqrt class weights from a subset's labels."""
+def _compute_class_weights(dataset, indices, n_classes, scheme="inv-sqrt"):
+    """Class weights from a subset's labels.
+
+    Parameters
+    ----------
+    scheme : str
+        ``"inv-sqrt"`` (default), ``"inv"``, or ``"none"``.
+    """
+    if scheme == "none":
+        return None
     labels = dataset.labels[indices]
     counts = torch.bincount(labels, minlength=n_classes).float().clamp(min=1)
-    weights = 1.0 / counts.sqrt()
+    if scheme == "inv":
+        weights = 1.0 / counts
+    else:  # inv-sqrt
+        weights = 1.0 / counts.sqrt()
     return weights / weights.sum() * n_classes
 
 
@@ -225,7 +340,7 @@ class BehaviourDataModule(L.LightningDataModule):
 
     def __init__(
         self,
-        tracking_dir,
+        dataset_dir,
         test_video=None,
         val_video=None,
         batch_size=32,
@@ -234,9 +349,11 @@ class BehaviourDataModule(L.LightningDataModule):
         temporal=False,
         n_segments=12,
         exclude=None,
+        embeddings_file="embeddings.pt",
+        embeddings_files=None,
     ):
         super().__init__()
-        self.tracking_dir = Path(tracking_dir)
+        self.dataset_dir = Path(dataset_dir)
         self.test_video = test_video
         self.val_video = val_video
         self.batch_size = batch_size
@@ -245,6 +362,8 @@ class BehaviourDataModule(L.LightningDataModule):
         self.temporal = temporal
         self.n_segments = n_segments
         self.exclude = exclude
+        self.embeddings_files = embeddings_files or [embeddings_file]
+        self.class_weight_scheme = "inv-sqrt"
 
     @property
     def video_ids(self) -> list[str]:
@@ -262,12 +381,13 @@ class BehaviourDataModule(L.LightningDataModule):
         # our single-GPU setup; revisit if we ever go multi-GPU.
         # pylint: disable=attribute-defined-outside-init
         self._dataset = BehaviourDataset(
-            self.tracking_dir,
+            self.dataset_dir,
             use_features=self.use_features,
             use_embeddings=self.use_embeddings,
             temporal=self.temporal,
             n_segments=self.n_segments,
             exclude=self.exclude,
+            embeddings_files=self.embeddings_files,
         )
         # pylint: enable=attribute-defined-outside-init
 
@@ -285,13 +405,16 @@ class BehaviourDataModule(L.LightningDataModule):
         self.label_encoder = data.label_encoder
         self.n_classes = data.n_classes
         self.data_dim = data.data_dim
+        self.flat_dim = data.flat_dim
 
         if stage == "fit" or stage is None:
             self.train_ds = train_ds
             self.val_ds = val_ds
             self.class_weights = _compute_class_weights(
-                data, train_ds.indices, self.n_classes
+                data, train_ds.indices, self.n_classes,
+                scheme=self.class_weight_scheme,
             )
+
             logger.info(
                 f"Fit: train={len(self.train_ds)}  val={len(self.val_ds)}  "
                 f"classes={list(self.label_encoder.lab2ind.keys())}  weights={self.class_weights}"
