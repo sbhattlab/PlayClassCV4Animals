@@ -1,0 +1,224 @@
+[
+  {
+    "type": "id_switch",
+    "frame": 1481,
+    "from": null,
+    "to": 1,
+    "_time": "00:59.23"
+  },
+  {
+    "type": "trim",
+    "cause": "merged_object",
+    "id": 2,
+    "from": 1018,
+    "to": 1107,
+    "_time": "00:40.70 - 00:44.26"
+  },
+  {
+    "type": "id_switch",
+    "frame": 1538,
+    "from": 2,
+    "to": 3,
+    "_time": "01:01.50"
+  },
+  {
+    "type": "trim",
+    "cause": "merged_object",
+    "id": 3,
+    "from": 3088,
+    "to": 3180,
+    "_time": "02:03.50 - 02:07.20"
+  },
+  {
+    "type": "trim",
+    "cause": "merged_object",
+    "id": 0,
+    "from": 3863,
+    "to": 3950,
+    "_time": "02:34.50 - 02:38"
+  },
+  {
+    "type": "trim",
+    "cause": "merged_object",
+    "id": 1,
+    "from": 4075,
+    "to": 4160,
+    "_time": "02:43 - 02:46.40"
+  },
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "from": 4479,
+    "to": 5627,
+    "id": 3,
+    "_time": "02:59.12-03:45.02"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "id": 1,
+    "from": 4479,
+    "to": 4925,
+    "_time": "02:59.12 - 03:17"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "id": 1,
+    "from": 5075,
+    "to": 5300,
+    "_time": "03:23 - 03:32"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "id": 1,
+    "from": 5375,
+    "to": 5627,
+    "_time": "03:35 - 03:45.02"
+  },
+  {
+    "type": "id_switch",
+    "frame": 5855,
+    "from": 0,
+    "to": 2,
+    "_time": "03:54.14"
+  },
+  {
+    "type": "id_switch",
+    "frame": 7518,
+    "from": 2,
+    "to": 5,
+    "_time": "05:00.65"
+  },
+  {
+    "type": "id_switch",
+    "frame": 7518,
+    "from": 3,
+    "to": 2,
+    "_time": "05:00.65"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "id": 5,
+    "from": 7550,
+    "to": 8000,
+    "_time": "05:02 - 05:20"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "id": 5,
+    "from": 8250,
+    "to": 8875,
+    "_time": "05:30 - 05:55"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "from": 8111,
+    "to": 8139,
+    "id": 2,
+    "_time": "05:24.36-05:25.48"
+  },
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "id": 1,
+    "from": 8860,
+    "to": 10265,
+    "_time": "05:54.40 - 06:50.60"
+  },
+  {
+    "type": "id_switch",
+    "frame": 10278,
+    "from": 1,
+    "to": 6,
+    "_time": "06:51.02"
+  },
+  {
+    "type": "id_switch",
+    "frame": 10287,
+    "from": 2,
+    "to": 1,
+    "_time": "06:51.38"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "id": 6,
+    "from": 16075,
+    "to": 16355,
+    "_time": "10:43 - 10:54.04"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "from": 16535,
+    "to": 16826,
+    "id": 5,
+    "_time": "11:01.24-11:12.87"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "id": 5,
+    "from": 19650,
+    "to": 20025,
+    "_time": "13:06 - 13:21"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "from": 20957,
+    "to": 20999,
+    "id": 5,
+    "_time": "13:58.07-13:59.75"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "id": 1,
+    "from": 21450,
+    "to": 21625,
+    "_time": "14:18 - 14:25"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "id": 6,
+    "from": 21550,
+    "to": 21625,
+    "_time": "14:22 - 14:25"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "from": 22496,
+    "to": 22530,
+    "id": 5,
+    "_time": "14:59.62-15:00.98"
+  },
+  {
+    "type": "id_match",
+    "protocol_id": 2785,
+    "description": "Black",
+    "tracking_id": 5,
+    "frame": null
+  },
+  {
+    "type": "id_match",
+    "protocol_id": 2700,
+    "description": "Green right wing",
+    "tracking_id": 6,
+    "frame": null
+  },
+  {
+    "type": "id_match",
+    "protocol_id": 2698,
+    "description": "White",
+    "tracking_id": 1,
+    "frame": null
+  }
+]

@@ -1,0 +1,224 @@
+[
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "id": 0,
+    "from": 38,
+    "to": 50,
+    "_time": "00:01.50 - 00:02"
+  },
+  {
+    "type": "trim",
+    "cause": "merged_object",
+    "id": 2,
+    "from": 888,
+    "to": 918,
+    "_time": "00:35.50 - 00:36.725"
+  },
+  {
+    "type": "trim",
+    "cause": "merged_object",
+    "id": 1,
+    "from": 1050,
+    "to": 1075,
+    "_time": "00:42 - 00:43"
+  },
+  {
+    "type": "trim",
+    "cause": "merged_object",
+    "id": 2,
+    "from": 2568,
+    "to": 2668,
+    "_time": "01:42.70 - 01:46.70"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "id": 0,
+    "from": 7525,
+    "to": 7700,
+    "_time": "05:01 - 05:08"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "id": 0,
+    "from": 8200,
+    "to": 8275,
+    "_time": "05:28 - 05:31"
+  },
+  {
+    "type": "id_switch",
+    "frame": 9210,
+    "from": 1,
+    "to": 2,
+    "_time": "06:08.4"
+  },
+  {
+    "type": "id_switch",
+    "frame": 9210,
+    "from": 2,
+    "to": 3,
+    "_time": "06:08.4"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "id": 0,
+    "from": 9000,
+    "to": 10300,
+    "_time": "06:00 - 06:52"
+  },
+  {
+    "type": "trim",
+    "cause": "merged_object",
+    "id": 3,
+    "from": 12025,
+    "to": 12225,
+    "_time": "08:01 - 08:09"
+  },
+  {
+    "type": "id_switch",
+    "frame": 12284,
+    "from": null,
+    "to": 3,
+    "_time": "08:11.27"
+  },
+  {
+    "type": "trim",
+    "cause": "merged_object",
+    "id": 2,
+    "from": 12325,
+    "to": 12625,
+    "_time": "08:13 - 08:25"
+  },
+  {
+    "type": "trim",
+    "cause": "merged_object",
+    "id": 2,
+    "from": 12700,
+    "to": 12950,
+    "_time": "08:28 - 08:38"
+  },
+  {
+    "type": "trim",
+    "cause": "merged_object",
+    "id": 3,
+    "from": 13513,
+    "to": 13700,
+    "_time": "09:00.50 - 09:08"
+  },
+  {
+    "type": "trim",
+    "cause": "merged_object",
+    "id": 3,
+    "from": 16400,
+    "to": 16450,
+    "_time": "10:56 - 10:58"
+  },
+  {
+    "type": "id_switch",
+    "frame": 16515,
+    "from": 0,
+    "to": 4,
+    "_time": "11:00.49"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "from": 16957,
+    "to": 17174,
+    "id": 4,
+    "_time": "11:18.16-11:26.84"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "from": 17239,
+    "to": 17282,
+    "id": 3,
+    "_time": "11:29.44-11:31.16"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "from": 17332,
+    "to": 17361,
+    "id": 3,
+    "_time": "11:33.16-11:34.32"
+  },
+  {
+    "type": "trim",
+    "cause": "merged_object",
+    "id": 3,
+    "from": 17700,
+    "to": 19259,
+    "_time": "11:48 - 12:50.23"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "id": 2,
+    "from": 17750,
+    "to": 17800,
+    "_time": "11:50 - 11:52"
+  },
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "id": 4,
+    "from": 17750,
+    "to": 19259,
+    "_time": "11:50 - 12:50.23"
+  },
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "from": 18930,
+    "to": 19259,
+    "id": 3,
+    "_time": "12:37.07-12:50.23"
+  },
+  {
+    "type": "id_switch",
+    "frame": 19259,
+    "from": 4,
+    "to": 1,
+    "_time": "12:50.23"
+  },
+  {
+    "type": "id_switch",
+    "frame": 19259,
+    "from": 2,
+    "to": 4,
+    "_time": "12:50.23"
+  },
+  {
+    "type": "id_switch",
+    "frame": 19259,
+    "from": 3,
+    "to": 2,
+    "_time": "12:50.23"
+  },
+  {
+    "type": "id_match",
+    "protocol_id": 2684,
+    "description": "Blue lower back",
+    "tracking_id": 2,
+    "frame": null
+  },
+  {
+    "type": "id_match",
+    "protocol_id": 2776,
+    "description": "Light brown",
+    "tracking_id": 4,
+    "frame": null
+  },
+  {
+    "type": "id_match",
+    "protocol_id": 2686,
+    "description": "Black",
+    "tracking_id": 1,
+    "frame": null
+  }
+]
