@@ -15,7 +15,7 @@ pixi install -e tracker
 pixi install -e classifier
 ```
 
-Other environments (`gs2`, `sam3-native`, `yolo`) exist but are not actively used. The `classifier` environment adds PyTorch Lightning + torchmetrics. The `videoprism` environment provides JAX + VideoPrism. Platform is Linux-only (CUDA 12.6).
+Other environments (`gs2`, `yolo`) exist but are not actively used. The `classifier` environment adds PyTorch Lightning + torchmetrics. The `videoprism` environment provides JAX + VideoPrism. Platform is Linux-only (CUDA 12.6).
 
 ## Data
 

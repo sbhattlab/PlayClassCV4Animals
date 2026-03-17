@@ -14,7 +14,6 @@ cuda = "12.6"
 
 # ======= Environments ======
 [environments]
-sam3-native = ["sam3-native"]
 gs2 = ["gs2"]
 yolo = ["yolo"]
 classifier = ["classifier"]
@@ -68,8 +67,7 @@ opencv-python = "*"
 lightning = ">=2.5"
 
 [feature.tracker.tasks]
-test_tracker_image = "python -m src.test.tracker_image"
-test_tracker_video = "python -m src.test.tracker_video"
+test_tracker = "CUDA_VISIBLE_DEVICES=1 pixi run -e tracker pytest tests/test_tracker.py -v"
 tracker = "python -m script.run_tracker --config config/tracker.yaml"
 tracker_scan = "python -m script.run_tracker --config config/tracker_scan.yaml"
 build_dataset = "python -m script.build_dataset"
@@ -77,21 +75,6 @@ test_postprocessing = "python -m pytest tests/test_tracking_postprocessing.py -v
 test_features = "python -m pytest tests/test_features.py -v"
 extract_features = "python -m script.extract_features"
 extract_embeddings = "python -m script.extract_embeddings"
-
-# ======= SAM3-native dependencies ======
-[feature.sam3-native.pypi-dependencies]
-sam3 = { git = "https://github.com/facebookresearch/sam3", rev = "11dec2936de97f2857c1f76b66d982d5a001155d" }
-transformers = { git = "https://github.com/huggingface/transformers", rev = "v5.0.0rc2" }
-accelerate = ">=1.12.0"
-einops = "*"
-ftfy = "==6.1.1"
-decord = "*"
-scikit-image = "*"
-numpy = ">=1.2.6,<2"
-opencv-python = "*"
-
-[feature.sam3-native.tasks]
-test-sam3-native-video = "python -m test.sam3_native_video"
 
 # ======= GS2 dependencies ======
 [feature.gs2.pypi-dependencies]
