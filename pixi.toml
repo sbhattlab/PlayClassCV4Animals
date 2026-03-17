@@ -19,6 +19,7 @@ sam3-native = ["sam3-native"]
 gs2 = ["gs2"]
 yolo = ["yolo"]
 classifier = ["classifier"]
+videoprism = ["videoprism"]
 
 # ======= Default dependencies ======
 [dependencies]
@@ -46,7 +47,7 @@ torch = "==2.9.1+cu126"
 torchvision = "==0.24.1+cu126"
 torchcodec = "==0.9"
 matplotlib = ">=3.7.0,<4"
-seaborn = ">=0.12.0,<0.13"
+seaborn = ">=0.13.2"
 openpyxl = ">=3.1.0,<4"
 tabulate = ">=0.9.0,<0.10"
 scikit-learn = ">=1.7.0"
@@ -58,11 +59,13 @@ kernels = ">=0.12.1, <0.13"
 [feature.sam3-hf.pypi-dependencies]
 transformers = { git = "https://github.com/huggingface/transformers", rev = "v5.0.0rc2" }
 accelerate = ">=1.12.0"
+peft = ">=0.15"
 ftfy = "==6.1.1"
 omegaconf = ">=2.3.0"
 ultralytics = "*"
 numpy = ">=1.2.6,<2"
 opencv-python = "*"
+lightning = ">=2.5"
 
 [feature.sam3-hf.tasks]
 test-sam3-hf-image = "python -m test.sam3_hf_basic_image"
@@ -132,9 +135,26 @@ lightning = ">=2.5"
 wandb = ">=0.19"
 torchmetrics = ">=1.7"
 xgboost = ">=3.2.0, <4"
+shap = ">=0.51.0, <0.52"
 
 [feature.classifier.tasks]
 train = "python -m script.train"
+train_xgboost = "python -m script.train_xgboost"
+train_pooler = "python -m script.train_pooler"
+
+# ======= VideoPrism dependencies ======
+[feature.videoprism.system-requirements]
+cuda = "12"
+
+[feature.videoprism.pypi-dependencies]
+jax = { version = "*", extras = ["cuda12"] }
+opt-einsum = ">=3.3,<3.4"
+videoprism = { git = "https://github.com/google-deepmind/videoprism" }
+einshape = ">=1.0"
+mediapy = ">=1.2.0"
+
+[feature.videoprism.tasks]
+extract_videoprism = "python -m script.extract_embeddings_videoprism"
 
 # ======= YOLO dependencies ======
 [feature.yolo.pypi-dependencies]
