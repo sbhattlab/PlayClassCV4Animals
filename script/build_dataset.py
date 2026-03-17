@@ -3,10 +3,13 @@ Build tracking_issues.json and tracking_postprocessing.json for each tracking
 subdirectory, then build the dataset in a single pass (no redundant disk
 re-reads).
 
-Given a batch tracking directory (containing per-video subdirectories, each with
-``tracking_outputs.parquet``), this script:
+Discovers all ``tracking_outputs.parquet`` files recursively under
+``data/tracking/`` (or ``--tracking-dir``). Supports multiple tracking run
+directories (e.g. separate SAM3 runs for different video batches).
 
-1. Discovers all tracking subdirectories
+Steps:
+
+1. Discovers all tracking subdirectories (across all runs)
 2. Parses labels and bird info from Excel files (once)
 3. For each subdirectory:
    a. Reads FPS from ``yolo_scan_summary.parquet`` (falls back to 25.0)
@@ -20,17 +23,13 @@ Given a batch tracking directory (containing per-video subdirectories, each with
 Typical workflow::
 
     # First run: generates tracking_issues.json + tracking_postprocessing.json
-    pixi run -e sam3-hf python -m script.preprocess \\
-        --tracking-dir data/tracking/20260225_214929_sam3_hf \\
-        --label-dir data/labels
+    pixi run -e sam3-hf build_dataset
 
     # Manually fill in "to" values and add trim entries in each
     # tracking_postprocessing.json
 
     # Second run: validates remaps, builds dataset
-    pixi run -e sam3-hf python -m script.preprocess \\
-        --tracking-dir data/tracking/20260225_214929_sam3_hf \\
-        --label-dir data/labels
+    pixi run -e sam3-hf build_dataset
 """
 
 import json
@@ -41,7 +40,12 @@ from pathlib import Path
 import pandas as pd
 from loguru import logger
 
-from src._config import DEFAULT_LABEL_DIR, DEFAULT_MIN_WINDOW_COVERAGE
+from src._config import (
+    DEFAULT_DATASET_DIR,
+    DEFAULT_LABEL_DIR,
+    DEFAULT_MIN_WINDOW_COVERAGE,
+    DEFAULT_TRACKING_DIR,
+)
 from src.dataset.labels import process_labels, resolve_dual_groups
 from src.dataset.tracking_issues import detect_tracking_issues
 from src.dataset.tracking_postprocessing import (
@@ -165,9 +169,11 @@ def process_tracking_subdir(tracking_dir, bird_info):
     }
 
 
-def save_data(save_dict, tracking_dir):
+def save_data(save_dict, output_dir):
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
     for fname, data in save_dict.items():
-        path = tracking_dir / fname
+        path = output_dir / fname
         if path.suffix == ".json":
             _save_json(path, data)
         elif path.suffix == ".parquet":
@@ -189,8 +195,14 @@ def parse_args():
     parser.add_argument(
         "--tracking-dir",
         type=Path,
-        required=True,
-        help="Path to batch tracking dir (contains per-video subdirs)",
+        default=DEFAULT_TRACKING_DIR,
+        help="Root dir to search for tracking_outputs.parquet (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=DEFAULT_DATASET_DIR,
+        help="Directory to write dataset outputs (default: %(default)s)",
     )
     parser.add_argument(
         "--label-dir",
@@ -229,8 +241,20 @@ def main():
 
     # 3. Discover tracking subdirs
     tracking_dirs = sorted(
-        [p.parent for p in args.tracking_dir.rglob(f"{args.tracking_fname}")]
+        [
+            p.parent
+            for p in args.tracking_dir.rglob(f"{args.tracking_fname}")
+            if p.is_file()
+        ]
     )
+    # rglob doesn't follow symlinks by default; fall back to glob via os.walk
+    if not tracking_dirs:
+        import os
+
+        for root, _dirs, files in os.walk(args.tracking_dir, followlinks=True):
+            if args.tracking_fname in files:
+                tracking_dirs.append(Path(root))
+        tracking_dirs.sort()
     if not tracking_dirs:
         logger.error(f"No {args.tracking_fname} found under {args.tracking_dir}")
         return
@@ -257,6 +281,16 @@ def main():
 
         tracks_clean["video_id"] = r["video_id"]
         fps_lookup[r["video_id"]] = r["fps"]
+
+        # Validate bird count matches expected from bird_info
+        actual_ids = sorted(tracks_clean["bird_id"].unique())
+        expected_ids = sorted(bird_info.get(r["video_id"], {}).keys())
+        if expected_ids and actual_ids != expected_ids:
+            logger.warning(
+                f"  {r['video_id']}: bird_id mismatch after postprocessing — "
+                f"expected {expected_ids}, got {actual_ids}"
+            )
+
         all_tracks.append(tracks_clean)
 
     tracks = pd.concat(all_tracks)
@@ -289,10 +323,10 @@ def main():
 
     # 6. Save dataset
     output_data = {
-        "dataset_tracks.parquet": tracks,
-        "dataset_labels.parquet": labels,
+        "tracks.parquet": tracks,
+        "labels.parquet": labels,
     }
-    save_data(output_data, args.tracking_dir)
+    save_data(output_data, args.output_dir)
 
 
 if __name__ == "__main__":

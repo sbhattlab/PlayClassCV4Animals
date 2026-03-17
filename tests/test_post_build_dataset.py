@@ -1,7 +1,7 @@
 """Data integrity tests for built dataset outputs.
 
-These tests require a built dataset at the default tracking directory.
-Run after: pixi run -e sam3-hf build_dataset ...
+These tests require a built dataset at the default dataset directory.
+Run after: pixi run -e sam3-hf build_dataset
 """
 
 from pathlib import Path
@@ -9,8 +9,9 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-TRACKING_DIR = Path("data/tracking/20260225_214929_sam3_hf")
-TRACKS_PATH = TRACKING_DIR / "dataset_tracks.parquet"
+from src._config import DEFAULT_DATASET_DIR
+
+TRACKS_PATH = Path(DEFAULT_DATASET_DIR) / "tracks.parquet"
 
 pytestmark = pytest.mark.skipif(
     not TRACKS_PATH.exists(), reason="Built dataset not found"
