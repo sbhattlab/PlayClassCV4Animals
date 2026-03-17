@@ -1,0 +1,162 @@
+[workspace]
+authors = [
+    "Prince Ravi Leow <prince.ravi.leow@sund.ku.dk>",
+    "Neclow <neil.clow@sund.ku.dk>",
+    "David Duchêne <david.duchene@sund.ku.dk>",
+]
+channels = ["conda-forge"]
+platforms = ["linux-64"]
+name = "birdplay"
+version = "0.1.0"
+
+[system-requirements]
+cuda = "12.6"
+
+# ======= Environments ======
+[environments]
+sam3-hf = ["sam3-hf"]
+sam3-native = ["sam3-native"]
+gs2 = ["gs2"]
+yolo = ["yolo"]
+classifier = ["classifier"]
+videoprism = ["videoprism"]
+
+# ======= Default dependencies ======
+[dependencies]
+python = ">=3.11,<3.12"
+ffmpeg = "==8.0.1"
+pkg-config = "*"
+ruff = ">=0.15.1,<0.16"
+pytest = ">=9.0.2,<10"
+
+[pypi-options]
+extra-index-urls = ["https://download.pytorch.org/whl/cu126"]
+index-strategy = "unsafe-best-match"
+
+[pypi-dependencies]
+pillow = ">=12.1.0,<13"
+pandas = ">=3.0.0,<4"
+supervision = ">=0.27.0,<0.28"
+loguru = ">=0.7.3"
+tqdm = ">=4.67.1,<5"
+pycocotools = ">=2.0.11,<3"
+pyarrow = ">=23.0.0,<24"
+ipykernel = ">=7.1.0"
+ipywidgets = ">=8.1.8"
+torch = "==2.9.1+cu126"
+torchvision = "==0.24.1+cu126"
+torchcodec = "==0.9"
+matplotlib = ">=3.7.0,<4"
+seaborn = ">=0.13.2"
+openpyxl = ">=3.1.0,<4"
+tabulate = ">=0.9.0,<0.10"
+scikit-learn = ">=1.7.0"
+simpler-timer = ">=0.0.2"
+av = ">=16.1.0"
+kernels = ">=0.12.1, <0.13"
+
+# ======= SAM3-HF dependencies ======
+[feature.sam3-hf.pypi-dependencies]
+transformers = { git = "https://github.com/huggingface/transformers", rev = "v5.0.0rc2" }
+accelerate = ">=1.12.0"
+peft = ">=0.15"
+ftfy = "==6.1.1"
+omegaconf = ">=2.3.0"
+ultralytics = "*"
+numpy = ">=1.2.6,<2"
+opencv-python = "*"
+lightning = ">=2.5"
+
+[feature.sam3-hf.tasks]
+test-sam3-hf-image = "python -m test.sam3_hf_basic_image"
+test-sam3-hf-video = "python -m test.sam3_hf_basic_video"
+test-sam3-native-video = "python -m test.sam3_native_video"
+sam3-hf-tracker = "python -m script.sam3.run_sam3_hf"
+yolo-prescan = "python -m script.sam3.run_sam3_hf --config config/prescan_only.yaml"
+build_dataset = "python -m script.build_dataset"
+test_postprocessing = "python -m pytest tests/test_tracking_postprocessing.py -v"
+test_features = "python -m pytest tests/test_features.py -v"
+extract_features = "python -m script.extract_features"
+extract_embeddings = "python -m script.extract_embeddings"
+
+# ======= SAM3-native dependencies ======
+[feature.sam3-native.pypi-dependencies]
+sam3 = { git = "https://github.com/facebookresearch/sam3", rev = "11dec2936de97f2857c1f76b66d982d5a001155d" }
+transformers = { git = "https://github.com/huggingface/transformers", rev = "v5.0.0rc2" }
+accelerate = ">=1.12.0"
+einops = "*"
+ftfy = "==6.1.1"
+decord = "*"
+scikit-image = "*"
+numpy = ">=1.2.6,<2"
+opencv-python = "*"
+
+[feature.sam3-native.tasks]
+test-sam3-native-video = "python -m test.sam3_native_video"
+
+# ======= GS2 dependencies ======
+[feature.gs2.pypi-dependencies]
+transformers = { git = "https://github.com/huggingface/transformers", rev = "v5.0.0rc2" }
+psutil = ">=5.9.0"
+numpy = ">=2.4.1,<3"
+opencv-python = ">=4.13.0.90,<5"
+
+[feature.gs2.tasks]
+download-sam2-checkpoints = { cmd = """
+bash -c 'if ls checkpoints/*.pt 1> /dev/null 2>&1; then echo "SAM2 checkpoints already exist, skipping download..."; else cd checkpoints && bash download_ckpts.sh; fi'
+""", cwd = "Grounded-SAM-2-fork" }
+
+download-gdino-checkpoints = { cmd = """
+bash -c 'if ls gdino_checkpoints/*.pth 1> /dev/null 2>&1; then echo "Grounding DINO checkpoints already exist, skipping download..."; else cd gdino_checkpoints && bash download_ckpts.sh; fi'
+""", cwd = "Grounded-SAM-2-fork" }
+
+install-gs2-packages = { cmd = """
+export CUDA_HOME="/usr/lib/nvidia-cuda-toolkit/" && \
+uv pip install -e . && \
+uv pip install --no-build-isolation -e grounding_dino
+""", cwd = "Grounded-SAM-2-fork" }
+
+setup-gs2 = { depends-on = [
+    "download-sam2-checkpoints",
+    "download-gdino-checkpoints",
+    "install-pytorch",
+    "install-gs2-packages",
+] }
+
+test-gs2 = { cmd = """
+python -m script.gs2.chicken_tracking_demo --gs2-repo-path Grounded-SAM-2-fork -i ext-data/imgs/imgs_1min --text ".chicken.bird." --save-dir ext-data/output/test/gs2 --save-masks --save-images --create-video
+""" }
+
+gs2-manual-chunking = "python -m script.gs2.run_gs2_manual_chunking --config config/gs2_manual_chunking.yaml"
+
+# ======= Classifier dependencies ======
+[feature.classifier.pypi-dependencies]
+lightning = ">=2.5"
+wandb = ">=0.19"
+torchmetrics = ">=1.7"
+xgboost = ">=3.2.0, <4"
+shap = ">=0.51.0, <0.52"
+
+[feature.classifier.tasks]
+train = "python -m script.train"
+train_xgboost = "python -m script.train_xgboost"
+train_pooler = "python -m script.train_pooler"
+
+# ======= VideoPrism dependencies ======
+[feature.videoprism.system-requirements]
+cuda = "12"
+
+[feature.videoprism.pypi-dependencies]
+jax = { version = "*", extras = ["cuda12"] }
+opt-einsum = ">=3.3,<3.4"
+videoprism = { git = "https://github.com/google-deepmind/videoprism" }
+einshape = ">=1.0"
+mediapy = ">=1.2.0"
+
+[feature.videoprism.tasks]
+extract_videoprism = "python -m script.extract_embeddings_videoprism"
+
+# ======= YOLO dependencies ======
+[feature.yolo.pypi-dependencies]
+ultralytics = "*"
+numpy = ">=2.4.1,<3"

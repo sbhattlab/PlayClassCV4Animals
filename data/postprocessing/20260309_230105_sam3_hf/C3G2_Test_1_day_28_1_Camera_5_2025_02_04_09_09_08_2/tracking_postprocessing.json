@@ -1,0 +1,166 @@
+[
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "id": 10,
+    "from": 768,
+    "to": 1299,
+    "_time": "00:30.72 - 00:51.96"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "from": 964,
+    "to": 1039,
+    "id": 11,
+    "_time": "00:38.56-00:41.56"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "id": 12,
+    "from": 744,
+    "to": 864,
+    "_time": "00:29.76 - 00:34.56"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "id": 12,
+    "from": 1056,
+    "to": 1440,
+    "_time": "00:42.24 - 00:57.60"
+  },
+  {
+    "type": "id_switch",
+    "frame": 1070,
+    "from": 11,
+    "to": 14,
+    "_time": "00:42.80"
+  },
+  {
+    "type": "id_switch",
+    "frame": 1299,
+    "from": 10,
+    "to": 16,
+    "_time": "00:51.96"
+  },
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "from": 1434,
+    "to": 1486,
+    "id": 10,
+    "_time": "00:57.36-00:59.44"
+  },
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "from": 1434,
+    "to": 1486,
+    "id": 14,
+    "_time": "00:57.36-00:59.44"
+  },
+  {
+    "type": "id_switch",
+    "from": 16,
+    "to": 3,
+    "frame": 1486,
+    "_time": "00:59.44"
+  },
+  {
+    "type": "id_switch",
+    "from": 14,
+    "to": 16,
+    "frame": 1486,
+    "_time": "00:59.44"
+  },
+  {
+    "type": "id_switch",
+    "frame": 1487,
+    "from": 12,
+    "to": 0,
+    "_time": "00:59.48"
+  },
+  {
+    "type": "id_switch",
+    "frame": 1509,
+    "from": 16,
+    "to": 3,
+    "_time": "01:00.36"
+  },
+  {
+    "type": "id_switch",
+    "frame": 3317,
+    "from": 3,
+    "to": 5,
+    "_time": "02:12.68"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "id": 0,
+    "from": 15000,
+    "to": 15288,
+    "_time": "10:00 - 10:11.52"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "id": 16,
+    "from": 15096,
+    "to": 15336,
+    "_time": "10:03.84 - 10:13.44"
+  },
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "id": 16,
+    "from": 15336,
+    "to": 16341,
+    "_time": "10:13.44 - 10:53.65"
+  },
+  {
+    "type": "id_switch",
+    "frame": 16341,
+    "from": 5,
+    "to": 2,
+    "_time": "10:53.65"
+  },
+  {
+    "type": "id_switch",
+    "frame": 16341,
+    "from": 16,
+    "to": 3,
+    "_time": "10:53.65"
+  },
+  {
+    "type": "trim",
+    "cause": "merged_object",
+    "id": 3,
+    "from": 19728,
+    "to": 19812,
+    "_time": "13:09.12 - 13:12.48"
+  },
+  {
+    "type": "id_match",
+    "protocol_id": 2783,
+    "description": "Pink lower back",
+    "tracking_id": 2,
+    "frame": null
+  },
+  {
+    "type": "id_match",
+    "protocol_id": 2688,
+    "description": "Grey marbled",
+    "tracking_id": 0,
+    "frame": null
+  },
+  {
+    "type": "id_match",
+    "protocol_id": 2644,
+    "description": "Green lower back",
+    "tracking_id": 3,
+    "frame": null
+  }
+]

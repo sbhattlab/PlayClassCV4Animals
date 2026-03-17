@@ -12,13 +12,13 @@ import matplotlib.lines as mlines
 import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
-from matplotlib.axes import Axes
 import numpy as np
 import pandas as pd
 import pycocotools.mask as mask_util
 import supervision as sv
 import torch
 from loguru import logger
+from matplotlib.axes import Axes
 from matplotlib.cm import ScalarMappable
 from matplotlib.colors import Normalize
 from PIL import Image
@@ -105,12 +105,19 @@ def draw_points_on_axes(
 
         if line:
             (ln,) = ax.plot(
-                x, y, "-", color=colors[i], linewidth=line_width, alpha=line_alpha, zorder=9
+                x,
+                y,
+                "-",
+                color=colors[i],
+                linewidth=line_width,
+                alpha=line_alpha,
+                zorder=9,
             )
             lines.append(ln)
 
         sc = ax.scatter(
-            x, y,
+            x,
+            y,
             s=marker_size,
             c=[colors[i]] * len(x),
             marker=marker,
@@ -131,7 +138,9 @@ def draw_points_on_axes(
                     ha="left",
                     va="center",
                     zorder=11,
-                    bbox=dict(boxstyle="round,pad=0.1", fc=colors[i], ec="none", alpha=0.6),
+                    bbox=dict(
+                        boxstyle="round,pad=0.1", fc=colors[i], ec="none", alpha=0.6
+                    ),
                 )
                 texts.append(t)
 
@@ -1197,12 +1206,16 @@ def plot_chunk_boundary_frames(
 
     video_path = Path(video_path)
     if not video_path.exists():
-        logger.warning(f"plot_chunk_boundary_frames: video not found ({video_path}), skipping")
+        logger.warning(
+            f"plot_chunk_boundary_frames: video not found ({video_path}), skipping"
+        )
         return
 
     cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
-        logger.warning(f"plot_chunk_boundary_frames: could not open video ({video_path}), skipping")
+        logger.warning(
+            f"plot_chunk_boundary_frames: could not open video ({video_path}), skipping"
+        )
         return
 
     _fps = fps or 25.0
@@ -1213,7 +1226,11 @@ def plot_chunk_boundary_frames(
 
     # Build n_obj lookup from yolo_scan_df if available
     n_obj_lookup: dict[int, int] = {}
-    if yolo_scan_df is not None and not yolo_scan_df.empty and "frame_idx" in yolo_scan_df.columns:
+    if (
+        yolo_scan_df is not None
+        and not yolo_scan_df.empty
+        and "frame_idx" in yolo_scan_df.columns
+    ):
         n_obj_lookup = dict(zip(yolo_scan_df["frame_idx"], yolo_scan_df["num_objects"]))
 
     def _grab(frame_idx: int):
@@ -1228,7 +1245,8 @@ def plot_chunk_boundary_frames(
 
     n_chunks = len(chunks)
     fig, axes = plt.subplots(
-        n_chunks, 2,
+        n_chunks,
+        2,
         figsize=(14, n_chunks * 2.5),
         constrained_layout=True,
     )
@@ -1246,8 +1264,15 @@ def plot_chunk_boundary_frames(
                 ax.imshow(img)
             else:
                 ax.set_facecolor("black")
-                ax.text(0.5, 0.5, "read error", color="white",
-                        ha="center", va="center", transform=ax.transAxes)
+                ax.text(
+                    0.5,
+                    0.5,
+                    "read error",
+                    color="white",
+                    ha="center",
+                    va="center",
+                    transform=ax.transAxes,
+                )
             n_obj = n_obj_lookup.get(frame_idx, "?")
             ax.set_title(
                 f"Chunk {i} [{model_short}] — {label}\n"

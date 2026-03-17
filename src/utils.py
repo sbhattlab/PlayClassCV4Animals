@@ -13,6 +13,7 @@ import psutil
 import torch
 from loguru import logger
 from omegaconf import DictConfig, OmegaConf
+from torchcodec.decoders import VideoDecoder
 
 # ---------------------------------------------------------------------------
 # Config, environment, logging, and output directory utilities
@@ -214,14 +215,28 @@ def get_video_metadata(video_path: str | Path) -> tuple[float, int]:
     return fps, total_frames
 
 
+def load_video_frames(video_path: str | Path, start_frame: int, end_frame: int) -> list:
+    """Load frames [start_frame, end_frame) as a list of RGB numpy arrays.
+
+    Uses torchcodec for frame-accurate seeking (``seek_mode="exact"``).
+    The first call on a video incurs a ~18 s index scan; subsequent calls
+    (or calls after the OS has cached the file) are fast.
+    """
+
+    decoder = VideoDecoder(str(video_path))
+    batch = decoder.get_frames_in_range(start=start_frame, stop=end_frame)
+    # batch.data shape: (N, C, H, W) uint8 tensor
+    return [frame.permute(1, 2, 0).numpy() for frame in batch.data]
+
+
 def load_video_frames_range(
     video_path: str | Path, start_frame: int, end_frame: int
 ) -> list:
     """Load frames [start_frame, end_frame) from a video file as a list of RGB numpy arrays.
 
-    Uses cv2 seek (CAP_PROP_POS_FRAMES). Note: seek-based indexing can be
-    unreliable on some codecs/containers — prefer load_video_frames_torchcodec
-    for frame-accurate results.
+    .. deprecated::
+        Uses cv2.CAP_PROP_POS_FRAMES seeking, which is unreliable for
+        H.264-encoded videos. Use :func:`load_video_frames` instead.
     """
     import cv2
 

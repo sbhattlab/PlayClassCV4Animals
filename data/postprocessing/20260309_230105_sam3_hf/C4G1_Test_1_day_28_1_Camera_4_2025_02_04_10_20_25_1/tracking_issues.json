@@ -1,0 +1,530 @@
+{
+  "transition0": {
+    "type": "id_switch",
+    "start": 45,
+    "end": 45,
+    "start_time": 1.8,
+    "end_time": 1.8,
+    "ids_before": [
+      0
+    ],
+    "ids_after": [
+      0,
+      1
+    ],
+    "lost": [],
+    "gained": [
+      1
+    ]
+  },
+  "transition1": {
+    "type": "id_switch",
+    "start": 47,
+    "end": 47,
+    "start_time": 1.88,
+    "end_time": 1.88,
+    "ids_before": [
+      0,
+      1
+    ],
+    "ids_after": [
+      0,
+      1,
+      2
+    ],
+    "lost": [],
+    "gained": [
+      2
+    ]
+  },
+  "transition2": {
+    "type": "id_switch",
+    "start": 1474,
+    "end": 1474,
+    "start_time": 58.95,
+    "end_time": 58.95,
+    "ids_before": [
+      0,
+      1,
+      2
+    ],
+    "ids_after": [
+      0
+    ],
+    "lost": [
+      1,
+      2
+    ],
+    "gained": []
+  },
+  "transition3": {
+    "type": "id_switch",
+    "start": 1481,
+    "end": 1481,
+    "start_time": 59.23,
+    "end_time": 59.23,
+    "ids_before": [
+      0
+    ],
+    "ids_after": [
+      0,
+      1
+    ],
+    "lost": [],
+    "gained": [
+      1
+    ]
+  },
+  "transition4": {
+    "type": "id_switch",
+    "start": 1538,
+    "end": 1538,
+    "start_time": 61.5,
+    "end_time": 61.5,
+    "ids_before": [
+      0,
+      1
+    ],
+    "ids_after": [
+      0,
+      1,
+      3
+    ],
+    "lost": [],
+    "gained": [
+      3
+    ]
+  },
+  "overlap1": {
+    "type": "overlap",
+    "start": 4396,
+    "end": 4396,
+    "start_time": 175.8,
+    "end_time": 175.8,
+    "ids": [
+      1,
+      3
+    ]
+  },
+  "overlap2": {
+    "type": "overlap",
+    "start": 4479,
+    "end": 5565,
+    "start_time": 179.12,
+    "end_time": 222.54,
+    "ids": [
+      1,
+      3
+    ]
+  },
+  "overlap3": {
+    "type": "overlap",
+    "start": 5617,
+    "end": 5627,
+    "start_time": 224.62,
+    "end_time": 225.02,
+    "ids": [
+      1,
+      3
+    ]
+  },
+  "transition5": {
+    "type": "id_switch",
+    "start": 5855,
+    "end": 5855,
+    "start_time": 234.14,
+    "end_time": 234.14,
+    "ids_before": [
+      0,
+      1,
+      3
+    ],
+    "ids_after": [
+      2,
+      3
+    ],
+    "lost": [
+      0,
+      1
+    ],
+    "gained": [
+      2
+    ]
+  },
+  "transition6": {
+    "type": "id_switch",
+    "start": 5873,
+    "end": 5873,
+    "start_time": 234.86,
+    "end_time": 234.86,
+    "ids_before": [
+      2,
+      3
+    ],
+    "ids_after": [
+      1,
+      2,
+      3
+    ],
+    "lost": [],
+    "gained": [
+      1
+    ]
+  },
+  "transition7": {
+    "type": "id_switch",
+    "start": 7518,
+    "end": 7518,
+    "start_time": 300.65,
+    "end_time": 300.65,
+    "ids_before": [
+      1,
+      2,
+      3
+    ],
+    "ids_after": [
+      5
+    ],
+    "lost": [
+      1,
+      2,
+      3
+    ],
+    "gained": [
+      5
+    ]
+  },
+  "transition8": {
+    "type": "id_switch",
+    "start": 7543,
+    "end": 7543,
+    "start_time": 301.65,
+    "end_time": 301.65,
+    "ids_before": [
+      5
+    ],
+    "ids_after": [
+      1,
+      5
+    ],
+    "lost": [],
+    "gained": [
+      1
+    ]
+  },
+  "transition9": {
+    "type": "id_switch",
+    "start": 7573,
+    "end": 7573,
+    "start_time": 302.84,
+    "end_time": 302.84,
+    "ids_before": [
+      1,
+      5
+    ],
+    "ids_after": [
+      1,
+      2,
+      5
+    ],
+    "lost": [],
+    "gained": [
+      2
+    ]
+  },
+  "low_score1": {
+    "type": "low_score",
+    "start": 8111,
+    "end": 8139,
+    "start_time": 324.36,
+    "end_time": 325.48,
+    "id": 2,
+    "low_score_rows": 29,
+    "total_rows": 29,
+    "min_score": 0.412
+  },
+  "low_score0": {
+    "type": "low_score",
+    "start": 8860,
+    "end": 8951,
+    "start_time": 354.31,
+    "end_time": 357.95,
+    "id": 1,
+    "low_score_rows": 92,
+    "total_rows": 92,
+    "min_score": 0.14
+  },
+  "overlap0": {
+    "type": "overlap",
+    "start": 8928,
+    "end": 10265,
+    "start_time": 357.03,
+    "end_time": 410.5,
+    "ids": [
+      1,
+      2
+    ]
+  },
+  "transition10": {
+    "type": "id_switch",
+    "start": 10266,
+    "end": 10266,
+    "start_time": 410.54,
+    "end_time": 410.54,
+    "ids_before": [
+      1,
+      2,
+      5
+    ],
+    "ids_after": [
+      5
+    ],
+    "lost": [
+      1,
+      2
+    ],
+    "gained": []
+  },
+  "transition11": {
+    "type": "id_switch",
+    "start": 10278,
+    "end": 10278,
+    "start_time": 411.02,
+    "end_time": 411.02,
+    "ids_before": [
+      5
+    ],
+    "ids_after": [
+      5,
+      6
+    ],
+    "lost": [],
+    "gained": [
+      6
+    ]
+  },
+  "transition12": {
+    "type": "id_switch",
+    "start": 10287,
+    "end": 10287,
+    "start_time": 411.38,
+    "end_time": 411.38,
+    "ids_before": [
+      5,
+      6
+    ],
+    "ids_after": [
+      1,
+      5,
+      6
+    ],
+    "lost": [],
+    "gained": [
+      1
+    ]
+  },
+  "transition13": {
+    "type": "id_switch",
+    "start": 12045,
+    "end": 12045,
+    "start_time": 481.68,
+    "end_time": 481.68,
+    "ids_before": [
+      1,
+      5,
+      6
+    ],
+    "ids_after": [
+      1,
+      5
+    ],
+    "lost": [
+      6
+    ],
+    "gained": []
+  },
+  "transition14": {
+    "type": "id_switch",
+    "start": 12054,
+    "end": 12054,
+    "start_time": 482.04,
+    "end_time": 482.04,
+    "ids_before": [
+      1,
+      5
+    ],
+    "ids_after": [
+      1,
+      5,
+      6
+    ],
+    "lost": [],
+    "gained": [
+      6
+    ]
+  },
+  "transition15": {
+    "type": "id_switch",
+    "start": 13502,
+    "end": 13502,
+    "start_time": 539.95,
+    "end_time": 539.95,
+    "ids_before": [
+      1,
+      5,
+      6
+    ],
+    "ids_after": [
+      5
+    ],
+    "lost": [
+      1,
+      6
+    ],
+    "gained": []
+  },
+  "transition16": {
+    "type": "id_switch",
+    "start": 13505,
+    "end": 13505,
+    "start_time": 540.07,
+    "end_time": 540.07,
+    "ids_before": [
+      5
+    ],
+    "ids_after": [
+      1,
+      5,
+      6
+    ],
+    "lost": [],
+    "gained": [
+      1,
+      6
+    ]
+  },
+  "low_score2": {
+    "type": "low_score",
+    "start": 14010,
+    "end": 14108,
+    "start_time": 560.26,
+    "end_time": 564.18,
+    "id": 5,
+    "low_score_rows": 99,
+    "total_rows": 99,
+    "min_score": 0.594
+  },
+  "transition17": {
+    "type": "id_switch",
+    "start": 16322,
+    "end": 16322,
+    "start_time": 652.72,
+    "end_time": 652.72,
+    "ids_before": [
+      1,
+      5,
+      6
+    ],
+    "ids_after": [
+      5
+    ],
+    "lost": [
+      1,
+      6
+    ],
+    "gained": []
+  },
+  "transition18": {
+    "type": "id_switch",
+    "start": 16350,
+    "end": 16350,
+    "start_time": 653.84,
+    "end_time": 653.84,
+    "ids_before": [
+      5
+    ],
+    "ids_after": [
+      1,
+      5
+    ],
+    "lost": [],
+    "gained": [
+      1
+    ]
+  },
+  "transition19": {
+    "type": "id_switch",
+    "start": 16355,
+    "end": 16355,
+    "start_time": 654.04,
+    "end_time": 654.04,
+    "ids_before": [
+      1,
+      5
+    ],
+    "ids_after": [
+      1,
+      5,
+      6
+    ],
+    "lost": [],
+    "gained": [
+      6
+    ]
+  },
+  "low_score3": {
+    "type": "low_score",
+    "start": 16535,
+    "end": 16826,
+    "start_time": 661.24,
+    "end_time": 672.87,
+    "id": 5,
+    "low_score_rows": 291,
+    "total_rows": 292,
+    "min_score": 0.007
+  },
+  "low_score4": {
+    "type": "low_score",
+    "start": 20957,
+    "end": 20999,
+    "start_time": 838.07,
+    "end_time": 839.75,
+    "id": 5,
+    "low_score_rows": 41,
+    "total_rows": 43,
+    "min_score": 0.523
+  },
+  "low_score5": {
+    "type": "low_score",
+    "start": 21940,
+    "end": 22074,
+    "start_time": 877.38,
+    "end_time": 882.74,
+    "id": 5,
+    "low_score_rows": 126,
+    "total_rows": 135,
+    "min_score": 0.668
+  },
+  "low_score6": {
+    "type": "low_score",
+    "start": 22160,
+    "end": 22211,
+    "start_time": 886.18,
+    "end_time": 888.22,
+    "id": 5,
+    "low_score_rows": 46,
+    "total_rows": 52,
+    "min_score": 0.734
+  },
+  "low_score7": {
+    "type": "low_score",
+    "start": 22496,
+    "end": 22530,
+    "start_time": 899.62,
+    "end_time": 900.98,
+    "id": 5,
+    "low_score_rows": 35,
+    "total_rows": 35,
+    "min_score": 0.738
+  }
+}

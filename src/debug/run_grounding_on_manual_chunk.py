@@ -1,10 +1,7 @@
 import os
 
-from src.debug.debug import load_inputs
-
 cfg, video_info = load_inputs("config/sam3_hf_manual_chunking_c5g2_day_28.yaml")
 os.environ["CUDA_VISIBLE_DEVICES"] = cfg.get("CUDA_VISIBLE_DEVICES", "1")
-
 
 import logging
 from pathlib import Path
@@ -15,7 +12,8 @@ from accelerate import Accelerator
 
 from script.sam3.run_sam3_hf import _process_video_chunk
 from src.grounding import find_best_grounding_frame, run_grounding
-from src.processing import extract_equidistant_points_from_masks
+from src.masks import extract_equidistant_points_from_masks
+from src.debug.debug import load_inputs
 from src.utils import load_video_frames_range
 from src.viz import draw_points_on_axes
 
