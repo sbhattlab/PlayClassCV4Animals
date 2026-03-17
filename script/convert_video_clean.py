@@ -11,6 +11,9 @@ def normalize_filename(name: str) -> str:
     return stem + p.suffix
 
 
+VIDEO_EXTENSIONS = {".mp4", ".mpg", ".mpeg", ".avi", ".mkv", ".mov", ".wmv", ".flv", ".webm"}
+
+
 def clean_video(input_path: str):
     input_path = Path(input_path)
     if not input_path.exists():
@@ -21,6 +24,10 @@ def clean_video(input_path: str):
 
     # Force .mp4 extension
     output_path = input_path.parent / f"{normalized_stem}.mp4"
+
+    if output_path.exists():
+        print(f"Skipping (output exists): {output_path}")
+        return
 
     # ffmpeg command
     cmd = [
@@ -45,10 +52,43 @@ def clean_video(input_path: str):
     print(f"Saved cleaned file → {output_path}")
 
 
+def clean_video_dir(dir_path: str):
+    dir_path = Path(dir_path)
+    if not dir_path.is_dir():
+        raise NotADirectoryError(f"Not a directory: {dir_path}")
+
+    videos = sorted(
+        f for f in dir_path.iterdir() if f.is_file() and f.suffix.lower() in VIDEO_EXTENSIONS
+    )
+
+    if not videos:
+        print(f"No video files found in {dir_path}")
+        return
+
+    print(f"Found {len(videos)} video(s) in {dir_path}\n")
+
+    failed = []
+    for i, video in enumerate(videos, 1):
+        print(f"[{i}/{len(videos)}] {video.name}")
+        try:
+            clean_video(str(video))
+        except subprocess.CalledProcessError as e:
+            print(f"  FAILED: {e}")
+            failed.append(video.name)
+        print()
+
+    print(f"Done. {len(videos) - len(failed)}/{len(videos)} succeeded.")
+    if failed:
+        print(f"Failed: {failed}")
+
+
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: python convert_video_clean.py <path/to/video>")
+        print("Usage: python convert_video_clean.py <path/to/video_or_directory>")
         sys.exit(1)
-    clean_video(sys.argv[1])
 
-## 🎯 Usage sh python convert_video_clean.py "C1G1 Test 1 day 28(1) Camera 4 2025-02-04 10_59_56 1.mpg"  Output example: Saved cleaned file → C1G1_Test_1_day_28_1_Camera_4_2025_02_04_10_59_56_1.mpg
+    target = Path(sys.argv[1])
+    if target.is_dir():
+        clean_video_dir(str(target))
+    else:
+        clean_video(str(target))
