@@ -727,7 +727,7 @@ def _run_single_video(cfg, run_dir: Path, config_path: Path | None = None):
     ).get("enabled", False)
     if _grounding_on:
         logger.info(
-            f"Chunks: {len(chunks)} (all via video model text-prompt grounding for {cfg.get('grounding_frames')} frames -> video tracker model)"
+            f"Chunks: {len(chunks)} (all via video model text-prompt grounding for {cfg.get('text_grounding', {}).get('grounding_frames', 25)} frames -> video tracker model)"
         )
     else:
         logger.info(
