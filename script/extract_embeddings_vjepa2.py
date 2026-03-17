@@ -52,7 +52,8 @@ def parse_args():
         type=str,
         default="facebook/vjepa2-vitl-fpc64-256",
     )
-    parser.add_argument("--device", type=int, default=0)
+    parser.add_argument("--device", type=str, default="cuda:0",
+                        help="Device (e.g. cuda:0, cuda:1, cpu)")
     parser.add_argument(
         "--num-frames",
         type=int,
@@ -246,7 +247,7 @@ def main():
     logger.info(f"Loading model: {args.model_name}")
     processor = AutoVideoProcessor.from_pretrained(args.model_name)
     model = AutoModel.from_pretrained(args.model_name, dtype=torch.bfloat16)
-    device = torch.device(f"cuda:{args.device}")
+    device = torch.device(args.device)
     model = model.to(device).eval()
 
     d_model = model.config.hidden_size

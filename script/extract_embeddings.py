@@ -62,9 +62,9 @@ def parse_args():
     )
     parser.add_argument(
         "--device",
-        type=int,
-        default=0,
-        help="CUDA device index (default: 0)",
+        type=str,
+        default="cuda:0",
+        help="Device (e.g. cuda:0, cuda:1, cpu)",
     )
     parser.add_argument(
         "--bbox-scale",
@@ -172,7 +172,7 @@ def main():
         model = PeftModel.from_pretrained(model, str(args.lora_weights))
         model = model.merge_and_unload()  # merge LoRA into base weights for fast inference
         logger.info("LoRA adapter merged into base model")
-    device = torch.device(f"cuda:{args.device}")
+    device = torch.device(args.device)
     model = model.to(device).eval()
     logger.info(f"Model loaded on {device} (bfloat16)")
 
