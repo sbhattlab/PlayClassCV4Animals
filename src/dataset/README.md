@@ -41,7 +41,7 @@
          filter_incomplete_windows()    drop windows below coverage threshold
                   |
                   v
-         [dataset_tracks.parquet] + [dataset_labels.parquet]
+         [tracks.parquet] + [labels.parquet]
                   |
           --------+--------
           |                |
@@ -50,8 +50,8 @@
   summarize_by_window()    DINOv3 CLS-token per frame
           |                |
           v                v
-  [all_features.parquet]   [dataset_embeddings.pt]
-  [dataset_features.parquet]
+  [features_all.parquet]   [embeddings.pt]
+  [features_windowed.parquet]
 ```
 
 ### Column naming
@@ -156,18 +156,18 @@ temporal windows:
 ### Step 6: Extract features (separate scripts)
 
 Feature extraction and embedding extraction are separate scripts that read
-`dataset_tracks.parquet` and can run in parallel.
+`tracks.parquet` and can run in parallel.
 
 - **`extract_mask_features()`** — extracts spatial (mask area, bbox, centroid),
   temporal (velocity, area change), and pairwise (nearest-neighbor distance)
-  features per frame. Saved as `all_features.parquet`.
+  features per frame. Saved as `features_all.parquet`.
 
 - **`summarize_features_by_window()`** — aggregates per-frame features into
   per-window summary statistics (mean, std, min, max, median) plus frame count.
-  Saved as `dataset_features.parquet` (one row per video/bird/window).
+  Saved as `features_windowed.parquet` (one row per video/bird/window).
 
 - **`extract_embeddings()`** — extracts DINOv3 CLS-token embeddings from bbox
-  crops per (video_id, bird_id, window). Saved as `dataset_embeddings.pt`.
+  crops per (video_id, bird_id, window). Saved as `embeddings.pt`.
 
 ## Known issues
 
@@ -189,38 +189,32 @@ cap.release()
 
 ```sh
 # First run: generates tracking_issues.json + tracking_postprocessing.json
-pixi run -e sam3-hf build_dataset \
-    --tracking-dir data/tracking/20260225_214929_sam3_hf \
-    --label-dir data/labels
+pixi run -e sam3-hf build_dataset
 
 # User fills in "to" values and reviews trim entries
 
 # Second run: applies postprocessing, builds dataset
-pixi run -e sam3-hf build_dataset \
-    --tracking-dir data/tracking/20260225_214929_sam3_hf \
-    --label-dir data/labels
+pixi run -e sam3-hf build_dataset
 ```
 
-Output: `dataset_tracks.parquet` and `dataset_labels.parquet` saved to the tracking dir.
+Output: `tracks.parquet` and `labels.parquet` saved to `data/dataset/`.
 
 ### Feature extraction (CPU)
 
 ```sh
-pixi run -e sam3-hf extract_features \
-    --tracking-dir data/tracking/20260225_214929_sam3_hf
+pixi run -e sam3-hf extract_features
 ```
 
-Output: `all_features.parquet` (per-frame) and `dataset_features.parquet` (per-window) saved to the tracking dir.
+Output: `features_all.parquet` (per-frame) and `features_windowed.parquet` (per-window) saved to `data/dataset/`.
 
 ### Embedding extraction (GPU)
 
 ```sh
 pixi run -e sam3-hf extract_embeddings \
-    --tracking-dir data/tracking/20260225_214929_sam3_hf \
     --video-dir video-data/batch
 ```
 
-Output: `dataset_embeddings.pt` saved to the tracking dir.
+Output: `embeddings.pt` saved to `data/dataset/`.
 
 ## Module overview
 
@@ -231,7 +225,8 @@ Output: `dataset_embeddings.pt` saved to the tracking dir.
 | `labels.py`                  | Parse behaviour labels + bird info from Excel; resolve dual groups |
 | `features.py`                | Handcrafted mask features (spatial, temporal, pairwise)  |
 | `embeddings.py`              | DINOv3 CLS-token embedding extraction + window summarization |
-| `utils.py`                   | Shared helpers: `fmt_time`, `get_video_fps`, `_decode_rle_mask` |
+| `utils.py`                   | Shared helpers: `fmt_time`, `get_video_fps`, `resolve_video_path`, `assert_embedding_label_alignment` |
+| `crops.py`                   | Shared crop modes for embedding extraction: `crop_frame`, `compute_union_origin` |
 
 ## Example `tracking_postprocessing.json`
 

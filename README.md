@@ -3,29 +3,42 @@
 Multi-object tracking and segmentation of chickens in video data using SAM3,
 with postprocessing, feature extraction, and behaviour classification.
 
-## Data directory
+## Installation
 
-- Small and tabular data in `data/` directory
-- Larger video data symlinked to `video-data/`
+**Package manager**: [Pixi](https://pixi.sh) (not pip/conda directly).
 
 ```sh
-# ku-01
-ln -s "/mnt/birds/rebecca2025/raw" video-data
-ln -s "/mnt/birds/rebecca2025/" ext-data
+git submodule update --init --recursive
+
+# Install main (default) environment
+pixi install
+
+# Install SAM3 environment (main pipeline)
+pixi install -e sam3-hf
+
+# Launch shell
+pixi shell -e sam3-hf
 ```
 
-### Test data
+Other environments (`gs2`, `sam3-native`, `yolo`) exist but are not actively used. The `classifier` environment adds PyTorch Lightning + torchmetrics. The `videoprism` environment provides JAX + VideoPrism. Platform is Linux-only (CUDA 12.6).
 
-- Small (<=1 min) in `data/img` and `data/video` — 10 sec, 15 sec, 30 sec, 1 min clips
-- Medium (>=5 min) at `/mnt/birds/rebecca2025/` — 5 min
+## Data
 
-### `ext-data` directory
+```
+data/
+  labels/          Registration protocol Excel files (behaviour labels + bird info)
+  tracking/        Symlinks to tracking run output dirs (gitignored)
+  dataset/         Combined dataset outputs (tracks, labels, features, embeddings)
+  postprocessing/  Version-controlled per-video postprocessing JSONs
+  video/           Symlink to raw video files (gitignored)
+  img/             Short test clips and diagnostic outputs (gitignored)
+ext-data/          Symlink to /mnt/birds/rebecca2025/ (results, image sequences)
+```
 
 ```sh
-├── imgs    : video sequences converted to images (durations vary from 15 sec to 15 mins)
-├── output  : results from runs
-├── raw     : raw video files
-└── test    : *longer* video files (i.e. > 1 min)
+# ku-01: symlink video and external data
+ln -s "/mnt/birds/rebecca2025/raw" data/video
+ln -s "/mnt/birds/rebecca2025/" ext-data
 ```
 
 ### Dataset
@@ -35,124 +48,86 @@ Built from tracking outputs + registration protocol Excel files in three steps
 
 ```sh
 # 1. Labels, postprocessing, windows (fast, ~seconds)
-pixi run -e sam3-hf build_dataset --tracking-dir data/tracking/... --label-dir data/labels
+pixi run -e sam3-hf build_dataset
 
-# 2. Mask features (slow, ~7 min, CPU-only)
-pixi run -e sam3-hf extract_features --tracking-dir data/tracking/...
+# 2. Mask features (CPU-only)
+pixi run -e sam3-hf extract_features
 
-# 3. DINOv3 embeddings (slow, GPU required)
-pixi run -e sam3-hf extract_embeddings --tracking-dir data/tracking/... --video-dir data/video/...
+# 3. DINOv3 embeddings (GPU required)
+pixi run -e sam3-hf extract_embeddings --video-dir video-data/batch
 ```
 
-Outputs saved to the tracking batch directory:
+All scripts auto-discover tracking runs under `data/tracking/` and write outputs to `data/dataset/`:
 
-- `dataset_tracks.parquet` — postprocessed tracks with protocol bird IDs and window column
-- `dataset_labels.parquet` — behaviour labels aligned to tracking windows
-- `all_features.parquet` — per-frame mask features (spatial, temporal, pairwise)
-- `dataset_features.parquet` — per-window feature summaries
-- `dataset_embeddings.pt` — DINOv3 CLS-token embeddings per (video, bird, window)
+- `tracks.parquet` — postprocessed tracks with protocol bird IDs and window column
+- `labels.parquet` — behaviour labels aligned to tracking windows
+- `features_all.parquet` — per-frame mask features (spatial, temporal, pairwise)
+- `features_windowed.parquet` — per-window feature summaries
+- `embeddings.pt` — DINOv3 CLS-token embeddings per (video, bird, window)
 
-## Environment
+## Tasks
 
-Fetch git submodules:
+Scripts are organized as: executable scripts in `script/`, reusable library modules in `src/`.
+Run via pixi tasks or as Python modules from the project root.
 
-```sh
-git submodule update --init --recursive
-```
-
-Install environments (currently supported: `sam3-hf` and `gs2`):
-
-```sh
-# Install main (default) environment
-pixi install
-
-# Install SAM3 (sam3-hf) environment
-pixi install -e sam3-hf
-
-# install grounded-sam-2 (gs2) environment
-pixi run -e gs2 setup-gs2
-# Add location of gs2 fork to shell profile
-export PYTHONPATH="/path/to/submodule/chicken-behaviour-classifier/Grounded-SAM-2-fork":$PYTHONPATH
-
-# Launch shell in specific environment
-pixi shell -e sam3-hf
-```
-
-### Supported platforms
-
-In general, environments assume Linux.
-
-Currently the following environments are supported in addition to Linux, on macOS:
-
-- SAM3 (huggingface transformers - the native implementation isn't officially supported on macOS)
-- grounded-sam-2 (the git submodule contains a gs2 fork which allows frame streaming, which reduces GPU memory usage for longer runs)
-
-## How to run tracking pipelines
+### Tracking
 
 > [!IMPORTANT]
-> Please read base config file usually named (`config/<tool name>_config.yaml`), and modify appropriately (e.g. which CUDA device to run)
-
-- Scripts are organized as: executable scripts in `script/`, reusable library modules in `src/`.
-
-- Run scripts as Python modules, e.g.:
+> Read the base config file (`config/<tool name>_config.yaml`) and modify appropriately (e.g. CUDA device).
 
 ```sh
-python -m script.sam3.run_sam3_hf
+# Main SAM3-HF pipeline (defaults to config/sam3_hf_config.yaml)
+pixi run -e sam3-hf sam3-hf-tracker
+
+# Custom config
+pixi run -e sam3-hf python -m script.sam3.run_sam3_hf --config config/sam3_hf_manual_chunking.yaml
 ```
 
-- *OR* check whether a dedicated pixi task has been created for it, e.g.:
+### Post-tracking
 
-```sh
-pixi run sam3-hf-default
-pixi run sam3-hf-manual
-pixi run sam3-hf-yolo-scan
-```
+| Script | Description |
+|--------|-------------|
+| `script/build_dataset.py` | Postprocess tracking outputs, match bird IDs, build dataset parquets |
+| `script/extract_features.py` | Extract mask features + window summaries from dataset tracks (CPU) |
+| `script/extract_embeddings.py` | Extract DINOv3 embeddings from dataset tracks (GPU) |
+| `script/compute_chunk_boundaries.py` | Recompute YOLO scan metrics + chunk boundaries |
+| `script/viz_chunk_boundaries.py` | Visualize chunk boundary frames |
+| `script/viz_grounding.py` | Render grounding phase outputs onto video |
+| `script/extract_embeddings_vjepa2.py` | Extract V-JEPA 2 video embeddings from dataset tracks (GPU) |
+| `script/extract_embeddings_videoprism.py` | Extract VideoPrism video embeddings from dataset tracks (GPU, JAX) |
+| `script/train.py` | Classification training with LOVO cross-validation (PyTorch Lightning) |
+| `script/train_xgboost.py` | XGBoost baseline with LOVO cross-validation |
 
-## Post-tracking pipelines
-
-- script/build_dataset.py         -> Postprocess tracking outputs, match bird IDs, build dataset parquets
-- script/extract_features.py      -> Extract mask features + window summaries from dataset tracks (CPU)
-- script/extract_embeddings.py    -> Extract DINOv3 embeddings from dataset tracks (GPU)
-- script/viz_chunk_boundaries.py  -> Visualize chunk boundary frames from a config file or yolo scan run directory
-- script/viz_grounding.py         -> Render grounding phase outputs onto the original video
-
-## Test scripts
+## Tests
 
 > [!IMPORTANT]
-> Set `CUDA_VISIBLE_DEVICES` explicitly before running the commands below, e.g.:
+> Set `CUDA_VISIBLE_DEVICES` explicitly before running GPU tests.
 
 ```sh
+# SAM3 inference tests (standalone scripts, not pytest)
 CUDA_VISIBLE_DEVICES=1 pixi run test-sam3-hf-image
+CUDA_VISIBLE_DEVICES=1 pixi run test-sam3-hf-video
+
+# Dataset tests (pytest)
+pixi run -e sam3-hf test_features
+pixi run -e sam3-hf test_postprocessing                     # Tracking postprocessing tests (pytest)
+pixi run -e classifier pytest tests/test_pooling.py         # Segment pooling + attention tests (pytest)
+pixi run -e sam3-hf pytest tests/test_post_build_dataset.py # Dataset integrity checks (pytest)
 ```
+
+## Classification
+
+Behaviour classification using LOVO (Leave-One-Video-Out) cross-validation.
+Best result: **0.744 pooled macro F1** (TemporalCNNv2 on multi-scale DINOv3 embeddings + handcrafted features).
+See `notes/ablation_final.md` for full ablation tables.
 
 ```sh
-# Test torch/cuda in sam3 environments
-pixi run -e sam3-hf python -c "import torch; print(f'PyTorch is installed: {torch.__version__}'); print(f'CUDA available: {torch.cuda.is_available()}')"
-pixi run -e sam3-native python -c "import torch; print(f'PyTorch is installed: {torch.__version__}'); print(f'CUDA available: {torch.cuda.is_available()}')"
+# Features only (MLP baseline)
+pixi run -e classifier train --model mlp --input features --exclude social
 
-# SAM3-hf
-pixi run test-sam3-hf-image
-pixi run test-sam3-hf-video
+# Best model: temporal CNN on features + multi-scale embeddings
+pixi run -e classifier train --model temporal_cnn2 --input features+embeddings+embeddings_plain256+embeddings_union512 --exclude social --dropout 0.0 --n-segments 24
 
-# SAM3-native
-pixi run test-sam3-native-video
-
-# grounded-sam-2
-pixi run test-gs2
+# XGBoost baseline
+pixi run -e classifier python -m script.train_xgboost --exclude social
 ```
-
-## Methods tested
-
-- Object detection
-  - YOLO (yolo8n, yolo11x)
-- Pose-estimation (w/ fine-tuning from manually-labelled data)
-  - DeepLabCut
-  - YOLO model (yolo11x-pose)
-- Segmenter
-  - OpenCV + SciPy (i.e. "pure" computer vision, virtually no pre-trained model-based prediction)
-  - Grounded-SAM-2
-  - SAM3 (huggingface (hf) and native implementations)
-
-## Future work
-
-- Behaviour classifier training (TemporalCNN / TemporalGRU on features + embeddings)
