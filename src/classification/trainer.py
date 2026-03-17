@@ -2,6 +2,7 @@
 
 import lightning as L
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 from torchmetrics import MetricCollection
 from torchmetrics.classification import MulticlassConfusionMatrix, MulticlassF1Score
@@ -9,10 +10,12 @@ from torchmetrics.classification import MulticlassConfusionMatrix, MulticlassF1S
 
 def _build_metrics(n_classes: int) -> MetricCollection:
     """Metric set used for each stage. Add new metrics here."""
-    return MetricCollection({
-        "macro_f1": MulticlassF1Score(num_classes=n_classes, average="macro"),
-        "confusion_matrix": MulticlassConfusionMatrix(num_classes=n_classes),
-    })
+    return MetricCollection(
+        {
+            "macro_f1": MulticlassF1Score(num_classes=n_classes, average="macro"),
+            "confusion_matrix": MulticlassConfusionMatrix(num_classes=n_classes),
+        }
+    )
 
 
 # Keys that can't be logged as scalars via log_dict
@@ -34,11 +37,21 @@ class BehaviourClassifier(L.LightningModule):
         Per-class weights for cross-entropy loss (length ``n_classes``).
     """
 
-    def __init__(self, backbone, n_classes, lr=1e-3, class_weights=None):
+    def __init__(
+        self,
+        backbone,
+        n_classes,
+        lr=1e-3,
+        class_weights=None,
+        label_smoothing=0.1,
+        feature_dropout=0.0,
+    ):
         super().__init__()
         self.save_hyperparameters(ignore=["backbone", "class_weights"])
         self.backbone = backbone
         self.lr = lr
+        self.label_smoothing = label_smoothing
+        self.feature_drop = nn.Dropout(feature_dropout) if feature_dropout > 0 else None
 
         if class_weights is not None:
             self.register_buffer("class_weights", class_weights)
@@ -53,14 +66,29 @@ class BehaviourClassifier(L.LightningModule):
     def _log_scalars(self, metrics: MetricCollection, **kwargs):
         """Log only scalar metrics from a collection."""
         self.log_dict(
-            {k: v for k, v in metrics.items()
-             if k.split("_", 1)[-1] not in _NON_SCALAR_METRICS},
+            {
+                k: v
+                for k, v in metrics.items()
+                if k.split("_", 1)[-1] not in _NON_SCALAR_METRICS
+            },
             **kwargs,
         )
 
     def _step(self, batch):
-        logits = self.backbone(batch["data"])
-        loss = F.cross_entropy(logits, batch["label"], weight=self.class_weights)
+        flat = batch.get("flat")
+        if flat is not None and self.feature_drop is not None and self.training:
+            flat = self.feature_drop(flat)
+        logits = (
+            self.backbone(batch["data"], flat=flat)
+            if flat is not None
+            else self.backbone(batch["data"])
+        )
+        loss = F.cross_entropy(
+            logits,
+            batch["label"],
+            weight=self.class_weights,
+            label_smoothing=self.label_smoothing,
+        )
         return logits, loss
 
     def training_step(self, batch, batch_idx):
