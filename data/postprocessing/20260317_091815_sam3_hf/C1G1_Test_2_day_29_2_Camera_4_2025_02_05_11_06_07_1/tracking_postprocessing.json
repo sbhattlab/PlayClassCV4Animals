@@ -1,0 +1,69 @@
+[
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "from": 995,
+    "to": 1068,
+    "id": 0,
+    "_time": "00:39.79-00:42.71"
+  },
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "from": 10577,
+    "to": 11425,
+    "id": 0,
+    "_time": "07:02.97-07:36.89"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "from": 11963,
+    "to": 12024,
+    "id": 2,
+    "_time": "07:58.40-08:00.84"
+  },
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "from": 12024,
+    "to": 13709,
+    "id": 2,
+    "_time": "08:00.84-09:08.22"
+  },
+  {
+    "type": "id_switch",
+    "frame": 13710,
+    "from": null,
+    "to": 3,
+    "_time": "09:08.26"
+  },
+  {
+    "type": "id_switch",
+    "frame": 17795,
+    "from": null,
+    "to": 4,
+    "_time": "11:51.62"
+  },
+  {
+    "type": "id_match",
+    "protocol_id": 2781,
+    "description": "Pink head",
+    "tracking_id": null,
+    "frame": null
+  },
+  {
+    "type": "id_match",
+    "protocol_id": 2670,
+    "description": "Black",
+    "tracking_id": null,
+    "frame": null
+  },
+  {
+    "type": "id_match",
+    "protocol_id": 2650,
+    "description": "Light brown",
+    "tracking_id": null,
+    "frame": null
+  }
+]
