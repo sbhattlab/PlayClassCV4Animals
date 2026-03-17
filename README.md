@@ -104,10 +104,6 @@ pixi run -e sam3-hf python -m script.sam3.run_sam3_hf --config config/sam3_hf_ma
 > Set `CUDA_VISIBLE_DEVICES` explicitly before running GPU tests.
 
 ```sh
-# SAM3 inference tests (standalone scripts, not pytest)
-CUDA_VISIBLE_DEVICES=1 pixi run test-sam3-hf-image
-CUDA_VISIBLE_DEVICES=1 pixi run test-sam3-hf-video
-
 # Dataset tests (pytest)
 pixi run -e sam3-hf test_features
 pixi run -e sam3-hf test_postprocessing                     # Tracking postprocessing tests (pytest)
