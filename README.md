@@ -71,7 +71,7 @@ Run via pixi tasks or as Python modules from the project root.
 > Read the base config file (`config/tracker.yaml`) and modify appropriately (e.g. video path, CUDA device).
 
 ```sh
-# Main SAM3-HF pipeline (defaults to config/sam3_hf_config.yaml)
+# Main SAM3-HF pipeline (defaults to config/tracker.yaml)
 pixi run tracker
 
 # Custom config
