@@ -137,7 +137,7 @@ def parse_input(input_str):
         "embeddings"                        → (False, True,  ["embeddings.pt"])
         "embeddings_250"                    → (False, True,  ["embeddings_250.pt"])
         "features+embeddings"               → (True,  True,  ["embeddings.pt"])
-        "features+embeddings+embeddings_plain512" → (True, True, ["embeddings.pt", "embeddings_plain512.pt"])
+        "features+embeddings+embeddings_union512" → (True, True, ["embeddings.pt", "embeddings_union512.pt"])
     """
     parts = input_str.split("+")
     use_features = False
