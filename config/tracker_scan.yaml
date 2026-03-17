@@ -1,0 +1,89 @@
+# SAM3 HuggingFace — YOLO scan only
+# Runs YOLO inference + boundary analysis and exits without loading SAM3 models.
+# Also used as the default config for script/compute_chunk_boundaries.py.
+
+# =============================================================================
+# Job Configuration
+# =============================================================================
+job_type: "yolo_scan"
+
+# =============================================================================
+# Environmental variables
+# =============================================================================
+CUDA_VISIBLE_DEVICES: "1"
+PYTORCH_ALLOC_CONF: "expandable_segments:True,garbage_collection_threshold:0.6"
+
+# =============================================================================
+# Video/IO Configuration
+# =============================================================================
+video_path: "ext-data/raw/C5G2_Test_1_day_28_1_Camera_5_2025_02_04_11_35_00_2.mp4"
+text_prompt: "bird"
+
+# Output directory - results will be saved to a timestamped subdirectory
+# Format: {output_dir}/{YYYYMMDD_HHMMSS}_{job_type}/
+output_dir: "ext-data/output/results/yolo_scan"
+
+# =============================================================================
+# Model Configuration
+# =============================================================================
+start_frame: 0 # Frame index to start processing from (0 = beginning)
+max_frames_to_track: 0 # Maximum number of frames to propagate (0 = all)
+
+# =============================================================================
+# Chunking Configuration
+# =============================================================================
+
+# YOLO-scan-only mode: run YOLO scan and exit without loading SAM3 models
+yolo_scan_only: true
+
+# Occlusion-aware adaptive chunking (YOLO-based scan)
+use_adaptive_chunking: true
+
+# Chunk sizes
+chunk_seconds: 60 # Base duration of each chunk in seconds
+# Chunk length limits
+adaptive_max_chunk_seconds: 120 # Hard VRAM cap — never exceed this
+adaptive_search_window_seconds: 10.0 # Search radius (±s) when refining each boundary
+
+# =============================================================================
+# YOLO scan configuration
+# These parameters drive compute_yolo_per_frame_metrics(), which computes a
+# separation_score per frame.  chunk_video_frames_adaptive() then picks the
+# highest-scoring frame in a ±adaptive_search_window_seconds window around
+# each nominal chunk boundary.
+#
+# A frame scores > 0 only when ALL three hard gates pass:
+#   1. num_objects >= separation_min_objects
+#   2. max_pairwise_bbox_iou < occlusion_iou_threshold   (no overlapping pairs)
+#   3. min_centroid_distance >= separation_min_distance
+# The actual score is: min(min_centroid_distance, 1) * (1 - clustering_coeff)
+#
+# To retune without re-running YOLO inference:
+#   1. Edit the params below
+#   2. pixi run -e sam3-hf python -m script.compute_chunk_boundaries \
+#          --run-dir <run_dir> --config config/yolo_scan_only.yaml
+# =============================================================================
+yolo_scan:
+  # --- YOLO inference ---
+  model: "model/yolo26x.pt"
+  conf_thresh: 0.25
+  iou_thresh: 0.45
+  tracker_config: "config/botsort.yaml"
+  allowed_classes: ["bird"]
+
+  # --- Separation scoring ---
+  # Gate 1: minimum number of birds that must be detected for a frame to qualify.
+  separation_min_objects: 3
+
+  # Gate 2: hard IoU disqualifier — any bbox pair with IoU >= this value
+  # means the frame is considered too occluded to use as a chunk boundary.
+  # Keep this low (0.05–0.10); even slight overlap is a bad sign.
+  occlusion_iou_threshold: 0.07
+
+  # Gate 3: minimum normalised centroid distance between any two birds.
+  # 0.10 ≈ 10% of frame width — a reasonable minimum for unambiguous tracking.
+  separation_min_distance: 0.10
+
+  # Clustering coefficient threshold baked into the score formula
+  # (fraction of pairs within this distance counts against the score).
+  clustering_distance_threshold: 0.15

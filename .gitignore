@@ -229,6 +229,9 @@ __marimo__/
 model/
 
 # Data
+ext/
+video-data
+ext-data
 ext-data/
 data/eval/
 data/video/

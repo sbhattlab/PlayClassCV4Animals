@@ -1,1 +1,0 @@
-yolo train task=pose model=yolo11x-pose.pt data=YOLO/yolo_pose_dataset/data.yaml imgsz=640 epochs=100

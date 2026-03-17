@@ -8,9 +8,9 @@ from pathlib import Path
 
 import pandas as pd
 import supervision as sv
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import DictConfig
 
-from src.utils import load_config
+from src.config import load_config
 
 JOB_TYPE = "sam3_hf"
 CONFIG_PATH = f"config/{JOB_TYPE}_config.yaml"
