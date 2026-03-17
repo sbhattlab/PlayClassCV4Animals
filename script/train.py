@@ -4,15 +4,20 @@ Always runs full LOVO (Leave-One-Video-Out) cross-validation.
 
 Usage::
 
-    # Full LOVO cross-validation
-    pixi run -e classifier train \\
-        --tracking-dir data/tracking/20260225_214929_sam3_hf \\
-        --model mlp
+    # Features only (MLP)
+    pixi run -e classifier train --model mlp --input features
+
+    # Mean-pooled embeddings (MLP)
+    pixi run -e classifier train --model mlp --input embeddings_250
+
+    # Features + embeddings combined
+    pixi run -e classifier train --model mlp --input features+embeddings
+
+    # Temporal model on embeddings
+    pixi run -e classifier train --model temporal_mlp --input embeddings
 
     # Dry run — first fold, 1 batch, no checkpoints
-    pixi run -e classifier train \\
-        --tracking-dir data/tracking/20260225_214929_sam3_hf \\
-        --model mlp --dry-run
+    pixi run -e classifier train --model mlp --input features --dry-run
 """
 
 import gc
@@ -21,30 +26,53 @@ from argparse import ArgumentParser
 from datetime import datetime
 from pathlib import Path
 
+import logging
+
 import lightning as L
 import torch
-from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
+
+# Suppress noisy Lightning logs (GPU info, tips, LOCAL_RANK)
+for _name in (
+    "lightning.pytorch.utilities.rank_zero",
+    "lightning.pytorch.accelerators.cuda",
+    "lightning.fabric.utilities.distributed",
+):
+    logging.getLogger(_name).setLevel(logging.WARNING)
+from lightning.pytorch.callbacks import ModelCheckpoint
 from lightning.pytorch.loggers import CSVLogger
 from loguru import logger
 
-from src._config import DEFAULT_CHECKPOINT_DIR
-from src.classification.datamodule import BehaviourDataModule
+from src._config import DEFAULT_CHECKPOINT_DIR, DEFAULT_DATASET_DIR
+from src.classification.datamodule import BehaviourDataModule, select_val_video
 from src.classification.models import MODEL_REGISTRY
 from src.classification.stats import aggregate_metrics
 from src.classification.trainer import BehaviourClassifier
 
+torch.set_float32_matmul_precision("high")
+
 
 def parse_args():
     parser = ArgumentParser(description="Train behaviour classifier.")
-    parser.add_argument("--tracking-dir", type=Path, required=True)
+    parser.add_argument(
+        "--dataset-dir",
+        type=Path,
+        default=DEFAULT_DATASET_DIR,
+        help="Directory containing dataset files (default: %(default)s)",
+    )
     parser.add_argument("--model", type=str, choices=MODEL_REGISTRY, required=True)
     parser.add_argument(
-        "--exclude", type=str, default=None, help="Exclude videos with this substring"
+        "--input",
+        type=str,
+        required=True,
+        help=(
+            "Input data: 'features', 'embeddings', 'embeddings_250', "
+            "'features+embeddings', 'features+embeddings_lora', etc."
+        ),
     )
-    parser.add_argument("--epochs", type=int, default=50)
     parser.add_argument(
-        "--patience", type=int, default=5, help="EarlyStopping patience"
+        "--exclude", type=str, default=None, help="Exclude a class (e.g. social)"
     )
+    parser.add_argument("--epochs", type=int, default=5)
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument(
@@ -58,27 +86,85 @@ def parse_args():
         action="store_true",
         help="Run 1 train + 1 val batch, first fold only",
     )
+    parser.add_argument(
+        "--n-segments",
+        type=int,
+        default=12,
+        help="Number of temporal bins for segment pooling (default: 12)",
+    )
+    parser.add_argument(
+        "--dropout",
+        type=float,
+        default=None,
+        help="Override model dropout (default: use model default, typically 0.3)",
+    )
+    parser.add_argument(
+        "--d-hidden",
+        type=int,
+        default=None,
+        help="Override model hidden dimension (default: use model default, typically 128)",
+    )
+    parser.add_argument(
+        "--label-smoothing",
+        type=float,
+        default=0.1,
+        help="Label smoothing factor (default: 0.1, 0=none)",
+    )
+    parser.add_argument(
+        "--feature-dropout",
+        type=float,
+        default=0.0,
+        help="Dropout on flat features before classification (default: 0.0)",
+    )
+    parser.add_argument(
+        "--class-weights",
+        type=str,
+        default="inv-sqrt",
+        choices=["inv-sqrt", "inv", "none"],
+        help="Class weighting scheme (default: inv-sqrt)",
+    )
     return parser.parse_args()
+
+
+def parse_input(input_str):
+    """Parse --input string into data loading flags.
+
+    Returns (use_features, use_embeddings, embeddings_files).
+
+    Examples::
+
+        "features"                          → (True,  False, [])
+        "embeddings"                        → (False, True,  ["embeddings.pt"])
+        "embeddings_250"                    → (False, True,  ["embeddings_250.pt"])
+        "features+embeddings"               → (True,  True,  ["embeddings.pt"])
+        "features+embeddings+embeddings_plain512" → (True, True, ["embeddings.pt", "embeddings_plain512.pt"])
+    """
+    parts = input_str.split("+")
+    use_features = False
+    use_embeddings = False
+    embeddings_files = []
+
+    for part in parts:
+        if part == "features":
+            use_features = True
+        elif part.startswith("embeddings"):
+            use_embeddings = True
+            embeddings_files.append(f"{part}.pt")
+        else:
+            raise ValueError(
+                f"Unknown input component: '{part}'. "
+                "Expected 'features' or 'embeddings[_variant]'."
+            )
+
+    if not use_features and not use_embeddings:
+        raise ValueError("--input must include 'features' and/or 'embeddings[_variant]'")
+
+    return use_features, use_embeddings, embeddings_files
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def select_val_video(test_video: str, all_videos: list[str]) -> str:
-    """Pick val video from the next cage (cage-aware rotation).
-
-    Extracts cage prefix (first 2 chars), rotates to next cage in sorted order,
-    and picks the first video from that cage.
-    """
-    cage_to_videos: dict[str, list[str]] = {}
-    for v in sorted(all_videos):
-        cage_to_videos.setdefault(v[:2], []).append(v)
-    cages = sorted(cage_to_videos)
-    test_cage = test_video[:2]
-    next_cage = cages[(cages.index(test_cage) + 1) % len(cages)]
-    return cage_to_videos[next_cage][0]
 
 
 def parse_device(device: str) -> tuple:
@@ -116,9 +202,6 @@ def train_fold(
         logger=pl_logger,
         enable_model_summary=(fold_idx == 0),
         callbacks=[
-            EarlyStopping(
-                monitor="val_loss", patience=training_args["patience"], mode="min"
-            ),
             ModelCheckpoint(
                 dirpath=fold_dir / "checkpoints",
                 monitor="val_loss",
@@ -149,7 +232,11 @@ def _eval_dataloader(model, dataloader, metrics):
     with torch.no_grad():
         for batch in dataloader:
             batch = {k: v.to(model.device) for k, v in batch.items()}
-            logits = model.backbone(batch["data"])
+            flat = batch.get("flat")
+            if flat is not None:
+                logits = model.backbone(batch["data"], flat=flat)
+            else:
+                logits = model.backbone(batch["data"])
             metrics.update(logits, batch["label"])
 
 
@@ -213,11 +300,20 @@ def run_lovo(dm, backbone_cls, run_dir, dry_run=False, **training_args) -> list[
         dm.setup()
 
         # Update model
+        backbone_kwargs = {}
+        if dm.flat_dim > 0:
+            backbone_kwargs["d_flat"] = dm.flat_dim
+        if training_args.get("dropout") is not None:
+            backbone_kwargs["dropout"] = training_args["dropout"]
+        if training_args.get("d_hidden") is not None:
+            backbone_kwargs["d_hidden"] = training_args["d_hidden"]
         model = BehaviourClassifier(
-            backbone=backbone_cls(dm.data_dim, dm.n_classes),
+            backbone=backbone_cls(dm.data_dim, dm.n_classes, **backbone_kwargs),
             n_classes=dm.n_classes,
             lr=training_args["lr"],
             class_weights=dm.class_weights,
+            label_smoothing=training_args.get("label_smoothing", 0.1),
+            feature_dropout=training_args.get("feature_dropout", 0.0),
         )
 
         # Logger and checkpoint dir for this fold
@@ -252,6 +348,10 @@ def run_lovo(dm, backbone_cls, run_dir, dry_run=False, **training_args) -> list[
 def main():
     args = parse_args()
 
+    # Parse input specification
+    use_features, use_embeddings, embeddings_files = parse_input(args.input)
+    backbone_cls, temporal = MODEL_REGISTRY[args.model]
+
     # Timestamped run directory
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     run_dir = Path(DEFAULT_CHECKPOINT_DIR) / f"{timestamp}_{args.model}"
@@ -262,24 +362,29 @@ def main():
     with open(run_dir / "cfg.json", "w", encoding="utf-8") as f:
         json.dump(cfg, f, indent=2)
 
-    # Load model class and arguments
-    backbone_cls, backbone_args = MODEL_REGISTRY[args.model]
-
     # Load dataset
     dm = BehaviourDataModule(
-        tracking_dir=args.tracking_dir,
+        dataset_dir=args.dataset_dir,
         batch_size=args.batch_size,
         exclude=args.exclude,
-        **backbone_args,
+        use_features=use_features,
+        use_embeddings=use_embeddings,
+        temporal=temporal,
+        embeddings_files=embeddings_files or ["embeddings.pt"],
+        n_segments=args.n_segments,
     )
+    dm.class_weight_scheme = args.class_weights
     dm.prepare_data()
 
     # Training args
     accelerator, devices = parse_device(args.device)
     training_args = {
         "epochs": args.epochs,
-        "patience": args.patience,
         "lr": args.lr,
+        "dropout": args.dropout,
+        "d_hidden": args.d_hidden,
+        "label_smoothing": args.label_smoothing,
+        "feature_dropout": args.feature_dropout,
         "accelerator": accelerator,
         "devices": devices,
     }
