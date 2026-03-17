@@ -1,11 +1,83 @@
 [
   {
     "type": "trim",
-    "cause": "low_score",
-    "from": 1267,
-    "to": 1324,
-    "id": 2,
-    "_time": "00:50.68-00:52.96"
+    "cause": "merged_object",
+    "from": 2249,
+    "to": 2257,
+    "id": 1,
+    "_time": "11:21.34-11:24.22"
+  },
+  {
+    "type": "trim",
+    "cause": "merged_object",
+    "from": 3051,
+    "to": 3118,
+    "id": 1,
+    "_time": "11:21.34-11:24.22"
+  },
+  {
+    "type": "trim",
+    "cause": "merged_object",
+    "from": 9997,
+    "to": 10019,
+    "id": 0,
+    "_time": "11:21.34-11:24.22"
+  },
+  {
+    "type": "trim",
+    "cause": "merged_object",
+    "from": 9997,
+    "to": 10019,
+    "id": 0,
+    "_time": "11:21.34-11:24.22"
+  },
+  {
+    "type": "trim",
+    "cause": "merged_object",
+    "from": 12116,
+    "to": 13228,
+    "id": 0,
+    "_time": "11:21.34-11:24.22"
+  },
+  {
+    "type": "trim",
+    "cause": "merged_object",
+    "from": 13785,
+    "to": 13899,
+    "id": 1,
+    "_time": "11:21.34-11:24.22"
+  },
+  {
+    "type": "trim",
+    "cause": "merged_object",
+    "from": 15300,
+    "to": 15433,
+    "id": 0,
+    "_time": "11:21.34-11:24.22"
+  },
+  {
+    "type": "trim",
+    "cause": "merged_object",
+    "from": 15806,
+    "to": 15875,
+    "id": 0,
+    "_time": "11:21.34-11:24.22"
+  },
+  {
+      "type": "trim",
+      "cause": "merged_object",
+      "from": 16228,
+      "to": 16293,
+      "id": 0,
+      "_time": "11:21.34-11:24.22"
+  },
+  {
+      "type": "trim",
+      "cause": "merged_object",
+      "from": 16275,
+      "to": 16917,
+      "id": 1,
+      "_time": "11:21.34-11:24.22"
   },
   {
     "type": "trim",
@@ -16,32 +88,24 @@
     "_time": "11:21.34-11:24.22"
   },
   {
-    "type": "trim",
-    "cause": "low_score",
-    "from": 17396,
-    "to": 17752,
-    "id": 1,
-    "_time": "11:35.86-11:50.10"
-  },
-  {
     "type": "id_match",
     "protocol_id": 2664,
     "description": "Blue head",
-    "tracking_id": null,
+    "tracking_id": 1,
     "frame": null
   },
   {
     "type": "id_match",
     "protocol_id": 2672,
     "description": "Dark",
-    "tracking_id": null,
+    "tracking_id": 0,
     "frame": null
   },
   {
     "type": "id_match",
     "protocol_id": 2656,
     "description": "White",
-    "tracking_id": null,
+    "tracking_id": 2,
     "frame": null
   }
 ]
