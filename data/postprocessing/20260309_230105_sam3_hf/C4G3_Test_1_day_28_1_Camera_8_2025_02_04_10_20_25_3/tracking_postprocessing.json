@@ -1,0 +1,135 @@
+[
+  {
+    "type": "trim",
+    "cause": "merged_object",
+    "id": 2,
+    "from": 2184,
+    "to": 2232,
+    "_time": "01:27.36 - 01:29.28"
+  },
+  {
+    "type": "trim",
+    "cause": "merged_object",
+    "id": 0,
+    "from": 2442,
+    "to": 2472,
+    "_time": "01:37.68 - 01:38.88"
+  },
+  {
+    "type": "trim",
+    "cause": "merged_object",
+    "id": 1,
+    "from": 2592,
+    "to": 2616,
+    "_time": "01:43.68 - 01:44.64"
+  },
+  {
+    "type": "trim",
+    "cause": "merged_object",
+    "id": 0,
+    "from": 2904,
+    "to": 2940,
+    "_time": "01:56.16 - 01:57.60"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "id": 0,
+    "from": 6120,
+    "to": 6168,
+    "_time": "04:04.80 - 04:06.72"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "from": 14867,
+    "to": 15623,
+    "id": 2,
+    "_time": "09:54.69-10:24.93"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "from": 14867,
+    "to": 15623,
+    "id": 1,
+    "_time": "09:54.69-10:24.93"
+  },
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "id": 2,
+    "from": 16626,
+    "to": 17088,
+    "_time": "11:05.05 - 11:23.52"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "id": 1,
+    "from": 16626,
+    "to": 17088,
+    "_time": "11:05.05 - 11:23.52"
+  },
+  {
+    "type": "trim",
+    "cause": "merged_object",
+    "id": 1,
+    "from": 17088,
+    "to": 17856,
+    "_time": "11:23.52 - 11:54.24"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "id": 1,
+    "from": 17856,
+    "to": 18000,
+    "_time": "11:54.24 - 12:00"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "id": 2,
+    "from": 17856,
+    "to": 18000,
+    "_time": "11:54.24 - 12:00"
+  },
+  {
+    "type": "trim",
+    "cause": "merged_object",
+    "id": 2,
+    "from": 18000,
+    "to": 18288,
+    "_time": "12:00 - 12:11.52"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "id": 2,
+    "from": 18912,
+    "to": 21240,
+    "_time": "12:36.48 - 14:09.60"
+  },
+  {
+    "type": "id_match",
+    "protocol_id": 2666,
+    "description": "Black marbled",
+    "tracking_id": 0,
+    "frame": null
+  },
+  {
+    "type": "id_match",
+    "protocol_id": 2652,
+    "description": "Black right wing",
+    "tracking_id": 2,
+    "frame": null
+  },
+  {
+    "type": "id_match",
+    "protocol_id": 2694,
+    "description": "Light brown/creme",
+    "tracking_id": 1,
+    "frame": null
+  }
+]

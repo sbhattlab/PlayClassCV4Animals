@@ -1,0 +1,69 @@
+[
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "from": 106,
+    "to": 383,
+    "id": 4,
+    "_time": "00:04.24-00:15.32"
+  },
+  {
+    "type": "id_switch",
+    "frame": 383,
+    "from": 4,
+    "to": 0,
+    "_time": "00:15.32"
+  },
+  {
+    "type": "trim",
+    "cause": "merge_object",
+    "from": 1850,
+    "to": 1913,
+    "id": 0,
+    "_time": "01:14.00-01:16.52"
+  },
+  {
+    "type": "id_switch",
+    "frame": 15833,
+    "from": 7,
+    "to": 6,
+    "_time": "10:33.32"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "from": 18808,
+    "to": 19500,
+    "id": 6,
+    "_time": "12:32.32-13:00.00"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "from": 19240,
+    "to": 19274,
+    "id": 0,
+    "_time": "12:49.60-12:50.96"
+  },
+  {
+    "type": "id_match",
+    "protocol_id": 2664,
+    "description": "White, blue head",
+    "tracking_id": 0,
+    "frame": null
+  },
+  {
+    "type": "id_match",
+    "protocol_id": 2670,
+    "description": "Black",
+    "tracking_id": 6,
+    "frame": null
+  },
+  {
+    "type": "id_match",
+    "protocol_id": 2780,
+    "description": "White, black head",
+    "tracking_id": 5,
+    "frame": null
+  }
+]
