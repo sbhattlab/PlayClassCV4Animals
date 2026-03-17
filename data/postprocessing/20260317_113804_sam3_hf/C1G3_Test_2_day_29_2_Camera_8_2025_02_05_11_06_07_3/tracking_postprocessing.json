@@ -1,0 +1,79 @@
+[
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "from": 244,
+    "to": 1595,
+    "id": 2,
+    "_time": "00:09.76-01:03.80"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "from": 7573,
+    "to": 7626,
+    "id": 0,
+    "_time": "05:02.93-05:05.05"
+  },
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "from": 7676,
+    "to": 8054,
+    "id": 0,
+    "_time": "05:07.05-05:22.17"
+  },
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "from": 8235,
+    "to": 8453,
+    "id": 2,
+    "_time": "05:29.41-05:38.13"
+  },
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "from": 8557,
+    "to": 8597,
+    "id": 2,
+    "_time": "05:42.29-05:43.89"
+  },
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "from": 8656,
+    "to": 8984,
+    "id": 0,
+    "_time": "05:46.26-05:59.38"
+  },
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "from": 21404,
+    "to": 22515,
+    "id": 1,
+    "_time": "14:16.20-15:00.64"
+  },
+  {
+    "type": "id_match",
+    "protocol_id": 2780,
+    "description": "Black head",
+    "tracking_id": null,
+    "frame": null
+  },
+  {
+    "type": "id_match",
+    "protocol_id": 2648,
+    "description": "Green head",
+    "tracking_id": null,
+    "frame": null
+  },
+  {
+    "type": "id_match",
+    "protocol_id": 2674,
+    "description": "Dark marbled",
+    "tracking_id": null,
+    "frame": null
+  }
+]

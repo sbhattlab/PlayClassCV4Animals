@@ -1,0 +1,47 @@
+[
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "from": 1267,
+    "to": 1324,
+    "id": 2,
+    "_time": "00:50.68-00:52.96"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "from": 17033,
+    "to": 17105,
+    "id": 1,
+    "_time": "11:21.34-11:24.22"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "from": 17396,
+    "to": 17752,
+    "id": 1,
+    "_time": "11:35.86-11:50.10"
+  },
+  {
+    "type": "id_match",
+    "protocol_id": 2664,
+    "description": "Blue head",
+    "tracking_id": null,
+    "frame": null
+  },
+  {
+    "type": "id_match",
+    "protocol_id": 2672,
+    "description": "Dark",
+    "tracking_id": null,
+    "frame": null
+  },
+  {
+    "type": "id_match",
+    "protocol_id": 2656,
+    "description": "White",
+    "tracking_id": null,
+    "frame": null
+  }
+]
