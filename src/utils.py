@@ -241,25 +241,31 @@ _torchcodec_decoder_cache: dict[str, object] = {}
 
 
 def load_video_frames_torchcodec(
-    video_path: str | Path, start_frame: int, end_frame: int
+    video_path: str | Path,
+    start_frame: int,
+    end_frame: int,
+    device: str = "cpu",
 ) -> list:
     """Load frames [start_frame, end_frame) as a list of RGB numpy arrays.
 
     Uses torchcodec for frame-accurate decoding (seek_mode="exact").
     The decoder is cached per video path so the index scan (~18 s on first
     access) only happens once across all chunks of the same video.
+
+    When *device* is ``"cuda"``, decoding is offloaded to NVDEC hardware.
     """
     from torchcodec.decoders import VideoDecoder
 
     key = str(video_path)
     if key not in _torchcodec_decoder_cache:
         logger.info(
-            "Building torchcodec index for '{}' — this may take ~18 s on first access.",
+            "Building torchcodec index for '{}' (device={}) — this may take ~18 s on first access.",
             Path(video_path).name,
+            device,
         )
-        _torchcodec_decoder_cache[key] = VideoDecoder(key)
+        _torchcodec_decoder_cache[key] = VideoDecoder(key, device=device)
 
     decoder = _torchcodec_decoder_cache[key]
     batch = decoder.get_frames_in_range(start=start_frame, stop=end_frame)
     # batch.data shape: (N, C, H, W) uint8 tensor
-    return [frame.permute(1, 2, 0).numpy() for frame in batch.data]
+    return [frame.permute(1, 2, 0).cpu().numpy() for frame in batch.data]

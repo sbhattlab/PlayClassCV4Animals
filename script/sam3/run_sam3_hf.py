@@ -753,7 +753,7 @@ def _run_single_video(cfg, run_dir: Path, config_path: Path | None = None):
         global_chunk_start = start_frame + start_idx
         global_chunk_end = start_frame + end_idx
         chunk_frames = load_video_frames_torchcodec(
-            video_path, global_chunk_start, global_chunk_end
+            video_path, global_chunk_start, global_chunk_end, device=str(device)
         )
         num_frames = len(chunk_frames)
 
