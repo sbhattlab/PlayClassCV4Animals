@@ -233,7 +233,7 @@ ext-data/
 data/eval/
 data/video/
 video-data/
-*.pt
+data/dataset/
 .DS_Store/
 sandbox/
 tracking/
@@ -243,6 +243,16 @@ tmp/
 drafts*.py
 drafts*.ipynb
 notes/
+papers/
+
+# Shelved experiments
+shelf/
+
+# Generated / local-only
+.matplotlib/
+data/tsne/
+img/
+ext/
 
 # Claude local stuff
 .claude/
