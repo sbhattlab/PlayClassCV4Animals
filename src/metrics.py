@@ -8,12 +8,10 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
-from src.masks import (
-    _normalize_frame_dict,
-    to_numpy,
-)
+from src.tracker.masks import _normalize_frame_dict, to_numpy
 
 
+### General spatial metrics (IoU, centroid distances, clustering coefficient) and
 def compute_bbox_iou(boxA, boxB) -> float:
     """
     Compute IoU between two bounding boxes in [x1, y1, x2, y2] format.
@@ -364,6 +362,181 @@ def compute_per_frame_metrics(
                 "mask_area_variance": area_stats["variance"],
                 "is_high_occlusion": is_high_occ,
                 "is_object_count_change": is_count_change,
+            }
+        )
+        prev_num_objects = n
+
+    return results
+
+
+### YOLO scan-specific metrics (separation score, identity switch detection) and adaptive chunking
+def compute_separation_score(
+    num_objects: int,
+    min_centroid_distance: float,
+    clustering_coefficient: float,
+    num_overlapping_pairs: int,
+    min_objects: int = 3,
+    min_separation_distance: float = 0.15,
+) -> float:
+    """
+    Per-frame separation quality score in [0, 1].
+
+    Returns 0 for frames that fail the hard gates (too few objects, any
+    overlap, or subjects too close). Otherwise:
+        min(min_centroid_distance, 1.0) * (1 - clustering_coefficient)
+
+    Args:
+        num_objects: Number of detected objects in the frame.
+        min_centroid_distance: Minimum pairwise centroid distance (normalised).
+        clustering_coefficient: Fraction of pairs within the clustering threshold.
+        num_overlapping_pairs: Count of bbox pairs with IoU above threshold.
+        min_objects: Minimum objects required to score above zero.
+        min_separation_distance: Minimum min_centroid_distance required.
+
+    Returns:
+        Float in [0, 1]. Higher = subjects more spread out and unambiguous.
+    """
+    if (
+        num_objects < min_objects
+        or num_overlapping_pairs > 0
+        or min_centroid_distance == float("inf")
+        or min_centroid_distance < min_separation_distance
+    ):
+        return 0.0
+    return min(min_centroid_distance, 1.0) * (1.0 - clustering_coefficient)
+
+
+def compute_yolo_per_frame_metrics(
+    yolo_df: pd.DataFrame,
+    occlusion_iou_threshold: float = 0.15,
+    clustering_distance_threshold: float = 0.15,
+    use_normalized_coords: bool = True,
+    separation_min_objects: int = 3,
+    separation_min_distance: float = 0.15,
+) -> List[Dict[str, Any]]:
+    """
+    Compute per-frame spatial, overlap, and bbox quality metrics from YOLO tracking.
+
+    Args:
+        yolo_df: DataFrame with columns [frame, track_id, x1, y1, x2, y2,
+                 cx_norm, cy_norm, confidence] (from YOLO tracking)
+        occlusion_iou_threshold: bbox IoU above which a pair is "overlapping"
+        clustering_distance_threshold: centroid distance for clustering coefficient
+        use_normalized_coords: use cx_norm/cy_norm for distances (recommended)
+        separation_min_objects: minimum objects for a non-zero separation_score
+        separation_min_distance: minimum min_centroid_distance for separation_score
+
+    Returns:
+        List of dicts (sorted by frame), one per frame with metrics:
+        - num_objects, objects_present, min/mean_centroid_distance,
+          clustering_coefficient, max/mean_pairwise_bbox_iou,
+          num_overlapping_pairs, mean/min/max/variance bbox_area,
+          is_high_occlusion, is_object_count_change, mean_confidence,
+          separation_score
+    """
+    results: List[Dict[str, Any]] = []
+    prev_num_objects: Optional[int] = None
+
+    yolo_df = yolo_df.sort_values("frame").reset_index(drop=True)
+
+    for frame_idx in sorted(yolo_df["frame"].unique()):
+        frame_dets = yolo_df[yolo_df["frame"] == frame_idx]
+        n = len(frame_dets)
+
+        if n == 0:
+            results.append(
+                {
+                    "frame_idx": int(frame_idx),
+                    "num_objects": 0,
+                    "objects_present": [],
+                    "min_centroid_distance": float("inf"),
+                    "mean_centroid_distance": float("inf"),
+                    "clustering_coefficient": 0.0,
+                    "max_pairwise_bbox_iou": 0.0,
+                    "mean_pairwise_bbox_iou": 0.0,
+                    "num_overlapping_pairs": 0,
+                    "mean_bbox_area": 0.0,
+                    "min_bbox_area": 0.0,
+                    "max_bbox_area": 0.0,
+                    "bbox_area_variance": 0.0,
+                    "is_high_occlusion": False,
+                    "is_object_count_change": prev_num_objects is not None
+                    and prev_num_objects != 0,
+                    "mean_confidence": 0.0,
+                    "separation_score": 0.0,
+                }
+            )
+            prev_num_objects = 0
+            continue
+
+        boxes = frame_dets[["x1", "y1", "x2", "y2"]].values
+
+        if use_normalized_coords and "cx_norm" in frame_dets.columns:
+            centroids = frame_dets[["cx_norm", "cy_norm"]].values
+        else:
+            centroids = compute_bbox_centroids(boxes)
+
+        dist_matrix = compute_pairwise_centroid_distances(centroids)
+        if n > 1:
+            upper_dists = dist_matrix[np.triu_indices(n, k=1)]
+            min_dist = (
+                float(np.nanmin(upper_dists)) if len(upper_dists) else float("inf")
+            )
+            mean_dist = (
+                float(np.nanmean(upper_dists)) if len(upper_dists) else float("inf")
+            )
+        else:
+            min_dist = float("inf")
+            mean_dist = float("inf")
+
+        clust_coef = compute_clustering_coefficient(
+            centroids, clustering_distance_threshold
+        )
+
+        iou_matrix = compute_pairwise_bbox_iou(boxes)
+        if n > 1:
+            upper_iou = iou_matrix[np.triu_indices(n, k=1)]
+            max_iou = float(np.max(upper_iou)) if len(upper_iou) else 0.0
+            mean_iou = float(np.mean(upper_iou)) if len(upper_iou) else 0.0
+            num_overlap = int(np.sum(upper_iou > occlusion_iou_threshold))
+        else:
+            max_iou = 0.0
+            mean_iou = 0.0
+            num_overlap = 0
+
+        area_stats = compute_bbox_area_stats(boxes)
+        mean_conf = float(frame_dets["confidence"].mean())
+        is_high_occ = max_iou > occlusion_iou_threshold or clust_coef > 0.5
+        is_count_change = prev_num_objects is not None and prev_num_objects != n
+
+        sep_score = compute_separation_score(
+            num_objects=n,
+            min_centroid_distance=min_dist,
+            clustering_coefficient=float(clust_coef),
+            num_overlapping_pairs=num_overlap,
+            min_objects=separation_min_objects,
+            min_separation_distance=separation_min_distance,
+        )
+
+        results.append(
+            {
+                "frame_idx": int(frame_idx),
+                "num_objects": n,
+                "objects_present": frame_dets["track_id"].tolist(),
+                "min_centroid_distance": min_dist,
+                "mean_centroid_distance": mean_dist,
+                "clustering_coefficient": float(clust_coef),
+                "max_pairwise_bbox_iou": max_iou,
+                "mean_pairwise_bbox_iou": mean_iou,
+                "num_overlapping_pairs": num_overlap,
+                "mean_bbox_area": area_stats["mean"],
+                "min_bbox_area": area_stats["min"],
+                "max_bbox_area": area_stats["max"],
+                "bbox_area_variance": area_stats["variance"],
+                "is_high_occlusion": is_high_occ,
+                "is_object_count_change": is_count_change,
+                "mean_confidence": mean_conf,
+                "separation_score": sep_score,
             }
         )
         prev_num_objects = n

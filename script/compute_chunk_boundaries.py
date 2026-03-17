@@ -35,11 +35,9 @@ import pandas as pd
 from loguru import logger
 from omegaconf import OmegaConf
 
-from src.chunk_boundaries import (
-    chunk_video_frames_adaptive,
-    compute_yolo_per_frame_metrics,
-    yolo_scan_to_df,
-)
+from src.metrics import compute_yolo_per_frame_metrics
+from src.tracker.chunking import chunk_video_frames_adaptive
+from src.tracker.scan import yolo_scan_to_df
 from src.viz import plot_chunk_boundary_frames, plot_yolo_scan_overview
 
 

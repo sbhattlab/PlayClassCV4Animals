@@ -14,11 +14,10 @@ cuda = "12.6"
 
 # ======= Environments ======
 [environments]
-sam3-hf = ["sam3-hf"]
-sam3-native = ["sam3-native"]
 gs2 = ["gs2"]
 yolo = ["yolo"]
 classifier = ["classifier"]
+tracker = ["tracker"]
 videoprism = ["videoprism"]
 
 # ======= Default dependencies ======
@@ -55,8 +54,8 @@ simpler-timer = ">=0.0.2"
 av = ">=16.1.0"
 kernels = ">=0.12.1, <0.13"
 
-# ======= SAM3-HF dependencies ======
-[feature.sam3-hf.pypi-dependencies]
+# ======= Tracker dependencies ======
+[feature.tracker.pypi-dependencies]
 transformers = { git = "https://github.com/huggingface/transformers", rev = "v5.0.0rc2" }
 accelerate = ">=1.12.0"
 peft = ">=0.15"
@@ -67,32 +66,15 @@ numpy = ">=1.2.6,<2"
 opencv-python = "*"
 lightning = ">=2.5"
 
-[feature.sam3-hf.tasks]
-test-sam3-hf-image = "python -m test.sam3_hf_basic_image"
-test-sam3-hf-video = "python -m test.sam3_hf_basic_video"
-test-sam3-native-video = "python -m test.sam3_native_video"
-sam3-hf-tracker = "python -m script.sam3.run_sam3_hf"
-yolo-prescan = "python -m script.sam3.run_sam3_hf --config config/prescan_only.yaml"
+[feature.tracker.tasks]
+test_tracker = "CUDA_VISIBLE_DEVICES=1 pixi run -e tracker pytest tests/test_tracker.py -v"
+tracker = "python -m script.run_tracker --config config/tracker.yaml"
+tracker_scan = "python -m script.run_tracker --config config/tracker_scan.yaml"
 build_dataset = "python -m script.build_dataset"
 test_postprocessing = "python -m pytest tests/test_tracking_postprocessing.py -v"
 test_features = "python -m pytest tests/test_features.py -v"
 extract_features = "python -m script.extract_features"
 extract_embeddings = "python -m script.extract_embeddings"
-
-# ======= SAM3-native dependencies ======
-[feature.sam3-native.pypi-dependencies]
-sam3 = { git = "https://github.com/facebookresearch/sam3", rev = "11dec2936de97f2857c1f76b66d982d5a001155d" }
-transformers = { git = "https://github.com/huggingface/transformers", rev = "v5.0.0rc2" }
-accelerate = ">=1.12.0"
-einops = "*"
-ftfy = "==6.1.1"
-decord = "*"
-scikit-image = "*"
-numpy = ">=1.2.6,<2"
-opencv-python = "*"
-
-[feature.sam3-native.tasks]
-test-sam3-native-video = "python -m test.sam3_native_video"
 
 # ======= GS2 dependencies ======
 [feature.gs2.pypi-dependencies]
@@ -104,17 +86,17 @@ opencv-python = ">=4.13.0.90,<5"
 [feature.gs2.tasks]
 download-sam2-checkpoints = { cmd = """
 bash -c 'if ls checkpoints/*.pt 1> /dev/null 2>&1; then echo "SAM2 checkpoints already exist, skipping download..."; else cd checkpoints && bash download_ckpts.sh; fi'
-""", cwd = "Grounded-SAM-2-fork" }
+""", cwd = "ext/Grounded-SAM-2-fork" }
 
 download-gdino-checkpoints = { cmd = """
 bash -c 'if ls gdino_checkpoints/*.pth 1> /dev/null 2>&1; then echo "Grounding DINO checkpoints already exist, skipping download..."; else cd gdino_checkpoints && bash download_ckpts.sh; fi'
-""", cwd = "Grounded-SAM-2-fork" }
+""", cwd = "ext/Grounded-SAM-2-fork" }
 
 install-gs2-packages = { cmd = """
 export CUDA_HOME="/usr/lib/nvidia-cuda-toolkit/" && \
 uv pip install -e . && \
 uv pip install --no-build-isolation -e grounding_dino
-""", cwd = "Grounded-SAM-2-fork" }
+""", cwd = "ext/Grounded-SAM-2-fork" }
 
 setup-gs2 = { depends-on = [
     "download-sam2-checkpoints",
@@ -124,7 +106,7 @@ setup-gs2 = { depends-on = [
 ] }
 
 test-gs2 = { cmd = """
-python -m script.gs2.chicken_tracking_demo --gs2-repo-path Grounded-SAM-2-fork -i ext-data/imgs/imgs_1min --text ".chicken.bird." --save-dir ext-data/output/test/gs2 --save-masks --save-images --create-video
+python -m script.gs2.chicken_tracking_demo --gs2-repo-path ext/Grounded-SAM-2-fork -i ext-data/imgs/imgs_1min --text ".chicken.bird." --save-dir ext-data/output/test/gs2 --save-masks --save-images --create-video
 """ }
 
 gs2-manual-chunking = "python -m script.gs2.run_gs2_manual_chunking --config config/gs2_manual_chunking.yaml"
