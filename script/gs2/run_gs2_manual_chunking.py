@@ -32,7 +32,7 @@ def _early_init():
     )
     args, _ = parser.parse_known_args()
 
-    from src.utils import load_config, set_env_vars
+    from src.config import load_config, set_env_vars
 
     cfg = load_config(args.config)
     set_env_vars(cfg)
@@ -45,6 +45,7 @@ _args, _cfg = _early_init()
 import cv2  # noqa: E402
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
+import supervision as sv  # noqa: E402
 import torch  # noqa: E402
 from loguru import logger  # noqa: E402
 from omegaconf import OmegaConf  # noqa: E402
@@ -56,22 +57,16 @@ from transformers import (  # noqa: E402
     AutoProcessor,
 )
 
-import supervision as sv  # noqa: E402
-
-from src.processing import process_tracking_outputs  # noqa: E402
-from src.utils import (  # noqa: E402
-    build_manual_chunks,
-    create_run_directory,
-    get_video_metadata,
-    load_video_frames_range,
-    setup_logger,
-)
+from src.config import create_run_directory, setup_logger  # noqa: E402
+from src.io import get_video_metadata, load_video_frames_range  # noqa: E402
+from src.tracker.chunking import build_manual_chunks  # noqa: E402
+from src.tracker.masks import process_tracking_outputs  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
 
-GS2_DIR = Path(__file__).resolve().parent.parent.parent / "Grounded-SAM-2-fork"
+GS2_DIR = Path(__file__).resolve().parent.parent.parent / "ext/Grounded-SAM-2-fork"
 GDINO_MODEL_ID = "IDEA-Research/grounding-dino-tiny"
 
 _SIZE_TO_CONFIG_CODE = {
@@ -153,9 +148,11 @@ def _filter_boxes_by_area(
     if rejected.any():
         for i, (frac, lbl) in enumerate(zip(fractions, labels)):
             if rejected[i]:
-                reason = "too large" if fractions[i] > max_area_fraction else "too small"
+                reason = (
+                    "too large" if fractions[i] > max_area_fraction else "too small"
+                )
                 logger.info(
-                    f"  Filtered box {i} ({lbl!r}): {100*frac:.1f}% of frame — {reason}"
+                    f"  Filtered box {i} ({lbl!r}): {100 * frac:.1f}% of frame — {reason}"
                 )
     return boxes[keep], [lbl for lbl, k in zip(labels, keep) if k]
 
@@ -220,7 +217,10 @@ def _detect_and_segment_first_frame(
         raw_boxes = results[0]["boxes"].detach().cpu().numpy()
         raw_labels = results[0]["labels"]
         input_boxes, labels = _filter_boxes_by_area(
-            raw_boxes, raw_labels, frame_h, frame_w,
+            raw_boxes,
+            raw_labels,
+            frame_h,
+            frame_w,
             min_area_fraction=min_box_area_fraction,
             max_area_fraction=max_box_area_fraction,
         )
@@ -243,7 +243,9 @@ def _detect_and_segment_first_frame(
         )
 
     if input_boxes.shape[0] == 0:
-        logger.warning(f"GroundingDINO: no valid detections for '{text_prompt}' on first frame")
+        logger.warning(
+            f"GroundingDINO: no valid detections for '{text_prompt}' on first frame"
+        )
         return {}, []
 
     # Refine each box to a mask using SAM2 image predictor
@@ -368,7 +370,12 @@ def _process_chunk(
                 ys, xs = np.where(m)
                 if len(ys) > 0:
                     boxes.append(
-                        [float(xs.min()), float(ys.min()), float(xs.max()), float(ys.max())]
+                        [
+                            float(xs.min()),
+                            float(ys.min()),
+                            float(xs.max()),
+                            float(ys.max()),
+                        ]
                     )
                 else:
                     boxes.append([0.0, 0.0, 0.0, 0.0])
@@ -478,11 +485,26 @@ def _create_annotated_video(
     cap.release()
 
     ffmpeg_cmd = [
-        "ffmpeg", "-y",
-        "-f", "rawvideo", "-vcodec", "rawvideo",
-        "-s", f"{w}x{h}", "-pix_fmt", "bgr24", "-r", str(fps),
-        "-i", "pipe:0",
-        "-vcodec", "libx264", "-pix_fmt", "yuv420p", "-crf", "18",
+        "ffmpeg",
+        "-y",
+        "-f",
+        "rawvideo",
+        "-vcodec",
+        "rawvideo",
+        "-s",
+        f"{w}x{h}",
+        "-pix_fmt",
+        "bgr24",
+        "-r",
+        str(fps),
+        "-i",
+        "pipe:0",
+        "-vcodec",
+        "libx264",
+        "-pix_fmt",
+        "yuv420p",
+        "-crf",
+        "18",
         str(output_path),
     ]
     proc = subprocess.Popen(ffmpeg_cmd, stdin=subprocess.PIPE)
@@ -498,7 +520,9 @@ def _create_annotated_video(
     while current_frame <= max_frame:
         ret, frame = cap.read()
         if not ret:
-            logger.warning(f"Source video ended at frame {current_frame} — stopping annotated video")
+            logger.warning(
+                f"Source video ended at frame {current_frame} — stopping annotated video"
+            )
             break
 
         if current_frame in tracked_set:
@@ -514,8 +538,12 @@ def _create_annotated_video(
                     mask=masks_uint8.astype(bool),
                     class_id=np.array(obj_ids, dtype=np.int32),
                 )
-                annotated = mask_annotator.annotate(scene=frame.copy(), detections=detections)
-                annotated = box_annotator.annotate(scene=annotated, detections=detections)
+                annotated = mask_annotator.annotate(
+                    scene=frame.copy(), detections=detections
+                )
+                annotated = box_annotator.annotate(
+                    scene=annotated, detections=detections
+                )
                 annotated = label_annotator.annotate(
                     annotated,
                     detections=detections,
@@ -537,7 +565,9 @@ def _create_annotated_video(
     if proc.returncode == 0:
         logger.info(f"Annotated video saved to: {output_path}")
     else:
-        logger.error(f"ffmpeg exited with code {proc.returncode} — annotated video may be incomplete")
+        logger.error(
+            f"ffmpeg exited with code {proc.returncode} — annotated video may be incomplete"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -591,13 +621,17 @@ def _run_pipeline(cfg, run_dir: Path, config_path: Path | None = None) -> None:
             )
             return
         total_frames = total_frames_raw - start_frame
-        logger.info(f"  Starting from frame {start_frame}: {total_frames} frames remaining")
+        logger.info(
+            f"  Starting from frame {start_frame}: {total_frames} frames remaining"
+        )
     else:
         total_frames = total_frames_raw
 
     if max_frames and max_frames > 0:
         total_frames = min(total_frames, max_frames)
-        logger.info(f"  Capped to {total_frames} frames (max_frames_to_track={max_frames})")
+        logger.info(
+            f"  Capped to {total_frames} frames (max_frames_to_track={max_frames})"
+        )
 
     # --- Build chunks ---
     raw_chunks = cfg.get("manual_chunk_frames", None)
@@ -610,8 +644,10 @@ def _run_pipeline(cfg, run_dir: Path, config_path: Path | None = None) -> None:
     chunks = build_manual_chunks(manual_chunk_frames)
 
     if max_chunks is not None:
-        chunks = chunks[:int(max_chunks)]
-        logger.info(f"max_chunks={max_chunks}: processing only first {len(chunks)} chunks")
+        chunks = chunks[: int(max_chunks)]
+        logger.info(
+            f"max_chunks={max_chunks}: processing only first {len(chunks)} chunks"
+        )
 
     logger.info(f"Chunks: {len(chunks)}")
     for i, (s, e, mtype) in enumerate(chunks):
@@ -684,7 +720,9 @@ def _run_pipeline(cfg, run_dir: Path, config_path: Path | None = None) -> None:
         # --- Determine prompts ---
         if chunk_idx == 0:
             # Detect objects in first frame
-            logger.info("  Running GroundingDINO + SAM2 image predictor on first frame...")
+            logger.info(
+                "  Running GroundingDINO + SAM2 image predictor on first frame..."
+            )
             gs2_cfg = cfg.get("gs2", {})
             obj_id_to_mask, _labels = _detect_and_segment_first_frame(
                 frame_rgb=chunk_frames[0],
@@ -769,7 +807,9 @@ def _run_pipeline(cfg, run_dir: Path, config_path: Path | None = None) -> None:
             del existing_df
         chunk_df.to_parquet(results_path)
         del chunk_df
-        logger.info(f"Tracking results saved to {results_path} (after chunk {chunk_idx})")
+        logger.info(
+            f"Tracking results saved to {results_path} (after chunk {chunk_idx})"
+        )
 
         n_frames_chunk = len(chunk_outputs)
         all_outputs_per_frame.update(chunk_outputs)
@@ -792,7 +832,9 @@ def _run_pipeline(cfg, run_dir: Path, config_path: Path | None = None) -> None:
             f"{elapsed:.2f}s, {fps_achieved:.2f} FPS"
         )
 
-    logger.info(f"All chunks complete: {len(all_outputs_per_frame)} total frames processed")
+    logger.info(
+        f"All chunks complete: {len(all_outputs_per_frame)} total frames processed"
+    )
 
     # --- Save chunk info ---
     chunk_info_path = run_dir / "chunk_info.json"
@@ -812,9 +854,7 @@ def _run_pipeline(cfg, run_dir: Path, config_path: Path | None = None) -> None:
 
     # --- Final summary ---
     total_elapsed = time.perf_counter() - total_start
-    total_fps = (
-        len(all_outputs_per_frame) / total_elapsed if total_elapsed > 0 else 0.0
-    )
+    total_fps = len(all_outputs_per_frame) / total_elapsed if total_elapsed > 0 else 0.0
 
     logger.info("=" * 60)
     logger.info(f"Results saved to: {run_dir}")

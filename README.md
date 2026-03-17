@@ -10,14 +10,9 @@ with postprocessing, feature extraction, and behaviour classification.
 ```sh
 git submodule update --init --recursive
 
-# Install main (default) environment
-pixi install
-
-# Install SAM3 environment (main pipeline)
-pixi install -e sam3-hf
-
-# Launch shell
-pixi shell -e sam3-hf
+# Install environments
+pixi install -e tracker
+pixi install -e classifier
 ```
 
 Other environments (`gs2`, `sam3-native`, `yolo`) exist but are not actively used. The `classifier` environment adds PyTorch Lightning + torchmetrics. The `videoprism` environment provides JAX + VideoPrism. Platform is Linux-only (CUDA 12.6).
@@ -70,17 +65,21 @@ All scripts auto-discover tracking runs under `data/tracking/` and write outputs
 Scripts are organized as: executable scripts in `script/`, reusable library modules in `src/`.
 Run via pixi tasks or as Python modules from the project root.
 
-### Tracking
+### Tracker
 
 > [!IMPORTANT]
-> Read the base config file (`config/<tool name>_config.yaml`) and modify appropriately (e.g. CUDA device).
+> Read the base config file (`config/tracker.yaml`) and modify appropriately (e.g. video path, CUDA device).
 
 ```sh
 # Main SAM3-HF pipeline (defaults to config/sam3_hf_config.yaml)
-pixi run -e sam3-hf sam3-hf-tracker
+pixi run tracker
 
 # Custom config
-pixi run -e sam3-hf python -m script.sam3.run_sam3_hf --config config/sam3_hf_manual_chunking.yaml
+pixi run -e tracker python -m script.run_tracker --config config/tracker_manual_chunking.yaml
+
+# Basic tracker test
+CUDA_VISIBLE_DEVICES=1 pixi run test-sam3-hf-image
+CUDA_VISIBLE_DEVICES=1 pixi run test-sam3-hf-video
 ```
 
 ### Post-tracking
@@ -104,10 +103,6 @@ pixi run -e sam3-hf python -m script.sam3.run_sam3_hf --config config/sam3_hf_ma
 > Set `CUDA_VISIBLE_DEVICES` explicitly before running GPU tests.
 
 ```sh
-# SAM3 inference tests (standalone scripts, not pytest)
-CUDA_VISIBLE_DEVICES=1 pixi run test-sam3-hf-image
-CUDA_VISIBLE_DEVICES=1 pixi run test-sam3-hf-video
-
 # Dataset tests (pytest)
 pixi run -e sam3-hf test_features
 pixi run -e sam3-hf test_postprocessing                     # Tracking postprocessing tests (pytest)
