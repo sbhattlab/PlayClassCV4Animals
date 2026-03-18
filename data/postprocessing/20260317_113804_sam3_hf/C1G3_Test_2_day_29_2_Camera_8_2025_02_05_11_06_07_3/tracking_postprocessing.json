@@ -8,44 +8,95 @@
     "_time": "00:09.76-01:03.80"
   },
   {
+    "type": "id_switch",
+    "frame": 1596,
+    "from": 1,
+    "to": 2
+  },
+  {
+    "type": "id_switch",
+    "frame": 1596,
+    "from": 2,
+    "to": 1
+  },
+  {
     "type": "trim",
-    "cause": "low_score",
-    "from": 7573,
-    "to": 7626,
+    "cause": "merged_object",
+    "from": 1998,
+    "to": 2085,
     "id": 0,
     "_time": "05:02.93-05:05.05"
   },
   {
     "type": "trim",
-    "cause": "overlap",
-    "from": 7676,
-    "to": 8054,
+    "cause": "merged_object",
+    "from": 2310,
+    "to": 2351,
     "id": 0,
-    "_time": "05:07.05-05:22.17"
+    "_time": "05:02.93-05:05.05"
   },
   {
+    "type": "trim",
+    "cause": "merged_object",
+    "from": 3957,
+    "to": 3957,
+    "id": 0,
+    "_time": "05:02.93-05:05.05"
+  },
+  {
+    "type": "id_switch",
+    "frame": 4507,
+    "from": 0,
+    "to": 2
+  },
+  {
+    "type": "id_switch",
+    "frame": 4507,
+    "from": 2,
+    "to": 0
+  },
+  {    
+    "type": "trim",
+    "cause": "overlap",
+    "from": 7675,
+    "to": 8234,
+    "id": 0,
+    "_time": "05:02.93-05:05.05"
+  },
+  {    
+    "type": "trim",
+    "cause": "overlap",
+    "from": 7675,
+    "to": 8084,
+    "id": 2,
+    "_time": "05:02.93-05:05.05"
+  },
+  {    
     "type": "trim",
     "cause": "overlap",
     "from": 8235,
-    "to": 8453,
-    "id": 2,
-    "_time": "05:29.41-05:38.13"
-  },
-  {
-    "type": "trim",
-    "cause": "overlap",
-    "from": 8557,
-    "to": 8597,
-    "id": 2,
-    "_time": "05:42.29-05:43.89"
-  },
-  {
-    "type": "trim",
-    "cause": "overlap",
-    "from": 8656,
-    "to": 8984,
+    "to": 8987,
     "id": 0,
-    "_time": "05:46.26-05:59.38"
+    "_time": "05:02.93-05:05.05"
+  },
+  {    
+    "type": "trim",
+    "cause": "overlap",
+    "from": 15553,
+    "to": 15629,
+    "id": 0,
+    "_time": "05:02.93-05:05.05"
+  },
+  {    
+    "type": "trim",
+    "cause": "merged_object",
+    "from": 15838,
+    "to": 15853,
+    "id": 1,
+    "_time": "05:02.93-05:05.05"
+  },
+  {
+    "placeholder" : true
   },
   {
     "type": "trim",
