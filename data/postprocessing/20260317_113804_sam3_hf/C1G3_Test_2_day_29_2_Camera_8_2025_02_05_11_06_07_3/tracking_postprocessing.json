@@ -56,6 +56,14 @@
     "to": 0
   },
   {    
+    "type": "merged_object",
+    "cause": "overlap",
+    "from": 4777,
+    "to": 4777,
+    "id": 0,
+    "_time": "05:02.93-05:05.05"
+  },
+  {    
     "type": "trim",
     "cause": "overlap",
     "from": 7675,
@@ -75,15 +83,23 @@
     "type": "trim",
     "cause": "overlap",
     "from": 8235,
-    "to": 8987,
+    "to": 9105,
     "id": 0,
+    "_time": "05:02.93-05:05.05"
+  },
+  {    
+    "type": "trim",
+    "cause": "merged_object",
+    "from": 14324,
+    "to": 14324,
+    "id": 2,
     "_time": "05:02.93-05:05.05"
   },
   {    
     "type": "trim",
     "cause": "overlap",
     "from": 15553,
-    "to": 15629,
+    "to": 15627,
     "id": 0,
     "_time": "05:02.93-05:05.05"
   },
@@ -95,8 +111,53 @@
     "id": 1,
     "_time": "05:02.93-05:05.05"
   },
-  {
-    "placeholder" : true
+  {    
+    "type": "trim",
+    "cause": "overlap",
+    "from": 16676,
+    "to": 16897,
+    "id": 2,
+    "_time": "05:02.93-05:05.05"
+  },
+  {    
+    "type": "trim",
+    "cause": "overlap",
+    "from": 17061,
+    "to": 17204,
+    "id": 2,
+    "_time": "05:02.93-05:05.05"
+  },
+  {    
+    "type": "trim",
+    "cause": "overlap",
+    "from": 17288,
+    "to": 17354,
+    "id": 2,
+    "_time": "05:02.93-05:05.05"
+  },
+  {    
+    "type": "trim",
+    "cause": "overlap",
+    "from": 17383,
+    "to": 17471,
+    "id": 2,
+    "_time": "05:02.93-05:05.05"
+  },
+  {    
+    "type": "trim",
+    "cause": "overlap",
+    "from": 17604,
+    "to": 17678,
+    "id": 2,
+    "_time": "05:02.93-05:05.05"
+  },
+  {    
+    "type": "trim",
+    "cause": "overlap",
+    "from": 17746,
+    "to": 17854,
+    "id": 2,
+    "_time": "05:02.93-05:05.05"
   },
   {
     "type": "trim",
@@ -106,25 +167,33 @@
     "id": 1,
     "_time": "14:16.20-15:00.64"
   },
+  {    
+    "type": "trim",
+    "cause": "overlap",
+    "from": 21976,
+    "to": 21989,
+    "id": 2,
+    "_time": "05:02.93-05:05.05"
+  },
   {
     "type": "id_match",
     "protocol_id": 2780,
     "description": "Black head",
-    "tracking_id": null,
+    "tracking_id": 0,
     "frame": null
   },
   {
     "type": "id_match",
     "protocol_id": 2648,
     "description": "Green head",
-    "tracking_id": null,
+    "tracking_id": 1,
     "frame": null
   },
   {
     "type": "id_match",
     "protocol_id": 2674,
     "description": "Dark marbled",
-    "tracking_id": null,
+    "tracking_id": 2,
     "frame": null
   }
 ]
