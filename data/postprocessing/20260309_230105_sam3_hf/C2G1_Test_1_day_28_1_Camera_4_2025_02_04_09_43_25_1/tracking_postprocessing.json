@@ -1,0 +1,276 @@
+[
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "id": 2,
+    "from": 78,
+    "to": 120,
+    "_time": "00:03.10 - 00:04.80"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "id": 2,
+    "from": 158,
+    "to": 546,
+    "_time": "00:06.30 - 00:21.85"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "id": 1,
+    "from": 425,
+    "to": 575,
+    "_time": "00:17 - 00:23"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "id": 2,
+    "from": 675,
+    "to": 725,
+    "_time": "00:27 - 00:29"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "id": 3,
+    "from": 813,
+    "to": 1350,
+    "_time": "00:32.50 - 00:54"
+  },
+  {
+    "type": "id_switch",
+    "frame": 855,
+    "from": 2,
+    "to": 4,
+    "_time": "00:34.19"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "id": 1,
+    "from": 1238,
+    "to": 1325,
+    "_time": "00:49.50 - 00:53"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "from": 1275,
+    "to": 1392,
+    "id": 4,
+    "_time": "00:51.00-00:55.67"
+  },
+  {
+    "type": "id_switch",
+    "frame": 1409,
+    "from": 1,
+    "to": 5,
+    "_time": "00:56.35"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "id": 4,
+    "from": 1475,
+    "to": 1503,
+    "_time": "00:59 - 01:00.11"
+  },
+  {
+    "type": "id_switch",
+    "frame": 1503,
+    "from": 4,
+    "to": 6,
+    "_time": "01:00.11"
+  },
+  {
+    "type": "id_switch",
+    "frame": 4655,
+    "from": 6,
+    "to": 0,
+    "_time": "03:06.16"
+  },
+  {
+    "type": "id_switch",
+    "frame": 4655,
+    "from": 3,
+    "to": 6,
+    "_time": "03:06.16"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "from": 4902,
+    "to": 4944,
+    "id": 5,
+    "_time": "03:16.04-03:17.72"
+  },
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "from": 4943,
+    "to": 6073,
+    "id": 5,
+    "_time": "03:17.68-04:02.87"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "from": 5223,
+    "to": 5264,
+    "id": 5,
+    "_time": "03:28.88-03:30.52"
+  },
+  {
+    "type": "id_switch",
+    "frame": 6099,
+    "from": 0,
+    "to": 5,
+    "_time": "04:03.91"
+  },
+  {
+    "type": "id_switch",
+    "frame": 6099,
+    "from": 5,
+    "to": 3,
+    "_time": "04:03.91"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "id": 6,
+    "from": 6625,
+    "to": 7000,
+    "_time": "04:25 - 04:40"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "from": 8220,
+    "to": 8326,
+    "id": 3,
+    "_time": "05:28.73-05:32.97"
+  },
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "from": 8256,
+    "to": 8268,
+    "id": 3,
+    "_time": "05:30.17-05:30.65"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "from": 11736,
+    "to": 11774,
+    "id": 5,
+    "_time": "07:49.34-07:50.86"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "id": 6,
+    "from": 9300,
+    "to": 9438,
+    "_time": "06:12 - 06:17.50"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "id": 6,
+    "from": 10050,
+    "to": 10375,
+    "_time": "06:42 - 06:55"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "id": 6,
+    "from": 10425,
+    "to": 10675,
+    "_time": "06:57 - 07:07"
+  },
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "from": 11751,
+    "to": 11914,
+    "id": 5,
+    "_time": "07:49.94-07:56.46"
+  },
+  {
+    "type": "id_switch",
+    "frame": 11914,
+    "from": 5,
+    "to": 0,
+    "_time": "07:56.46"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "id": 6,
+    "from": 11850,
+    "to": 12200,
+    "_time": "07:54 - 08:08"
+  },
+  {
+    "type": "id_switch",
+    "frame": 14776,
+    "from": 6,
+    "to": 4,
+    "_time": "09:50.91"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "id": 4,
+    "from": 18375,
+    "to": 19700,
+    "_time": "12:15 - 13:08"
+  },
+  {
+    "type": "id_switch",
+    "frame": 21198,
+    "from": 4,
+    "to": 3,
+    "_time": "14:07.74"
+  },
+  {
+    "type": "id_switch",
+    "frame": 21198,
+    "from": 3,
+    "to": 4,
+    "_time": "14:07.74"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "id": 3,
+    "from": 21198,
+    "to": 21250,
+    "_time": "14:07.74 - 14:10"
+  },
+  {
+    "type": "id_match",
+    "protocol_id": 2676,
+    "description": "Black",
+    "tracking_id": 3,
+    "frame": null
+  },
+  {
+    "type": "id_match",
+    "protocol_id": 2692,
+    "description": "Blue upper back",
+    "tracking_id": 4,
+    "frame": null
+  },
+  {
+    "type": "id_match",
+    "protocol_id": 2778,
+    "description": "Light brown/grey",
+    "tracking_id": 0,
+    "frame": null
+  }
+]

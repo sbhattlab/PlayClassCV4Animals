@@ -1,0 +1,83 @@
+[
+    {
+        "type": "id_switch",
+        "frame": 2896,
+        "from": 2,
+        "to": 3,
+        "_time": "01:55.84"
+    },
+    {
+        "type": "id_switch",
+        "frame": 2896,
+        "from": 1,
+        "to": 2,
+        "_time": "01:55.84"
+    },
+    {
+        "type": "trim",
+        "cause": "merged_object",
+        "from": 3648,
+        "to": 3768,
+        "id": 0,
+        "_time": "02:25.92-02:30.72"
+    },
+    {
+        "type": "trim",
+        "cause": "merged_object",
+        "from": 5568,
+        "to": 5616,
+        "id": 0,
+        "_time": "03:42.72-03:44.64"
+    },
+    {
+        "type": "trim",
+        "cause": "merged_object",
+        "from": 6216,
+        "to": 6312,
+        "id": 0,
+        "_time": "04:08.64-04:12.48"
+    },
+    {
+        "type": "trim",
+        "cause": "merged_object",
+        "from": 6336,
+        "to": 6408,
+        "id": 3,
+        "_time": "04:13.44-04:16.32"
+    },
+    {
+        "type": "id_switch",
+        "frame": 7362,
+        "from": 2,
+        "to": 4,
+        "_time": "04:54.48"
+    },
+    {
+        "type": "id_switch",
+        "frame": 13412,
+        "from": 4,
+        "to": 1,
+        "_time": "08:56.48"
+    },
+    {
+        "type": "id_match",
+        "protocol_id": 2784,
+        "description": "Yellow left wing",
+        "tracking_id": 3,
+        "frame": null
+    },
+    {
+        "type": "id_match",
+        "protocol_id": 2777,
+        "description": "Black left wing",
+        "tracking_id": 1,
+        "frame": null
+    },
+    {
+        "type": "id_match",
+        "protocol_id": 2658,
+        "description": "Dark marbled",
+        "tracking_id": 0,
+        "frame": null
+    }
+]

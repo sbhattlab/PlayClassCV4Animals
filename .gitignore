@@ -1,0 +1,86 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[codz]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+*.egg
+
+# Unit test / coverage reports
+htmlcov/
+.coverage
+.coverage.*
+.pytest_cache/
+
+# Translations
+*.mo
+*.pot
+
+# Logs
+*.log
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Pixi
+.pixi/*
+!.pixi/config.toml
+
+# Virtual environments
+.venv
+
+# Ruff
+.ruff_cache/
+
+# Marimo
+marimo/_static/
+marimo/_lsp/
+__marimo__/
+
+# VSCode
+*.code-workspace
+.vscode/
+
+# mypy
+.mypy_cache/
+
+# macOS
+.DS_Store/
+
+# Models
+model/
+
+# Data
+ext/
+video-data/
+ext-data/
+data/eval/
+data/video/
+data/dataset/
+data/tsne/
+tracking/
+
+# Notes & drafts
+tmp/
+drafts*.py
+drafts*.ipynb
+notes/
+paper/
+papers/
+
+# Shelved experiments
+shelf/
+sandbox/
+
+# Generated / local-only
+.matplotlib/
+img/
+
+# Claude
+.claude/

@@ -1,0 +1,67 @@
+[
+    {
+        "type": "id_switch",
+        "frame": 600,
+        "from": 1,
+        "to": 4,
+        "_time": "00:24.00"
+    },
+    {
+        "type": "trim",
+        "cause": "overlap",
+        "from": 765,
+        "to": 770,
+        "id": 1,
+        "time": "00:30.60-00:30.80"
+    },
+    {
+        "type": "trim",
+        "cause": "overlap",
+        "from": 1505,
+        "to": 1630,
+        "id": 1,
+        "time": "01:00.20-01:05.20"
+    },
+    {
+        "type": "id_switch",
+        "frame": 1630,
+        "from": 0,
+        "to": 1,
+        "_time": "01:05.20"
+    },
+    {
+        "type": "id_switch",
+        "frame": 1630,
+        "from": 4,
+        "to": 0,
+        "_time": "01:05.20"
+    },
+    {
+        "type": "id_switch",
+        "frame": 8850,
+        "from": 1,
+        "to": 4,
+        "_time": "05:55.00"
+    },
+    {
+        "type": "id_match",
+        "protocol_id": 2650,
+        "description": "Light brown",
+        "tracking_id": 4,
+        "frame": null
+    },
+    {
+        "type": "id_match",
+        "protocol_id": 2656,
+        "description": "White",
+        "tracking_id": 2,
+        "frame": null
+    },
+    {
+        "type": "id_match",
+        "protocol_id": 2674,
+        "description": "Dark marbled",
+        "tracking_id": 0,
+        "frame": null
+    }
+]

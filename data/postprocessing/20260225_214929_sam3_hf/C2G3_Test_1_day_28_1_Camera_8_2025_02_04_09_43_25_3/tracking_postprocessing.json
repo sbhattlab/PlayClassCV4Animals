@@ -1,0 +1,124 @@
+[
+    {
+        "type": "trim",
+        "cause": "low_score",
+        "from": 336,
+        "to": 480,
+        "id": 0,
+        "_time": "00:13.44-00:19.20"
+    },
+    {
+        "type": "id_switch",
+        "frame": 1340,
+        "from": 1,
+        "to": 3,
+        "_time": "00:53.60"
+    },
+    {
+        "type": "trim",
+        "cause": "low_score",
+        "from": 1355,
+        "to": 1382,
+        "id": 2,
+        "_time": "00:54.20-00:55.28"
+    },
+    {
+        "type": "trim",
+        "cause": "low_score",
+        "from": 1411,
+        "to": 1438,
+        "id": 2,
+        "_time": "00:56.44-00:57.52"
+    },
+    {
+        "type": "trim",
+        "cause": "low_score",
+        "from": 1519,
+        "to": 1559,
+        "id": 2,
+        "_time": "01:00.76-01:02.36"
+    },
+    {
+        "type": "trim",
+        "cause": "low_score",
+        "from": 1533,
+        "to": 1613,
+        "id": 0,
+        "_time": "01:01.32-01:04.52"
+    },
+    {
+        "type": "id_switch",
+        "frame": 2961,
+        "from": 3,
+        "to": 1,
+        "_time": "01:58.45"
+    },
+    {
+        "type": "id_switch",
+        "frame": 5814,
+        "from": 1,
+        "to": 3,
+        "_time": "03:52.57"
+    },
+    {
+        "type": "trim",
+        "cause": "merged_object",
+        "from": 5808,
+        "to": 7248,
+        "id": 3,
+        "_time": "04:02.00-05:02.00"
+    },
+    {
+        "type": "trim",
+        "cause": "low_score",
+        "from": 10315,
+        "to": 10367,
+        "id": 2,
+        "_time": "06:52.62-06:54.70"
+    },
+    {
+        "type": "trim",
+        "cause": "overlap",
+        "from": 10365,
+        "to": 10710,
+        "id": 2,
+        "_time": "06:54.62-07:08.42"
+    },
+    {
+        "type": "trim",
+        "cause": "low_score",
+        "from": 17451,
+        "to": 17482,
+        "id": 2,
+        "_time": "11:38.08-11:39.32"
+    },
+    {
+        "type": "trim",
+        "cause": "low_score",
+        "from": 18570,
+        "to": 19279,
+        "id": 3,
+        "_time": "12:22.84-12:51.20"
+    },
+    {
+        "type": "id_match",
+        "protocol_id": 2773,
+        "description": "Dark marbled",
+        "tracking_id": 0,
+        "frame": null
+    },
+    {
+        "type": "id_match",
+        "protocol_id": 2771,
+        "description": "Pink upper back",
+        "tracking_id": 2,
+        "frame": null
+    },
+    {
+        "type": "id_match",
+        "protocol_id": 2682,
+        "description": "White",
+        "tracking_id": 3,
+        "frame": null
+    }
+]

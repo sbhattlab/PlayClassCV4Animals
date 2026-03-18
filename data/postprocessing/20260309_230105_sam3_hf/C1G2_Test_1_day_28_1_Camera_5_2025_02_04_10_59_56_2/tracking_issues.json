@@ -1,0 +1,679 @@
+{
+  "transition0": {
+    "type": "id_switch",
+    "start": 70,
+    "end": 70,
+    "start_time": 2.8,
+    "end_time": 2.8,
+    "ids_before": [
+      0
+    ],
+    "ids_after": [
+      0,
+      1
+    ],
+    "lost": [],
+    "gained": [
+      1
+    ]
+  },
+  "transition1": {
+    "type": "id_switch",
+    "start": 73,
+    "end": 73,
+    "start_time": 2.92,
+    "end_time": 2.92,
+    "ids_before": [
+      0,
+      1
+    ],
+    "ids_after": [
+      0,
+      1,
+      2
+    ],
+    "lost": [],
+    "gained": [
+      2
+    ]
+  },
+  "low_score0": {
+    "type": "low_score",
+    "start": 580,
+    "end": 615,
+    "start_time": 23.2,
+    "end_time": 24.6,
+    "id": 2,
+    "low_score_rows": 36,
+    "total_rows": 36,
+    "min_score": 0.664
+  },
+  "transition2": {
+    "type": "id_switch",
+    "start": 1264,
+    "end": 1264,
+    "start_time": 50.56,
+    "end_time": 50.56,
+    "ids_before": [
+      0,
+      1,
+      2
+    ],
+    "ids_after": [
+      0,
+      1
+    ],
+    "lost": [
+      2
+    ],
+    "gained": []
+  },
+  "transition3": {
+    "type": "id_switch",
+    "start": 1272,
+    "end": 1272,
+    "start_time": 50.88,
+    "end_time": 50.88,
+    "ids_before": [
+      0,
+      1
+    ],
+    "ids_after": [
+      1
+    ],
+    "lost": [
+      0
+    ],
+    "gained": []
+  },
+  "transition4": {
+    "type": "id_switch",
+    "start": 1274,
+    "end": 1274,
+    "start_time": 50.96,
+    "end_time": 50.96,
+    "ids_before": [
+      1
+    ],
+    "ids_after": [
+      0,
+      1
+    ],
+    "lost": [],
+    "gained": [
+      0
+    ]
+  },
+  "transition5": {
+    "type": "id_switch",
+    "start": 1278,
+    "end": 1278,
+    "start_time": 51.12,
+    "end_time": 51.12,
+    "ids_before": [
+      0,
+      1
+    ],
+    "ids_after": [
+      0,
+      1,
+      2
+    ],
+    "lost": [],
+    "gained": [
+      2
+    ]
+  },
+  "overlap0": {
+    "type": "overlap",
+    "start": 2045,
+    "end": 2045,
+    "start_time": 81.8,
+    "end_time": 81.8,
+    "ids": [
+      0,
+      2
+    ]
+  },
+  "transition6": {
+    "type": "id_switch",
+    "start": 4574,
+    "end": 4574,
+    "start_time": 182.97,
+    "end_time": 182.97,
+    "ids_before": [
+      0,
+      1,
+      2
+    ],
+    "ids_after": [
+      1
+    ],
+    "lost": [
+      0,
+      2
+    ],
+    "gained": []
+  },
+  "transition7": {
+    "type": "id_switch",
+    "start": 4628,
+    "end": 4628,
+    "start_time": 185.13,
+    "end_time": 185.13,
+    "ids_before": [
+      1
+    ],
+    "ids_after": [
+      0,
+      1,
+      5
+    ],
+    "lost": [],
+    "gained": [
+      0,
+      5
+    ]
+  },
+  "transition8": {
+    "type": "id_switch",
+    "start": 6123,
+    "end": 6123,
+    "start_time": 244.93,
+    "end_time": 244.93,
+    "ids_before": [
+      0,
+      1,
+      5
+    ],
+    "ids_after": [
+      0,
+      1
+    ],
+    "lost": [
+      5
+    ],
+    "gained": []
+  },
+  "transition9": {
+    "type": "id_switch",
+    "start": 6126,
+    "end": 6126,
+    "start_time": 245.05,
+    "end_time": 245.05,
+    "ids_before": [
+      0,
+      1
+    ],
+    "ids_after": [
+      0,
+      1,
+      5
+    ],
+    "lost": [],
+    "gained": [
+      5
+    ]
+  },
+  "transition10": {
+    "type": "id_switch",
+    "start": 7680,
+    "end": 7680,
+    "start_time": 307.21,
+    "end_time": 307.21,
+    "ids_before": [
+      0,
+      1,
+      5
+    ],
+    "ids_after": [
+      1
+    ],
+    "lost": [
+      0,
+      5
+    ],
+    "gained": []
+  },
+  "transition11": {
+    "type": "id_switch",
+    "start": 7698,
+    "end": 7698,
+    "start_time": 307.93,
+    "end_time": 307.93,
+    "ids_before": [
+      1
+    ],
+    "ids_after": [
+      1,
+      5
+    ],
+    "lost": [],
+    "gained": [
+      5
+    ]
+  },
+  "transition12": {
+    "type": "id_switch",
+    "start": 7705,
+    "end": 7705,
+    "start_time": 308.21,
+    "end_time": 308.21,
+    "ids_before": [
+      1,
+      5
+    ],
+    "ids_after": [
+      0,
+      1,
+      5
+    ],
+    "lost": [],
+    "gained": [
+      0
+    ]
+  },
+  "transition13": {
+    "type": "id_switch",
+    "start": 9078,
+    "end": 9078,
+    "start_time": 363.13,
+    "end_time": 363.13,
+    "ids_before": [
+      0,
+      1,
+      5
+    ],
+    "ids_after": [
+      0,
+      1
+    ],
+    "lost": [
+      5
+    ],
+    "gained": []
+  },
+  "transition14": {
+    "type": "id_switch",
+    "start": 9085,
+    "end": 9085,
+    "start_time": 363.41,
+    "end_time": 363.41,
+    "ids_before": [
+      0,
+      1
+    ],
+    "ids_after": [
+      0,
+      1,
+      5
+    ],
+    "lost": [],
+    "gained": [
+      5
+    ]
+  },
+  "transition15": {
+    "type": "id_switch",
+    "start": 10311,
+    "end": 10311,
+    "start_time": 412.45,
+    "end_time": 412.45,
+    "ids_before": [
+      0,
+      1,
+      5
+    ],
+    "ids_after": [
+      1
+    ],
+    "lost": [
+      0,
+      5
+    ],
+    "gained": []
+  },
+  "transition16": {
+    "type": "id_switch",
+    "start": 10335,
+    "end": 10335,
+    "start_time": 413.41,
+    "end_time": 413.41,
+    "ids_before": [
+      1
+    ],
+    "ids_after": [
+      1,
+      5
+    ],
+    "lost": [],
+    "gained": [
+      5
+    ]
+  },
+  "transition17": {
+    "type": "id_switch",
+    "start": 10337,
+    "end": 10337,
+    "start_time": 413.49,
+    "end_time": 413.49,
+    "ids_before": [
+      1,
+      5
+    ],
+    "ids_after": [
+      0,
+      1,
+      5
+    ],
+    "lost": [],
+    "gained": [
+      0
+    ]
+  },
+  "transition18": {
+    "type": "id_switch",
+    "start": 11866,
+    "end": 11866,
+    "start_time": 474.65,
+    "end_time": 474.65,
+    "ids_before": [
+      0,
+      1,
+      5
+    ],
+    "ids_after": [
+      1,
+      5
+    ],
+    "lost": [
+      0
+    ],
+    "gained": []
+  },
+  "transition19": {
+    "type": "id_switch",
+    "start": 11893,
+    "end": 11893,
+    "start_time": 475.73,
+    "end_time": 475.73,
+    "ids_before": [
+      1,
+      5
+    ],
+    "ids_after": [
+      0,
+      1,
+      5
+    ],
+    "lost": [],
+    "gained": [
+      0
+    ]
+  },
+  "overlap1": {
+    "type": "overlap",
+    "start": 13273,
+    "end": 13273,
+    "start_time": 530.93,
+    "end_time": 530.93,
+    "ids": [
+      0,
+      5
+    ]
+  },
+  "transition20": {
+    "type": "id_switch",
+    "start": 13302,
+    "end": 13302,
+    "start_time": 532.09,
+    "end_time": 532.09,
+    "ids_before": [
+      0,
+      1,
+      5
+    ],
+    "ids_after": [
+      1
+    ],
+    "lost": [
+      0,
+      5
+    ],
+    "gained": []
+  },
+  "transition21": {
+    "type": "id_switch",
+    "start": 13351,
+    "end": 13351,
+    "start_time": 534.05,
+    "end_time": 534.05,
+    "ids_before": [
+      1
+    ],
+    "ids_after": [
+      1,
+      8,
+      9
+    ],
+    "lost": [],
+    "gained": [
+      8,
+      9
+    ]
+  },
+  "transition22": {
+    "type": "id_switch",
+    "start": 14955,
+    "end": 14955,
+    "start_time": 598.22,
+    "end_time": 598.22,
+    "ids_before": [
+      1,
+      8,
+      9
+    ],
+    "ids_after": [
+      1,
+      9
+    ],
+    "lost": [
+      8
+    ],
+    "gained": []
+  },
+  "transition23": {
+    "type": "id_switch",
+    "start": 14972,
+    "end": 14972,
+    "start_time": 598.9,
+    "end_time": 598.9,
+    "ids_before": [
+      1,
+      9
+    ],
+    "ids_after": [
+      1,
+      8,
+      9
+    ],
+    "lost": [],
+    "gained": [
+      8
+    ]
+  },
+  "transition24": {
+    "type": "id_switch",
+    "start": 16268,
+    "end": 16268,
+    "start_time": 650.74,
+    "end_time": 650.74,
+    "ids_before": [
+      1,
+      8,
+      9
+    ],
+    "ids_after": [
+      1
+    ],
+    "lost": [
+      8,
+      9
+    ],
+    "gained": []
+  },
+  "transition25": {
+    "type": "id_switch",
+    "start": 16302,
+    "end": 16302,
+    "start_time": 652.1,
+    "end_time": 652.1,
+    "ids_before": [
+      1
+    ],
+    "ids_after": [
+      1,
+      8
+    ],
+    "lost": [],
+    "gained": [
+      8
+    ]
+  },
+  "transition26": {
+    "type": "id_switch",
+    "start": 16303,
+    "end": 16303,
+    "start_time": 652.14,
+    "end_time": 652.14,
+    "ids_before": [
+      1,
+      8
+    ],
+    "ids_after": [
+      1,
+      8,
+      9
+    ],
+    "lost": [],
+    "gained": [
+      9
+    ]
+  },
+  "overlap3": {
+    "type": "overlap",
+    "start": 17540,
+    "end": 18155,
+    "start_time": 701.62,
+    "end_time": 726.22,
+    "ids": [
+      8,
+      9
+    ]
+  },
+  "low_score1": {
+    "type": "low_score",
+    "start": 18166,
+    "end": 18235,
+    "start_time": 726.66,
+    "end_time": 729.42,
+    "id": 9,
+    "low_score_rows": 70,
+    "total_rows": 70,
+    "min_score": 0.141
+  },
+  "overlap2": {
+    "type": "overlap",
+    "start": 19177,
+    "end": 19342,
+    "start_time": 767.1,
+    "end_time": 773.7,
+    "ids": [
+      1,
+      8
+    ]
+  },
+  "transition27": {
+    "type": "id_switch",
+    "start": 19357,
+    "end": 19357,
+    "start_time": 774.3,
+    "end_time": 774.3,
+    "ids_before": [
+      1,
+      8,
+      9
+    ],
+    "ids_after": [
+      1,
+      2,
+      3
+    ],
+    "lost": [
+      8,
+      9
+    ],
+    "gained": [
+      2,
+      3
+    ]
+  },
+  "transition28": {
+    "type": "id_switch",
+    "start": 21222,
+    "end": 21222,
+    "start_time": 848.9,
+    "end_time": 848.9,
+    "ids_before": [
+      1,
+      2,
+      3
+    ],
+    "ids_after": [
+      1
+    ],
+    "lost": [
+      2,
+      3
+    ],
+    "gained": []
+  },
+  "transition29": {
+    "type": "id_switch",
+    "start": 21236,
+    "end": 21236,
+    "start_time": 849.46,
+    "end_time": 849.46,
+    "ids_before": [
+      1
+    ],
+    "ids_after": [
+      1,
+      2
+    ],
+    "lost": [],
+    "gained": [
+      2
+    ]
+  },
+  "transition30": {
+    "type": "id_switch",
+    "start": 21255,
+    "end": 21255,
+    "start_time": 850.22,
+    "end_time": 850.22,
+    "ids_before": [
+      1,
+      2
+    ],
+    "ids_after": [
+      1,
+      2,
+      3
+    ],
+    "lost": [],
+    "gained": [
+      3
+    ]
+  }
+}

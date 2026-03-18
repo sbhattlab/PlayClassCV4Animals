@@ -1,0 +1,143 @@
+[
+  {
+    "type": "id_switch",
+    "frame": 1274,
+    "from": 2,
+    "to": 0,
+    "_time": "00:50.96"
+  },
+  {
+    "type": "id_switch",
+    "frame": 1274,
+    "from": 0,
+    "to": 1,
+    "_time": "00:50.96"
+  },
+  {
+    "type": "id_switch",
+    "frame": 1274,
+    "from": 1,
+    "to": 2,
+    "_time": "00:50.96"
+  },
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "id": 2,
+    "from": 2016,
+    "to": 2052,
+    "_time": "01:20.64 - 01:22.08"
+  },
+  {
+    "type": "id_switch",
+    "frame": 4628,
+    "from": 2,
+    "to": 5,
+    "_time": "03:05.13"
+  },
+  {
+    "type": "trim",
+    "cause": "merged_object",
+    "id": 5,
+    "from": 8712,
+    "to": 8784,
+    "_time": "05:48.48 - 05:51.36"
+  },
+  {
+    "type": "trim",
+    "cause": "merged_object",
+    "id": 5,
+    "from": 10248,
+    "to": 10335,
+    "_time": "06:49.92 - 06:53.41"
+  },
+  {
+    "type": "id_switch",
+    "frame": 13351,
+    "from": 5,
+    "to": 8,
+    "_time": "08:54.05"
+  },
+  {
+    "type": "id_switch",
+    "frame": 13351,
+    "from": 0,
+    "to": 9,
+    "_time": "08:54.05"
+  },
+  {
+    "type": "trim",
+    "cause": "merged_object",
+    "id": 8,
+    "from": 16296,
+    "to": 16704,
+    "_time": "10:51.84 - 11:08.16"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "id": 8,
+    "from": 17208,
+    "to": 19357,
+    "_time": "11:28.32 - 12:54.30"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "id": 9,
+    "from": 17700,
+    "to": 17880,
+    "_time": "11:48 - 11:55.20"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "id": 9,
+    "from": 18158,
+    "to": 19357,
+    "_time": "12:06.32 - 12:54.30"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "id": 1,
+    "from": 18144,
+    "to": 18912,
+    "_time": "12:05.76 - 12:36.48"
+  },
+  {
+    "type": "id_switch",
+    "frame": 19357,
+    "from": 8,
+    "to": 2,
+    "_time": "12:54.30"
+  },
+  {
+    "type": "id_switch",
+    "frame": 19357,
+    "from": 9,
+    "to": 3,
+    "_time": "12:54.30"
+  },
+  {
+    "type": "id_match",
+    "protocol_id": 2672,
+    "description": "Dark",
+    "tracking_id": 1,
+    "frame": null
+  },
+  {
+    "type": "id_match",
+    "protocol_id": 2781,
+    "description": "Pink head",
+    "tracking_id": 3,
+    "frame": null
+  },
+  {
+    "type": "id_match",
+    "protocol_id": 2648,
+    "description": "Green head",
+    "tracking_id": 2,
+    "frame": null
+  }
+]
