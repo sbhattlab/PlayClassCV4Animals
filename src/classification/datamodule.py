@@ -353,6 +353,8 @@ class BehaviourDataModule(L.LightningDataModule):
 
     def setup(self, stage=None):
         # pylint: disable=attribute-defined-outside-init
+        if self.test_id is None or self.val_id is None:
+            raise ValueError("Call set_fold(test_id, val_id) before setup()")
         data = self._dataset
 
         # Build per-sample group labels from the splitter

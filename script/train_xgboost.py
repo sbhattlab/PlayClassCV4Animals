@@ -20,7 +20,7 @@ from xgboost import XGBClassifier
 
 from src._config import DEFAULT_CHECKPOINT_DIR, DEFAULT_DATASET_DIR, LABEL_ORDER
 from src.classification.datamodule import LabelEncoder
-from src.classification.model_selection import LOCO, LOVO
+from src.classification.model_selection import LOVO
 from src.classification.stats import aggregate_metrics
 
 

@@ -45,6 +45,8 @@ class LOCO(LOO):
 
     def split(self, video_ids, shuffle=False, random_state=None):
         cages = sorted({cage_id_from_video_id(v) for v in video_ids})
+        if len(cages) < 2:
+            raise ValueError(f"LOCO requires at least 2 cages, got {len(cages)}")
         if shuffle:
             import random
 
@@ -65,12 +67,8 @@ class LOCO(LOO):
 class LOVO(LOO):
     """Leave-One-Video-Out cross-validation."""
 
-    def _select_val_circular(self, test_video, all_videos):
+    def _select_val_circular(self, test_video, all_videos, cage_to_videos, cages):
         """Pick val video from the next cage (cage-aware rotation, group-matched)."""
-        cage_to_videos: dict[str, list[str]] = {}
-        for v in sorted(all_videos):
-            cage_to_videos.setdefault(v[:2], []).append(v)
-        cages = sorted(cage_to_videos)
         test_cage = test_video[:2]
         next_cage = cages[(cages.index(test_cage) + 1) % len(cages)]
         test_group_idx = cage_to_videos[test_cage].index(test_video)
@@ -79,6 +77,13 @@ class LOVO(LOO):
 
     def split(self, video_ids, shuffle=False, random_state=None):
         videos = sorted(set(video_ids))
+        # Precompute cage mapping once
+        cage_to_videos: dict[str, list[str]] = {}
+        for v in videos:
+            cage_to_videos.setdefault(v[:2], []).append(v)
+        cages = sorted(cage_to_videos)
+        if len(cages) < 2:
+            raise ValueError(f"LOVO requires at least 2 cages, got {len(cages)}")
         if shuffle:
             import random
 
@@ -93,7 +98,9 @@ class LOVO(LOO):
                 yield test_video, val_video
         else:
             for test_video in videos:
-                yield test_video, self._select_val_circular(test_video, videos)
+                yield test_video, self._select_val_circular(
+                    test_video, videos, cage_to_videos, cages
+                )
 
     def get_groups(self, video_ids):
         return list(video_ids)
