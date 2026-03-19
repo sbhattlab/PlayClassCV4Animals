@@ -15,26 +15,10 @@ from loguru import logger
 from torch.utils.data import DataLoader, Dataset, Subset
 
 from src._config import LABEL_ORDER
+from src.classification.model_selection import LOO
 
 _KEY_COLS = {"video_id", "bird_id", "window"}
 _SKIP_COLS = _KEY_COLS | {"n_frames"}
-
-
-def select_val_video(test_video: str, all_videos: list[str]) -> str:
-    """Pick val video from the next cage (cage-aware rotation, group-matched).
-
-    Extracts cage prefix (first 2 chars), rotates to next cage in sorted order,
-    and matches the group index within that cage (e.g. C5G2 → C1G2).
-    """
-    cage_to_videos: dict[str, list[str]] = {}
-    for v in sorted(all_videos):
-        cage_to_videos.setdefault(v[:2], []).append(v)
-    cages = sorted(cage_to_videos)
-    test_cage = test_video[:2]
-    next_cage = cages[(cages.index(test_cage) + 1) % len(cages)]
-    test_group_idx = cage_to_videos[test_cage].index(test_video)
-    next_videos = cage_to_videos[next_cage]
-    return next_videos[test_group_idx % len(next_videos)]
 
 
 class LabelEncoder:
@@ -43,7 +27,7 @@ class LabelEncoder:
     Parameters
     ----------
     classes : list[str]
-        Ordered class names.  Index 0 → first element, etc.
+        Ordered class names.  Index 0 -> first element, etc.
     """
 
     def __init__(self, classes):
@@ -51,20 +35,20 @@ class LabelEncoder:
         self.ind2lab = {i: l for i, l in enumerate(classes)}
 
     def encode(self, labels):
-        """Encode label string(s) → integer index(es)."""
+        """Encode label string(s) -> integer index(es)."""
         if isinstance(labels, str):
             return self.lab2ind[labels]
         return [self.lab2ind[l] for l in labels]
 
     def decode(self, indices):
-        """Decode integer index(es) → label string(s)."""
+        """Decode integer index(es) -> label string(s)."""
         if isinstance(indices, int):
             return self.ind2lab[indices]
         return [self.ind2lab[i] for i in indices]
 
 
 def adaptive_segment_pool1d(x, n_segments):
-    """Reduce (T, D) → (K, D) via adaptive average pooling."""
+    """Reduce (T, D) -> (K, D) via adaptive average pooling."""
     # adaptive_avg_pool1d expects (B, C, L) — add batch dim, treat D as channels
     x = x.unsqueeze(0).transpose(1, 2)  # (1, D, T)
     # pylint: disable=not-callable
@@ -143,24 +127,11 @@ class BehaviourDataset(Dataset):
             self.label_encoder.encode(labels_df["behav_label"].tolist()),
             dtype=torch.long,
         )
-        self.groups = labels_df["video_id"].tolist()  # for LOVO splitting
+        self.video_ids = labels_df["video_id"].tolist()
         self.data_dim = self.data.shape[-1]
         self.flat_dim = self.flat.shape[-1] if self.flat is not None else 0
 
-    def _load_windowed_features(self, dataset_dir):
-        """Load windowed feature summaries as a flat (N, F) tensor."""
-        features_df = pd.read_parquet(
-            dataset_dir / "features_windowed.parquet"
-        ).drop(columns=_SKIP_COLS, errors="ignore")
-        features_df = features_df.fillna(features_df.median())
-        feat = torch.tensor(features_df.values, dtype=torch.float32)
-        self._feat_mean = feat.mean(dim=0)
-        self._feat_std = feat.std(dim=0).clamp(min=1e-8)
-        return (feat - self._feat_mean) / self._feat_std
-
-    def load_data(
-        self, dataset_dir, labels_df, use_features, use_embeddings, temporal
-    ):
+    def load_data(self, dataset_dir, labels_df, use_features, use_embeddings, temporal):
         """Load data and return (data, flat).
 
         ``flat`` is non-None only in hybrid mode: temporal model with
@@ -173,9 +144,9 @@ class BehaviourDataset(Dataset):
         flat : Tensor | None
             Windowed features (N, F) for hybrid mode, else None.
         """
-        assert use_features or use_embeddings, (
-            "At least one of use_features or use_embeddings must be True"
-        )
+        assert (
+            use_features or use_embeddings
+        ), "At least one of use_features or use_embeddings must be True"
 
         if temporal:
             # Temporal embeddings as main data
@@ -204,37 +175,16 @@ class BehaviourDataset(Dataset):
         data = torch.cat(parts, dim=-1) if len(parts) > 1 else parts[0]
         return data, None
 
-    def _load_embeddings(self, dataset_dir, labels_df, temporal):
-        keys = list(
-            zip(labels_df["video_id"], labels_df["bird_id"], labels_df["window"])
+    def _load_windowed_features(self, dataset_dir):
+        """Load windowed feature summaries as a flat (N, F) tensor."""
+        features_df = pd.read_parquet(dataset_dir / "features_windowed.parquet").drop(
+            columns=_SKIP_COLS, errors="ignore"
         )
-
-        all_emb_parts = []
-        for emb_file in self.embeddings_files:
-            emb_path = dataset_dir / emb_file
-            embeddings_dict = torch.load(emb_path, weights_only=False)
-
-            if temporal:
-                part = torch.stack(
-                    [
-                        adaptive_segment_pool1d(
-                            embeddings_dict[(v, b, w)].float(), self.n_segments
-                        )
-                        for v, b, w in keys
-                    ]
-                )
-            else:
-                def _pool(t):
-                    t = t.float()
-                    return t if t.ndim == 1 else t.mean(dim=0)
-                part = torch.stack([_pool(embeddings_dict[(v, b, w)]) for v, b, w in keys])
-
-            all_emb_parts.append(part)
-            del embeddings_dict
-
-        # Concatenate along feature dim: (N, D1) + (N, D2) → (N, D1+D2)
-        # or (N, K, D1) + (N, K, D2) → (N, K, D1+D2)
-        return torch.cat(all_emb_parts, dim=-1)
+        features_df = features_df.fillna(features_df.median())
+        feat = torch.tensor(features_df.values, dtype=torch.float32)
+        self._feat_mean = feat.mean(dim=0)
+        self._feat_std = feat.std(dim=0).clamp(min=1e-8)
+        return (feat - self._feat_mean) / self._feat_std
 
     def _load_temporal_features(self, dataset_dir, labels_df):
         """Load per-frame features as segment-pooled temporal sequences.
@@ -264,6 +214,42 @@ class BehaviourDataset(Dataset):
             ]
         )
 
+    def _load_embeddings(self, dataset_dir, labels_df, temporal):
+        keys = list(
+            zip(labels_df["video_id"], labels_df["bird_id"], labels_df["window"])
+        )
+
+        all_emb_parts = []
+        for emb_file in self.embeddings_files:
+            emb_path = dataset_dir / emb_file
+            embeddings_dict = torch.load(emb_path, weights_only=False)
+
+            if temporal:
+                part = torch.stack(
+                    [
+                        adaptive_segment_pool1d(
+                            embeddings_dict[(v, b, w)].float(), self.n_segments
+                        )
+                        for v, b, w in keys
+                    ]
+                )
+            else:
+
+                def _pool(t):
+                    t = t.float()
+                    return t if t.ndim == 1 else t.mean(dim=0)
+
+                part = torch.stack(
+                    [_pool(embeddings_dict[(v, b, w)]) for v, b, w in keys]
+                )
+
+            all_emb_parts.append(part)
+            del embeddings_dict
+
+        # Concatenate along feature dim: (N, D1) + (N, D2) -> (N, D1+D2)
+        # or (N, K, D1) + (N, K, D2) -> (N, K, D1+D2)
+        return torch.cat(all_emb_parts, dim=-1)
+
     def __len__(self):
         return len(self.labels)
 
@@ -272,36 +258,6 @@ class BehaviourDataset(Dataset):
         if self.flat is not None:
             item["flat"] = self.flat[idx]
         return item
-
-
-# ----------------------------------------------------------------------
-# Splitting
-# ----------------------------------------------------------------------
-
-
-def leave_one_group_out(dataset, test_group, val_group):
-    """Split a dataset by group membership (LOVO).
-
-    Parameters
-    ----------
-    dataset : BehaviourDataset
-        Must have a ``groups`` attribute (array of group labels).
-    test_group, val_group : str
-        Group values to hold out.
-
-    Returns
-    -------
-    train, val, test : Subset
-    """
-    groups = np.array(dataset.groups)
-    train_idx = np.where(~np.isin(groups, [test_group, val_group]))[0].tolist()
-    val_idx = np.where(groups == val_group)[0].tolist()
-    test_idx = np.where(groups == test_group)[0].tolist()
-    return (
-        Subset(dataset, train_idx),
-        Subset(dataset, val_idx),
-        Subset(dataset, test_idx),
-    )
 
 
 # ----------------------------------------------------------------------
@@ -329,20 +285,22 @@ def _compute_class_weights(dataset, indices, n_classes, scheme="inv-sqrt"):
 
 
 class BehaviourDataModule(L.LightningDataModule):
-    """LOVO (Leave-One-Video-Out) data module.
+    """Data module for behaviour classification with cross-validation.
+
+    Accepts a ``LOO`` splitter (LOCO or LOVO) that controls fold iteration.
+    Call ``set_fold(test_id, val_id)`` then ``setup()`` for each fold.
 
     After ``setup()``, exposes:
 
     - ``class_weights`` — inverse-sqrt weights from the train split
     - ``n_classes``, ``data_dim``
-    - ``label_encoder`` — maps class names ↔ indices
+    - ``label_encoder`` — maps class names <-> indices
     """
 
     def __init__(
         self,
         dataset_dir,
-        test_video=None,
-        val_video=None,
+        splitter: LOO,
         batch_size=32,
         use_features=True,
         use_embeddings=False,
@@ -354,8 +312,9 @@ class BehaviourDataModule(L.LightningDataModule):
     ):
         super().__init__()
         self.dataset_dir = Path(dataset_dir)
-        self.test_video = test_video
-        self.val_video = val_video
+        self.splitter = splitter
+        self.test_id = None
+        self.val_id = None
         self.batch_size = batch_size
         self.use_features = use_features
         self.use_embeddings = use_embeddings
@@ -368,12 +327,12 @@ class BehaviourDataModule(L.LightningDataModule):
     @property
     def video_ids(self) -> list[str]:
         """Unique video IDs in the dataset. Available after ``prepare_data()``."""
-        return sorted(set(self._dataset.groups))
+        return sorted(set(self._video_ids))
 
-    def set_split_groups(self, test_video: str, val_video: str):
-        """Set test/val video IDs for the next ``setup()`` call."""
-        self.test_video = test_video
-        self.val_video = val_video
+    def set_fold(self, test_id: str, val_id: str):
+        """Set test/val IDs for the next ``setup()`` call."""
+        self.test_id = test_id
+        self.val_id = val_id
 
     def prepare_data(self):
         # NOTE: assigns self._dataset here, which Lightning docs warn against for
@@ -389,18 +348,23 @@ class BehaviourDataModule(L.LightningDataModule):
             exclude=self.exclude,
             embeddings_files=self.embeddings_files,
         )
+        self._video_ids = list(self._dataset.video_ids)
         # pylint: enable=attribute-defined-outside-init
 
     def setup(self, stage=None):
         # pylint: disable=attribute-defined-outside-init
         data = self._dataset
 
-        # LOVO split
-        train_ds, val_ds, test_ds = leave_one_group_out(
-            data, self.test_video, self.val_video
-        )
+        # Build per-sample group labels from the splitter
+        groups = np.array(self.splitter.get_groups(data.video_ids))
+        train_idx = np.where(~np.isin(groups, [self.test_id, self.val_id]))[0].tolist()
+        val_idx = np.where(groups == self.val_id)[0].tolist()
+        test_idx = np.where(groups == self.test_id)[0].tolist()
+        train_ds = Subset(data, train_idx)
+        val_ds = Subset(data, val_idx)
+        test_ds = Subset(data, test_idx)
 
-        # Subset (LOVO) doesn't forward dataset attributes, so we expose them here
+        # Subset doesn't forward dataset attributes, so we expose them here
         # for model construction (data_dim, n_classes) and confusion matrix labels
         self.label_encoder = data.label_encoder
         self.n_classes = data.n_classes
@@ -411,7 +375,9 @@ class BehaviourDataModule(L.LightningDataModule):
             self.train_ds = train_ds
             self.val_ds = val_ds
             self.class_weights = _compute_class_weights(
-                data, train_ds.indices, self.n_classes,
+                data,
+                train_ds.indices,
+                self.n_classes,
                 scheme=self.class_weight_scheme,
             )
 
