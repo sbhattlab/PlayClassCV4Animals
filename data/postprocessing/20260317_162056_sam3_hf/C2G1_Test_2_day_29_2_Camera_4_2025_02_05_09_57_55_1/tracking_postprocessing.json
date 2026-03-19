@@ -1,6 +1,38 @@
 [
   {
     "type": "trim",
+    "cause": "low_score",
+    "from": 602,
+    "to": 616,
+    "id": 2,
+    "_time": "01:36.34-02:06.25"
+  },
+  {
+    "type": "trim",
+    "cause": "merged_object",
+    "from": 1031,
+    "to": 1069,
+    "id": 0,
+    "_time": "01:36.34-02:06.25"
+  },
+  {
+    "type": "trim",
+    "cause": "merged_object",
+    "from": 1291,
+    "to": 1323,
+    "id": 2,
+    "_time": "01:36.34-02:06.25"
+  },
+  {
+    "type": "trim",
+    "cause": "merged_object",
+    "from": 1300,
+    "to": 1349,
+    "id": 0,
+    "_time": "01:36.34-02:06.25"
+  },
+  {
+    "type": "trim",
     "cause": "overlap",
     "from": 2409,
     "to": 3157,
@@ -10,7 +42,7 @@
   {
     "type": "id_switch",
     "frame": 3229,
-    "from": null,
+    "from": 1,
     "to": 3,
     "_time": "02:09.13"
   },
