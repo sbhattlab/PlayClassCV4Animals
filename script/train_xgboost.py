@@ -18,8 +18,9 @@ from loguru import logger
 from sklearn.metrics import confusion_matrix, f1_score
 from xgboost import XGBClassifier
 
-from src._config import DEFAULT_CHECKPOINT_DIR, DEFAULT_DATASET_DIR
-from src.classification.datamodule import LABEL_ORDER, LabelEncoder, select_val_video
+from src._config import DEFAULT_CHECKPOINT_DIR, DEFAULT_DATASET_DIR, LABEL_ORDER
+from src.classification.datamodule import LabelEncoder
+from src.classification.model_selection import LOVO
 from src.classification.stats import aggregate_metrics
 
 
@@ -72,11 +73,12 @@ def main():
     run_dir.mkdir(parents=True, exist_ok=True)
     json.dump(vars(args), (run_dir / "cfg.json").open("w"), default=str, indent=2)
 
-    logger.info(f"LOVO: {len(all_videos)} videos — {all_videos}")
+    splitter = LOVO()
+    folds = list(splitter.split(all_videos))
+    logger.info(f"LOVO: {len(folds)} folds")
 
     fold_results = []
-    for fold_idx, test_video in enumerate(all_videos):
-        val_video = select_val_video(test_video, all_videos)
+    for fold_idx, (test_video, val_video) in enumerate(folds):
         logger.info(f"Fold {fold_idx}: test={test_video}, val={val_video}")
 
         train_mask = ~np.isin(video_ids, [test_video, val_video])
@@ -116,7 +118,7 @@ def main():
             verbose=False,
         )
 
-        result = {"test_video": test_video, "val_video": val_video}
+        result = {"test_id": test_video, "val_id": val_video}
         for split, X_s, y_s, prefix in [
             ("test", X_test, y_test, "test_"),
             ("train", X_train, y_train, "train_"),

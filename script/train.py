@@ -1,14 +1,18 @@
 """Train a behaviour classifier on tracked chicken data.
 
-Always runs full LOVO (Leave-One-Video-Out) cross-validation.
+Supports LOCO (leave-one-cage-out, default) and LOVO (leave-one-video-out,
+deprecated) cross-validation via ``--cv``.
 
 Usage::
 
-    # Features only (MLP)
+    # Features only (MLP, LOCO default)
     pixi run -e classifier train --model mlp --input features
 
+    # LOVO (v0.1.0)
+    pixi run -e classifier train --model mlp --input features --cv lovo
+
     # Mean-pooled embeddings (MLP)
-    pixi run -e classifier train --model mlp --input embeddings_250
+    pixi run -e classifier train --model mlp --input embeddings
 
     # Features + embeddings combined
     pixi run -e classifier train --model mlp --input features+embeddings
@@ -43,7 +47,8 @@ from lightning.pytorch.loggers import CSVLogger
 from loguru import logger
 
 from src._config import DEFAULT_CHECKPOINT_DIR, DEFAULT_DATASET_DIR
-from src.classification.datamodule import BehaviourDataModule, select_val_video
+from src.classification.datamodule import BehaviourDataModule
+from src.classification.model_selection import LOCO, LOVO
 from src.classification.models import MODEL_REGISTRY
 from src.classification.stats import aggregate_metrics
 from src.classification.trainer import BehaviourClassifier
@@ -123,6 +128,13 @@ def parse_args():
         choices=["inv-sqrt", "inv", "none"],
         help="Class weighting scheme (default: inv-sqrt)",
     )
+    parser.add_argument(
+        "--cv",
+        type=str,
+        default="loco",
+        choices=["lovo", "loco"],
+        help="Cross-validation: loco (leave-one-cage-out, default) or lovo (leave-one-video-out, deprecated)",
+    )
     return parser.parse_args()
 
 
@@ -157,7 +169,9 @@ def parse_input(input_str):
             )
 
     if not use_features and not use_embeddings:
-        raise ValueError("--input must include 'features' and/or 'embeddings[_variant]'")
+        raise ValueError(
+            "--input must include 'features' and/or 'embeddings[_variant]'"
+        )
 
     return use_features, use_embeddings, embeddings_files
 
@@ -250,7 +264,7 @@ def evaluate_fold(
     Lightning resets epoch metrics after fit() and test(), so we
     load the best checkpoint manually and re-evaluate all splits.
     """
-    result = {"test_video": dm.test_video, "val_video": dm.val_video}
+    result = {"test_id": dm.test_id, "val_id": dm.val_id}
 
     # Load best checkpoint (trainer.test resets metrics, so we do it manually)
     best_path = trainer.checkpoint_callback.best_model_path
@@ -279,27 +293,23 @@ def cleanup_fold(trainer, model):
 
 
 # ---------------------------------------------------------------------------
-# LOVO orchestrator
+# CV orchestrator
 # ---------------------------------------------------------------------------
 
 
-def run_lovo(dm, backbone_cls, run_dir, dry_run=False, **training_args) -> list[dict]:
-    """Run full LOVO loop across all videos. Returns fold results."""
-    all_videos = dm.video_ids
-    logger.info(f"LOVO: {len(all_videos)} videos — {all_videos}")
+def run_cv(dm, backbone_cls, run_dir, dry_run=False, **training_args) -> list[dict]:
+    """Run cross-validation loop (LOCO or LOVO). Returns fold results."""
+    folds = list(dm.splitter.split(dm.video_ids))
+    logger.info(f"{dm.splitter.__class__.__name__}: {len(folds)} folds")
 
     fold_results = []
 
-    for fold_idx, test_video in enumerate(all_videos):
-        # Set test and val videos for this fold
-        val_video = select_val_video(test_video, all_videos)
-        logger.info(f"Fold {fold_idx}: test={test_video}, val={val_video}")
+    for fold_idx, (test_id, val_id) in enumerate(folds):
+        logger.info(f"Fold {fold_idx}: test={test_id}, val={val_id}")
 
-        # Update data splits
-        dm.set_split_groups(test_video=test_video, val_video=val_video)
+        dm.set_fold(test_id=test_id, val_id=val_id)
         dm.setup()
 
-        # Update model
         backbone_kwargs = {}
         if dm.flat_dim > 0:
             backbone_kwargs["d_flat"] = dm.flat_dim
@@ -316,8 +326,7 @@ def run_lovo(dm, backbone_cls, run_dir, dry_run=False, **training_args) -> list[
             feature_dropout=training_args.get("feature_dropout", 0.0),
         )
 
-        # Logger and checkpoint dir for this fold
-        fold_dir = run_dir / f"fold_{fold_idx}_{test_video}"
+        fold_dir = run_dir / f"fold_{fold_idx}_{test_id}"
         fold_logger = CSVLogger(save_dir=fold_dir)
 
         trainer, model = train_fold(
@@ -363,8 +372,10 @@ def main():
         json.dump(cfg, f, indent=2)
 
     # Load dataset
+    splitter = LOCO() if args.cv == "loco" else LOVO()
     dm = BehaviourDataModule(
         dataset_dir=args.dataset_dir,
+        splitter=splitter,
         batch_size=args.batch_size,
         exclude=args.exclude,
         use_features=use_features,
@@ -389,12 +400,12 @@ def main():
         "devices": devices,
     }
 
-    fold_results = run_lovo(
+    fold_results = run_cv(
         dm, backbone_cls, run_dir, dry_run=args.dry_run, **training_args
     )
     if fold_results:
         labels = list(dm.label_encoder.lab2ind.keys())
-        aggregate_metrics(fold_results, run_dir, labels)
+        aggregate_metrics(fold_results, run_dir, labels, prefix=args.cv)
 
 
 if __name__ == "__main__":

@@ -14,7 +14,9 @@ def format_confusion_matrix(cm: np.ndarray, labels: list[str]) -> str:
     return "\n".join(rows)
 
 
-def aggregate_scalars(fold_results: list[dict], scalar_keys: list[str], run_dir: Path):
+def aggregate_scalars(
+    fold_results: list[dict], scalar_keys: list[str], run_dir: Path, prefix: str = "lovo"
+):
     """Build summary CSV with MEAN/STD rows and log per-metric stats."""
     rows = [{k: r[k] for k in scalar_keys} for r in fold_results]
     df = pd.DataFrame(rows)
@@ -28,13 +30,13 @@ def aggregate_scalars(fold_results: list[dict], scalar_keys: list[str], run_dir:
             std_row[c] = "STD" if c == df.columns[0] else ""
 
     df = pd.concat([df, pd.DataFrame([mean_row, std_row])], ignore_index=True)
-    summary_path = run_dir / "lovo_summary.csv"
+    summary_path = run_dir / f"{prefix}_summary.csv"
     df.to_csv(summary_path, index=False)
-    logger.info(f"LOVO summary saved to {summary_path}")
+    logger.info(f"{prefix.upper()} summary saved to {summary_path}")
 
     for col in numeric_cols:
         values = [r[col] for r in fold_results if col in r]
-        logger.info(f"LOVO {col}: {np.mean(values):.4f} +/- {np.std(values):.4f}")
+        logger.info(f"{prefix.upper()} {col}: {np.mean(values):.4f} +/- {np.std(values):.4f}")
 
 
 def _macro_f1_from_cm(cm: np.ndarray) -> float:
@@ -53,7 +55,11 @@ def _macro_f1_from_cm(cm: np.ndarray) -> float:
 
 
 def aggregate_confusion_matrices(
-    fold_results: list[dict], cm_keys: list[str], run_dir: Path, labels: list[str]
+    fold_results: list[dict],
+    cm_keys: list[str],
+    run_dir: Path,
+    labels: list[str],
+    prefix: str = "lovo",
 ) -> dict[str, float]:
     """Sum and write confusion matrices across folds.
 
@@ -64,11 +70,11 @@ def aggregate_confusion_matrices(
         summed_cm = sum(r[key] for r in fold_results)
 
         # Save as .npy for programmatic reuse
-        np.save(run_dir / f"lovo_{key}.npy", summed_cm)
+        np.save(run_dir / f"{prefix}_{key}.npy", summed_cm)
 
         # Save as txt for human inspection
         cm_text = format_confusion_matrix(summed_cm, labels)
-        cm_path = run_dir / f"lovo_{key}.txt"
+        cm_path = run_dir / f"{prefix}_{key}.txt"
         cm_path.write_text(f"# Summed {key} (rows=true, cols=predicted):\n{cm_text}\n")
         logger.info(f"Summed {key} saved to {cm_path}")
 
@@ -87,7 +93,7 @@ def aggregate_confusion_matrices(
 
 
 def aggregate_metrics(
-    fold_results: list[dict], run_dir: Path, labels: list[str]
+    fold_results: list[dict], run_dir: Path, labels: list[str], prefix: str = "lovo"
 ) -> None:
     """Aggregate per-fold metrics and write summary files.
 
@@ -99,6 +105,8 @@ def aggregate_metrics(
         Output directory.
     labels : list[str]
         Class names for confusion matrix formatting.
+    prefix : str
+        Filename prefix (``"loco"`` or ``"lovo"``).
     """
     scalar_keys = []
     cm_keys = []
@@ -110,11 +118,13 @@ def aggregate_metrics(
         else:
             raise ValueError(f"Unexpected type {type(v)} for metric '{k}'")
 
-    aggregate_scalars(fold_results, scalar_keys, run_dir)
-    pooled_f1s = aggregate_confusion_matrices(fold_results, cm_keys, run_dir, labels)
+    aggregate_scalars(fold_results, scalar_keys, run_dir, prefix=prefix)
+    pooled_f1s = aggregate_confusion_matrices(
+        fold_results, cm_keys, run_dir, labels, prefix=prefix
+    )
 
     # Append POOLED row to summary CSV
-    summary_path = run_dir / "lovo_summary.csv"
+    summary_path = run_dir / f"{prefix}_summary.csv"
     df = pd.read_csv(summary_path)
     pooled_row = {df.columns[0]: "POOLED"}
     pooled_row.update(pooled_f1s)
