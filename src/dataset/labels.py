@@ -93,8 +93,8 @@ def process_labels(label_files):
             bird_description = raw.iloc[0, 1]
 
             # Accumulate bird_info while we already have the sheet open
-            cage = sheet.strip().split()[0]  # "C1G1 2664" -> "C1G1"
-            video_id = f"{cage}D{age}"
+            cage_group = sheet.strip().split()[0]  # "C1G1 2664" -> "C1G1"
+            video_id = f"{cage_group}D{age}"
             if video_id not in bird_info:
                 bird_info[video_id] = {}
             bird_info[video_id][int(bird_id)] = str(bird_description).strip()
@@ -136,8 +136,8 @@ def process_labels(label_files):
     # Replace "" by "none"
     labels["behav"] = labels["behav"].replace("", "none")
 
-    cage = labels["sheet"].str.extract(r"^(C\dG\d)")[0]
-    labels["video_id"] = cage + "D" + labels["_age"].astype(str)
+    cage_group = labels["sheet"].str.extract(r"^(C\dG\d)")[0]
+    labels["video_id"] = cage_group + "D" + labels["_age"].astype(str)
     labels["behav_group"] = labels["behav"].apply(merge_behaviours)
 
     labels = labels.loc[

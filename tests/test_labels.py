@@ -6,7 +6,21 @@ import pytest
 
 from src._config import DEFAULT_LABEL_DIR, DEFAULT_N_BIRDS
 from src.dataset.labels import process_labels
-from src.dataset.utils import cage_id_from_video_id
+from src.dataset.utils import cage_id_from_video_id, extract_video_id
+
+
+@pytest.mark.parametrize(
+    "dirname, expected",
+    [
+        ("C1G3_Test_1_day_28_1_Camera_8_2025_02_04_10_59_56_3", "C1G3D28"),
+        ("C2G1_Test_2_day_29_2_Camera_4_2025_02_05_09_57_55_1", "C2G1D29"),
+        ("C5G2_Test_3_day_37_3_Camera_5_2025_02_11_10_00_00_2", "C5G2D37"),
+        ("some_random_directory", None),
+        ("C1G3_no_day_info", None),
+    ],
+)
+def test_extract_video_id(dirname, expected):
+    assert extract_video_id(dirname) == expected
 
 
 @pytest.fixture(scope="module")
