@@ -74,15 +74,8 @@
     "cause": "merged_object",
     "id": 3,
     "from": 12025,
-    "to": 12225,
-    "_time": "08:01 - 08:09"
-  },
-  {
-    "type": "id_switch",
-    "frame": 12284,
-    "from": null,
-    "to": 3,
-    "_time": "08:11.27"
+    "to": 12284,
+    "_time": "08:01 - 08:11"
   },
   {
     "type": "trim",

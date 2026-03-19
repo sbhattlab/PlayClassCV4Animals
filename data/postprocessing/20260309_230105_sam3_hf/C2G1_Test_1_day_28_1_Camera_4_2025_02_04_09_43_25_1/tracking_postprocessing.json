@@ -253,6 +253,22 @@
     "_time": "14:07.74 - 14:10"
   },
   {
+    "type": "trim",
+    "cause": "stray",
+    "id": 2,
+    "from": 855,
+    "to": 99999,
+    "_time": "00:34.20-end"
+  },
+  {
+    "type": "trim",
+    "cause": "stray",
+    "id": 1,
+    "from": 1409,
+    "to": 99999,
+    "_time": "00:56.36-end"
+  },
+  {
     "type": "id_match",
     "protocol_id": 2676,
     "description": "Black",

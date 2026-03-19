@@ -131,20 +131,6 @@
     "_time": "06:59.45"
   },
   {
-    "type": "id_switch",
-    "frame": 14784,
-    "from": null,
-    "to": 7,
-    "_time": "09:51.31"
-  },
-  {
-    "type": "id_switch",
-    "frame": 16397,
-    "from": null,
-    "to": 7,
-    "_time": "10:55.83"
-  },
-  {
     "type": "trim",
     "cause": "low_score",
     "id": 0,
@@ -191,6 +177,14 @@
     "to": 22524,
     "id": 7,
     "_time": "14:25.00-15:00.89"
+  },
+  {
+    "type": "trim",
+    "cause": "stray",
+    "id": 1,
+    "from": 691,
+    "to": 99999,
+    "_time": "00:27.64-end"
   },
   {
     "type": "id_match",
