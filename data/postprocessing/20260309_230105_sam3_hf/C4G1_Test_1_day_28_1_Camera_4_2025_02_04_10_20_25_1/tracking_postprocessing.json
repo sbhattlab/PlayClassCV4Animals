@@ -1,12 +1,5 @@
 [
   {
-    "type": "id_switch",
-    "frame": 1481,
-    "from": null,
-    "to": 1,
-    "_time": "00:59.23"
-  },
-  {
     "type": "trim",
     "cause": "merged_object",
     "id": 2,

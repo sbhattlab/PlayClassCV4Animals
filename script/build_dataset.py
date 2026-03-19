@@ -55,7 +55,7 @@ from src.dataset.tracking_postprocessing import (
     prefill_postprocessing,
     process_tracks,
 )
-from src.dataset.utils import fmt_time, get_video_fps
+from src.dataset.utils import extract_video_id, fmt_time, get_video_fps
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -109,51 +109,46 @@ def _log_issues(issues, fps):
 def process_tracking_subdir(tracking_dir, bird_info):
     """Detect issues, write JSONs, return in-memory results.
 
+    If ``tracking_postprocessing.json`` already exists, skips issue detection
+    and bird_info generation (assumes the subdir was already processed).
+
     Returns
     -------
     dict
         ``tracks``: DataFrame from tracking_outputs.parquet
-        ``issues``: detected tracking issues dict
         ``postprocessing``: list of postprocessing entries (trims + remaps)
+        ``video_id``: extracted video ID (e.g. ``C1G3D28``)
         ``fps``: video FPS
-        ``ready``: True if all remaps have ``to`` values filled in
     """
     tracking_dir = Path(tracking_dir)
-    logger.info(f"Processing {tracking_dir.name}")
+    video_id = extract_video_id(tracking_dir.name)
 
     fps = get_video_fps(tracking_dir)
     tracks = pd.read_parquet(tracking_dir / "tracking_outputs.parquet").reset_index()
     tracks = tracks.rename(columns={"object_id": "tracking_id"})
-    logger.info(f"  FPS: {fps:.2f}, {len(tracks)} tracking rows")
 
-    issues = detect_tracking_issues(tracks, fps)
-    _log_issues(issues, fps)
-
-    _save_json(tracking_dir / "tracking_issues.json", issues)
-
-    # Match subdir name to video_id (e.g. "C1G1_day28" starts with "C1G1")
-    video_id = None
-    video_birds = {}
-    for vid, birds in bird_info.items():
-        if tracking_dir.name.startswith(vid):
-            video_id = vid
-            video_birds = birds
-            break
-    if video_birds:
-        _save_json(tracking_dir / "bird_info.json", video_birds)
-        logger.info(f"  Saved bird_info.json ({len(video_birds)} bird(s))")
-    else:
-        logger.warning(f"  No bird info matched for {tracking_dir.name}")
-
-    # Load or create tracking_postprocessing.json
     pp_path = tracking_dir / "tracking_postprocessing.json"
     if pp_path.exists():
         postprocessing = _load_json(pp_path)
         logger.info(
-            f"  tracking_postprocessing.json already exists "
-            f"({len(postprocessing)} entry/ies)"
+            f"Processing {tracking_dir.name} "
+            f"({len(postprocessing)} postprocessing entry/ies, {len(tracks)} rows)"
         )
     else:
+        logger.info(f"Processing {tracking_dir.name} (new)")
+        logger.info(f"  FPS: {fps:.2f}, {len(tracks)} tracking rows")
+
+        issues = detect_tracking_issues(tracks, fps)
+        _log_issues(issues, fps)
+        _save_json(tracking_dir / "tracking_issues.json", issues)
+
+        video_birds = bird_info.get(video_id, {})
+        if video_birds:
+            _save_json(tracking_dir / "bird_info.json", video_birds)
+            logger.info(f"  Saved bird_info.json ({len(video_birds)} bird(s))")
+        else:
+            logger.warning(f"  No bird info matched for {tracking_dir.name}")
+
         postprocessing = prefill_postprocessing(issues, tracks, video_birds, fps)
         _save_json(pp_path, postprocessing)
         logger.info(
@@ -276,7 +271,7 @@ def main():
                 fps=r["fps"],
             )
         except ValueError as e:
-            logger.error(f"Cannot build dataset: {e}")
+            logger.error(f"Cannot process tracks for {r['video_id']}: {e}")
             return
 
         tracks_clean["video_id"] = r["video_id"]

@@ -1,4 +1,5 @@
 import os
+import re
 from pathlib import Path
 
 import pandas as pd
@@ -28,19 +29,36 @@ def fmt_time(frame_idx, fps=25.0):
     return f"{int(m):02d}:{s:05.2f}"
 
 
+def extract_video_id(tracking_dir_name: str) -> str | None:
+    """Extract video_id (e.g. ``C1G3D28``) from a tracking directory name.
+
+    Parses the cage (``CxGy``) and day (``day_Z``) from names like
+    ``C1G3_Test_1_day_28_1_Camera_8_2025_02_04_10_59_56_3``.
+    """
+    m = re.search(r"(C\dG\d).*day_(\d+)", tracking_dir_name)
+    if m:
+        return f"{m.group(1)}D{m.group(2)}"
+    return None
+
+
+def cage_id_from_video_id(video_id: str) -> str:
+    """Extract cage_id (e.g. ``C1``) from a video_id like ``C1G3D28``."""
+    return video_id[:2]
+
+
 def resolve_video_path(
     video_id: str, tracking_dir: Path, video_dirs: list[Path]
 ) -> Path | None:
     """Find the video file for a given video_id.
 
-    Searches tracking subdirs under *tracking_dir* for directories whose name
-    starts with *video_id*, then looks for ``{subdir_name}.mp4`` in each of
-    *video_dirs* (flat and one level deep).
+    Searches tracking subdirs under *tracking_dir* for directories whose
+    extracted video_id matches, then looks for ``{subdir_name}.mp4`` in each
+    of *video_dirs* (flat and one level deep).
     """
     for root, _dirs, files in os.walk(tracking_dir, followlinks=True):
         if "tracking_outputs.parquet" in files:
             name = Path(root).name
-            if name.startswith(video_id):
+            if extract_video_id(name) == video_id:
                 mp4_name = f"{name}.mp4"
                 for video_dir in video_dirs:
                     video_path = video_dir / mp4_name
@@ -53,7 +71,7 @@ def resolve_video_path(
                                 return video_path
                 logger.warning(f"Expected video not found in any video dir: {mp4_name}")
                 return None
-    logger.warning(f"No tracking subdir found starting with '{video_id}'")
+    logger.warning(f"No tracking subdir found for video_id '{video_id}'")
     return None
 
 

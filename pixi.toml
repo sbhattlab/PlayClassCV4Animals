@@ -74,6 +74,7 @@ openpyxl = ">=3.1.0,<4"
 [feature.dataset.tasks]
 build_dataset = "python -m script.build_dataset"
 extract_features = "python -m script.extract_features"
+test_labels = "python -m pytest tests/test_labels.py -v"
 test_features = "python -m pytest tests/test_features.py -v"
 test_postprocessing = "python -m pytest tests/test_tracking_postprocessing.py -v"
 test_post_build = "python -m pytest tests/test_post_build_dataset.py -v"
