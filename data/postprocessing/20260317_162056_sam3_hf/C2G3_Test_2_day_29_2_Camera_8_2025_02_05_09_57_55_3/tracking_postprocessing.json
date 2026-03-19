@@ -338,34 +338,71 @@
     "_time": "06:08.46"
   },
   {
+    "type": "id_switch",
+    "frame": 9211,
+    "from": 3,
+    "to": 2,
+    "_time": "06:08.46"
+  },
+  {
     "type": "trim",
     "cause": "merged_object",
     "from": 10649,
-    "to": "XXX",
+    "to": 12088,
     "id": 0,
     "_time": "05:59.46-06:00.06"
   },
   {
     "type": "id_switch",
     "frame": 12132,
-    "from": null,
+    "from": 2,
     "to": 3,
     "_time": "08:05.31"
   },
   {
     "type": "id_switch",
     "frame": 13695,
-    "from": null,
+    "from": 0,
     "to": 5,
     "_time": "09:07.84"
   },
   {
     "type": "trim",
     "cause": "overlap",
-    "from": 18667,
+    "from": 14521,
+    "to": 14594,
+    "id": 3,
+    "_time": "12:26.73-13:52.13"
+  },
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "from": 18633,
     "to": 20802,
     "id": 1,
     "_time": "12:26.73-13:52.13"
+  },
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "from": 20591,
+    "to": 20603,
+    "id": 3,
+    "_time": "12:26.73-13:52.13"
+  },
+  {
+    "type": "id_switch",
+    "frame": 20892,
+    "from": 5,
+    "to": 2,
+    "_time": "13:55.74"
+  },
+  {
+    "type": "id_switch",
+    "frame": 20892,
+    "from": 3,
+    "to": 1,
+    "_time": "13:55.74"
   },
   {
     "type": "id_switch",
@@ -378,7 +415,7 @@
     "type": "trim",
     "cause": "low_score",
     "from": 21814,
-    "to": 21923,
+    "to": 21866,
     "id": 5,
     "_time": "14:32.62-14:36.98"
   },
@@ -386,21 +423,21 @@
     "type": "id_match",
     "protocol_id": 2692,
     "description": "Blue upper back",
-    "tracking_id": null,
+    "tracking_id": 2,
     "frame": null
   },
   {
     "type": "id_match",
     "protocol_id": 2646,
     "description": "Green upper back",
-    "tracking_id": null,
+    "tracking_id": 1,
     "frame": null
   },
   {
     "type": "id_match",
     "protocol_id": 2773,
     "description": "Dark marbled",
-    "tracking_id": null,
+    "tracking_id": 5,
     "frame": null
   }
 ]
