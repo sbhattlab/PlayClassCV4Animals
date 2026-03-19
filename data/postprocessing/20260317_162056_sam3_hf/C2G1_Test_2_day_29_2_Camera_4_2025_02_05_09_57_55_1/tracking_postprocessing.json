@@ -1,0 +1,262 @@
+[
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "from": 2409,
+    "to": 3157,
+    "id": 1,
+    "_time": "01:36.34-02:06.25"
+  },
+  {
+    "type": "id_switch",
+    "frame": 3229,
+    "from": null,
+    "to": 3,
+    "_time": "02:09.13"
+  },
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "from": 6813,
+    "to": 6853,
+    "id": 3,
+    "_time": "04:32.46-04:34.06"
+  },
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "from": 9020,
+    "to": 9776,
+    "id": 3,
+    "_time": "06:00.72-06:30.96"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "from": 9470,
+    "to": 9558,
+    "id": 0,
+    "_time": "06:18.72-06:22.24"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "from": 9593,
+    "to": 9662,
+    "id": 0,
+    "_time": "06:23.64-06:26.40"
+  },
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "from": 9911,
+    "to": 10249,
+    "id": 3,
+    "_time": "06:36.36-06:49.87"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "from": 9925,
+    "to": 10155,
+    "id": 0,
+    "_time": "06:36.92-06:46.11"
+  },
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "from": 13259,
+    "to": 14927,
+    "id": 2,
+    "_time": "08:50.25-09:56.95"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "from": 15371,
+    "to": 15405,
+    "id": 3,
+    "_time": "10:14.71-10:16.07"
+  },
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "from": 19665,
+    "to": 19728,
+    "id": 2,
+    "_time": "13:06.43-13:08.95"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "from": 19667,
+    "to": 19703,
+    "id": 2,
+    "_time": "13:06.51-13:07.95"
+  },
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "from": 19834,
+    "to": 19919,
+    "id": 2,
+    "_time": "13:13.19-13:16.59"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "from": 19948,
+    "to": 20006,
+    "id": 2,
+    "_time": "13:17.75-13:20.07"
+  },
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "from": 19982,
+    "to": 20021,
+    "id": 2,
+    "_time": "13:19.11-13:20.67"
+  },
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "from": 20084,
+    "to": 20122,
+    "id": 2,
+    "_time": "13:23.19-13:24.71"
+  },
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "from": 20181,
+    "to": 20446,
+    "id": 2,
+    "_time": "13:27.07-13:37.67"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "from": 20214,
+    "to": 20342,
+    "id": 2,
+    "_time": "13:28.39-13:33.51"
+  },
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "from": 20251,
+    "to": 20252,
+    "id": 2,
+    "_time": "13:29.87-13:29.91"
+  },
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "from": 20658,
+    "to": 20740,
+    "id": 2,
+    "_time": "13:46.14-13:49.42"
+  },
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "from": 20775,
+    "to": 20990,
+    "id": 0,
+    "_time": "13:50.82-13:59.42"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "from": 21172,
+    "to": 21282,
+    "id": 3,
+    "_time": "14:06.70-14:11.10"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "from": 21349,
+    "to": 21741,
+    "id": 3,
+    "_time": "14:13.78-14:29.46"
+  },
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "from": 21708,
+    "to": 21708,
+    "id": 3,
+    "_time": "14:28.14-14:28.14"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "from": 21920,
+    "to": 21991,
+    "id": 3,
+    "_time": "14:36.61-14:39.45"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "from": 22017,
+    "to": 22135,
+    "id": 3,
+    "_time": "14:40.49-14:45.21"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "from": 22216,
+    "to": 22268,
+    "id": 3,
+    "_time": "14:48.45-14:50.53"
+  },
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "from": 22297,
+    "to": 22524,
+    "id": 3,
+    "_time": "14:51.69-15:00.77"
+  },
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "from": 22423,
+    "to": 22425,
+    "id": 2,
+    "_time": "14:56.73-14:56.81"
+  },
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "from": 22423,
+    "to": 22427,
+    "id": 2,
+    "_time": "14:56.73-14:56.89"
+  },
+  {
+    "type": "id_match",
+    "protocol_id": 2676,
+    "description": "Black",
+    "tracking_id": null,
+    "frame": null
+  },
+  {
+    "type": "id_match",
+    "protocol_id": 2660,
+    "description": "Black upper back",
+    "tracking_id": null,
+    "frame": null
+  },
+  {
+    "type": "id_match",
+    "protocol_id": 2682,
+    "description": "White",
+    "tracking_id": null,
+    "frame": null
+  }
+]
