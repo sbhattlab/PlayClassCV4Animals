@@ -1,5 +1,8 @@
 """Behaviour label processing from Registration protocols Excel files."""
 
+import re
+from pathlib import Path
+
 import pandas as pd
 
 BEHAVIOUR_COLS = [
@@ -53,6 +56,20 @@ def merge_behaviours(behav_str):
     return ", ".join(sorted(merged)) if merged else "other"
 
 
+def _extract_age(filepath) -> int:
+    """Extract bird age in days from a label filename.
+
+    Expects filenames like ``Registration protocols week 1 day 2 (age 29 days).xlsx``.
+    """
+    m = re.search(r"age (\d+) days", Path(filepath).name)
+    if not m:
+        raise ValueError(
+            f"Cannot extract age from filename: {Path(filepath).name!r}. "
+            "Expected pattern 'age <N> days'."
+        )
+    return int(m.group(1))
+
+
 def process_labels(label_files):
     """Parse behaviour labels and bird info from Registration protocols Excel files.
 
@@ -61,11 +78,13 @@ def process_labels(label_files):
     tuple[pd.DataFrame, dict[str, dict[int, str]]]
         ``(labels_df, bird_info)`` where *bird_info* maps
         ``{video_id: {bird_id: bird_description}}``.
+        Video IDs have the form ``CxGyDz`` (e.g. ``C1G3D28``).
     """
     all_labels = []
     bird_info: dict[str, dict[int, str]] = {}
 
     for f in label_files:
+        age = _extract_age(f)
         xl = pd.ExcelFile(f)
 
         for sheet in xl.sheet_names:
@@ -74,7 +93,8 @@ def process_labels(label_files):
             bird_description = raw.iloc[0, 1]
 
             # Accumulate bird_info while we already have the sheet open
-            video_id = sheet.strip().split()[0]  # "C1G1 2664" -> "C1G1"
+            cage = sheet.strip().split()[0]  # "C1G1 2664" -> "C1G1"
+            video_id = f"{cage}D{age}"
             if video_id not in bird_info:
                 bird_info[video_id] = {}
             bird_info[video_id][int(bird_id)] = str(bird_description).strip()
@@ -96,6 +116,7 @@ def process_labels(label_files):
             raw["bird_id"] = bird_id
             raw["bird_description"] = bird_description
             raw["sheet"] = sheet.strip()
+            raw["_age"] = age
             all_labels.append(raw)
 
     labels = pd.concat(all_labels, ignore_index=True)
@@ -115,7 +136,8 @@ def process_labels(label_files):
     # Replace "" by "none"
     labels["behav"] = labels["behav"].replace("", "none")
 
-    labels["video_id"] = labels["sheet"].str.extract(r"^(C\dG\d)")[0]
+    cage = labels["sheet"].str.extract(r"^(C\dG\d)")[0]
+    labels["video_id"] = cage + "D" + labels["_age"].astype(str)
     labels["behav_group"] = labels["behav"].apply(merge_behaviours)
 
     labels = labels.loc[

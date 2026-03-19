@@ -55,7 +55,7 @@ from src.dataset.tracking_postprocessing import (
     prefill_postprocessing,
     process_tracks,
 )
-from src.dataset.utils import fmt_time, get_video_fps
+from src.dataset.utils import extract_video_id, fmt_time, get_video_fps
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -131,14 +131,9 @@ def process_tracking_subdir(tracking_dir, bird_info):
 
     _save_json(tracking_dir / "tracking_issues.json", issues)
 
-    # Match subdir name to video_id (e.g. "C1G1_day28" starts with "C1G1")
-    video_id = None
-    video_birds = {}
-    for vid, birds in bird_info.items():
-        if tracking_dir.name.startswith(vid):
-            video_id = vid
-            video_birds = birds
-            break
+    # Extract video_id from subdir name (e.g. "C1G3_Test_1_day_28_..." -> "C1G3D28")
+    video_id = extract_video_id(tracking_dir.name)
+    video_birds = bird_info.get(video_id, {})
     if video_birds:
         _save_json(tracking_dir / "bird_info.json", video_birds)
         logger.info(f"  Saved bird_info.json ({len(video_birds)} bird(s))")
@@ -151,7 +146,7 @@ def process_tracking_subdir(tracking_dir, bird_info):
         postprocessing = _load_json(pp_path)
         logger.info(
             f"  tracking_postprocessing.json already exists "
-            f"({len(postprocessing)} entry/ies)"
+            f"({len(postprocessing)} entry/ies). "
         )
     else:
         postprocessing = prefill_postprocessing(issues, tracks, video_birds, fps)
