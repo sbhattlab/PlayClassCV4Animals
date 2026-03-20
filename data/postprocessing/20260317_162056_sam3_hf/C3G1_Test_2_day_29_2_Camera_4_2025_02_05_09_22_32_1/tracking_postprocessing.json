@@ -1,0 +1,68 @@
+[
+  {
+    "type": "id_switch",
+    "frame": 8882,
+    "from": null,
+    "to": 0,
+    "_time": "05:55.23"
+  },
+  {
+    "type": "id_switch",
+    "frame": 8882,
+    "from": null,
+    "to": 5,
+    "_time": "05:55.23"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "from": 9268,
+    "to": 9481,
+    "id": 1,
+    "_time": "06:10.67-06:19.19"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "from": 11572,
+    "to": 11641,
+    "id": 5,
+    "_time": "07:42.81-07:45.57"
+  },
+  {
+    "type": "id_switch",
+    "frame": 15255,
+    "from": null,
+    "to": 3,
+    "_time": "10:10.11"
+  },
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "from": 21169,
+    "to": 22530,
+    "id": 0,
+    "_time": "14:06.64-15:01.07"
+  },
+  {
+    "type": "id_match",
+    "protocol_id": 2686,
+    "description": "Black",
+    "tracking_id": null,
+    "frame": null
+  },
+  {
+    "type": "id_match",
+    "protocol_id": 2644,
+    "description": "Green lower back",
+    "tracking_id": null,
+    "frame": null
+  },
+  {
+    "type": "id_match",
+    "protocol_id": 2786,
+    "description": "White",
+    "tracking_id": null,
+    "frame": null
+  }
+]
