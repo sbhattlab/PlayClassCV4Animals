@@ -1,0 +1,45 @@
+[
+  {
+    "type": "id_switch",
+    "frame": 1396,
+    "from": null,
+    "to": 3,
+    "_time": "00:55.83"
+  },
+  {
+    "type": "id_switch",
+    "frame": 3234,
+    "from": null,
+    "to": 4,
+    "_time": "02:09.34"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "from": 20802,
+    "to": 20832,
+    "id": 4,
+    "_time": "13:51.93-13:53.13"
+  },
+  {
+    "type": "id_match",
+    "protocol_id": 2785,
+    "description": "Black",
+    "tracking_id": null,
+    "frame": null
+  },
+  {
+    "type": "id_match",
+    "protocol_id": 2678,
+    "description": "Blue right wing",
+    "tracking_id": null,
+    "frame": null
+  },
+  {
+    "type": "id_match",
+    "protocol_id": 2694,
+    "description": "Light brown/creme",
+    "tracking_id": null,
+    "frame": null
+  }
+]
