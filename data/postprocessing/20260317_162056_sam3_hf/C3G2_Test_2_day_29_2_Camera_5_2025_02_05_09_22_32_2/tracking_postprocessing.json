@@ -1,0 +1,116 @@
+[
+  {
+    "type": "id_switch",
+    "frame": 1281,
+    "from": null,
+    "to": 4,
+    "_time": "00:51.24"
+  },
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "from": 9247,
+    "to": 10695,
+    "id": 4,
+    "_time": "06:09.87-07:07.79"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "from": 10251,
+    "to": 10276,
+    "id": 0,
+    "_time": "06:50.03-06:51.03"
+  },
+  {
+    "type": "id_switch",
+    "frame": 10696,
+    "from": null,
+    "to": 5,
+    "_time": "07:07.83"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "from": 11354,
+    "to": 11397,
+    "id": 4,
+    "_time": "07:34.14-07:35.86"
+  },
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "from": 11376,
+    "to": 11585,
+    "id": 4,
+    "_time": "07:35.02-07:43.38"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "from": 11802,
+    "to": 11848,
+    "id": 4,
+    "_time": "07:52.06-07:53.90"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "from": 11879,
+    "to": 12020,
+    "id": 4,
+    "_time": "07:55.14-08:00.78"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "from": 12146,
+    "to": 12193,
+    "id": 4,
+    "_time": "08:05.82-08:07.70"
+  },
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "from": 18248,
+    "to": 19386,
+    "id": 4,
+    "_time": "12:09.90-12:55.41"
+  },
+  {
+    "type": "id_switch",
+    "frame": 19387,
+    "from": null,
+    "to": 1,
+    "_time": "12:55.45"
+  },
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "from": 19616,
+    "to": 19622,
+    "id": 0,
+    "_time": "13:04.61-13:04.85"
+  },
+  {
+    "type": "id_match",
+    "protocol_id": 2776,
+    "description": "Light brown",
+    "tracking_id": null,
+    "frame": null
+  },
+  {
+    "type": "id_match",
+    "protocol_id": 2688,
+    "description": "Grey marbled",
+    "tracking_id": null,
+    "frame": null
+  },
+  {
+    "type": "id_match",
+    "protocol_id": 2696,
+    "description": "Black lower back",
+    "tracking_id": null,
+    "frame": null
+  }
+]
