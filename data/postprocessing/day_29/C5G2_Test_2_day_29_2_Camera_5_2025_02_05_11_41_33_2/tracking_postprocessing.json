@@ -1,0 +1,236 @@
+[
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "from": 0,
+    "to": 1869,
+    "_time": "00:00.00-01:14.76"
+  },
+  {
+    "type": "trim",
+    "cause": "merged_object",
+    "from": 4560,
+    "to": 4680,
+    "id": 3,
+    "_time": "03:02.40-03:07.20"
+  },
+  {
+    "type": "trim",
+    "cause": "merged_object",
+    "from": 4944,
+    "to": 4992,
+    "id": 3,
+    "_time": "03:17.76-03:19.68"
+  },
+  {
+    "type": "trim",
+    "cause": "merged_object",
+    "from": 5112,
+    "to": 5160,
+    "id": 3,
+    "_time": "03:24.48-03:26.40"
+  },
+  {
+    "type": "trim",
+    "cause": "merged_object",
+    "from": 5292,
+    "to": 5688,
+    "id": 3,
+    "_time": "03:31.68-03:47.52"
+  },
+  {
+    "type": "trim",
+    "cause": "merged_object",
+    "from": 5760,
+    "to": 5844,
+    "id": 3,
+    "_time": "03:50.40-03:53.76"
+  },
+  {
+    "type": "trim",
+    "cause": "merged_object",
+    "from": 5844,
+    "to": 5860,
+    "id": 0,
+    "_time": "03:53.76-03:54.40"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "from": 6072,
+    "to": 6098,
+    "id": 3,
+    "_time": "04:02.89-04:03.93"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "from": 6204,
+    "to": 6310,
+    "id": 3,
+    "_time": "04:08.16-04:12.41"
+  },
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "from": 8064,
+    "to": 8136,
+    "id": 1,
+    "_time": "05:22.56-05:25.44"
+  },
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "from": 8136,
+    "to": 8170,
+    "id": 1,
+    "_time": "05:25.44-05:26.80"
+  },
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "from": 8136,
+    "to": 8170,
+    "id": 3,
+    "_time": "05:25.44-05:26.80"
+  },
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "from": 8244,
+    "to": 8436,
+    "id": 1,
+    "_time": "05:29.76-05:37.44"
+  },
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "from": 8574,
+    "to": 8578,
+    "id": 3,
+    "_time": "05:42.97-05:43.13"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "from": 10332,
+    "to": 10506,
+    "id": 3,
+    "_time": "06:53.28-07:00.25"
+  },
+  {
+    "type": "id_switch",
+    "frame": 10506,
+    "from": 3,
+    "to": 2,
+    "_time": "07:00.25"
+  },
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "from": 12720,
+    "to": 12768,
+    "id": 2,
+    "_time": "08:28.80-08:30.72"
+  },
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "from": 12768,
+    "to": 13128,
+    "id": 1,
+    "_time": "08:30.72-08:45.12"
+  },
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "from": 12840,
+    "to": 13128,
+    "id": 2,
+    "_time": "08:33.60-08:45.12"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "from": 13752,
+    "to": 15048,
+    "id": 1,
+    "_time": "09:10.08-10:01.92"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "from": 15156,
+    "to": 16560,
+    "id": 1,
+    "_time": "10:06.24-11:02.40"
+  },
+  {
+    "type": "id_switch",
+    "frame": 18008,
+    "from": 2,
+    "to": 3,
+    "_time": "12:00.34"
+  },
+  {
+    "type": "trim",
+    "cause": "merged_object",
+    "from": 19500,
+    "to": 19620,
+    "id": 0,
+    "_time": "13:00.00-13:04.80"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "from": 19512,
+    "to": 19560,
+    "id": 3,
+    "_time": "13:00.48-13:02.40"
+  },
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "from": 19512,
+    "to": 19747,
+    "id": 1,
+    "_time": "13:00.48-13:09.88"
+  },
+  {
+    "type": "trim",
+    "cause": "merged_object",
+    "from": 19824,
+    "to": 20256,
+    "id": 0,
+    "_time": "13:12.96-13:30.24"
+  },
+  {
+    "type": "trim",
+    "cause": "merged_object",
+    "from": 20760,
+    "to": 22512,
+    "id": 0,
+    "_time": "13:50.40-15:00.48"
+  },
+  {
+    "type": "id_match",
+    "protocol_id": 2787,
+    "description": "White",
+    "tracking_id": 3,
+    "frame": null
+  },
+  {
+    "type": "id_match",
+    "protocol_id": 2658,
+    "description": "Dark marbled",
+    "tracking_id": 0,
+    "frame": null
+  },
+  {
+    "type": "id_match",
+    "protocol_id": 2690,
+    "description": "Blue left wing",
+    "tracking_id": 1,
+    "frame": null
+  }
+]

@@ -1,0 +1,204 @@
+[
+  {
+    "type": "id_switch",
+    "frame": 1634,
+    "from": 3,
+    "to": 2,
+    "_time": "01:05.36"
+  },
+  {
+    "type": "id_switch",
+    "frame": 4609,
+    "from": 1,
+    "to": 2,
+    "_time": "03:04.37"
+  },
+  {
+    "type": "id_switch",
+    "frame": 4609,
+    "from": 2,
+    "to": 6,
+    "_time": "03:04.37"
+  },
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "from": 5004,
+    "to": 5040,
+    "id": 2,
+    "_time": "03:20.16-03:21.60"
+  },
+  {
+    "type": "id_switch",
+    "frame": 5040,
+    "from": 2,
+    "to": 6,
+    "_time": "03:21.60"
+  },
+  {
+    "type": "id_switch",
+    "frame": 5040,
+    "from": 6,
+    "to": 2,
+    "_time": "03:21.60"
+  },
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "from": 5376,
+    "to": 5949,
+    "id": 2,
+    "_time": "03:35.04-03:57.97"
+  },
+  {
+    "type": "id_switch",
+    "frame": 5949,
+    "from": 2,
+    "to": 7,
+    "_time": "03:57.97"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "from": 6388,
+    "to": 6444,
+    "id": 6,
+    "_time": "04:15.53-04:17.77"
+  },
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "from": 6432,
+    "to": 6480,
+    "id": 6,
+    "_time": "04:17.28-04:19.20"
+  },
+  {
+    "type": "trim",
+    "cause": "merged_object",
+    "from": 7500,
+    "to": 7564,
+    "id": 6,
+    "_time": "05:00.00-05:02.56"
+  },
+  {
+    "type": "id_switch",
+    "frame": 7787,
+    "from": 7,
+    "to": 2,
+    "_time": "05:11.50"
+  },
+  {
+    "type": "trim",
+    "cause": "merged_object",
+    "from": 7908,
+    "to": 7961,
+    "id": 3,
+    "_time": "05:16.32-05:18.44"
+  },
+  {
+    "type": "id_switch",
+    "frame": 7787,
+    "from": 6,
+    "to": 3,
+    "_time": "05:11.50"
+  },
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "from": 12048,
+    "to": 13524,
+    "id": 0,
+    "_time": "08:01.92-09:00.96"
+  },
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "from": 15550,
+    "to": 16723,
+    "id": 3,
+    "_time": "10:22.04-11:08.96"
+  },
+  {
+    "type": "id_switch",
+    "frame": 16779,
+    "from": 2,
+    "to": 3,
+    "_time": "11:11.20"
+  },
+  {
+    "type": "id_switch",
+    "frame": 16779,
+    "from": 3,
+    "to": 1,
+    "_time": "11:11.20"
+  },
+  {
+    "type": "trim",
+    "cause": "merged_object",
+    "from": 17880,
+    "to": 17928,
+    "id": 0,
+    "_time": "11:55.20-11:57.12"
+  },
+  {
+    "type": "trim",
+    "cause": "merged_object",
+    "from": 17928,
+    "to": 17988,
+    "id": 1,
+    "_time": "11:57.12-11:59.52"
+  },
+  {
+    "type": "trim",
+    "cause": "merged_object",
+    "from": 19176,
+    "to": 19584,
+    "id": 1,
+    "_time": "12:47.04-13:03.36"
+  },
+  {
+    "type": "trim",
+    "cause": "merged_object",
+    "from": 19248,
+    "to": 19704,
+    "id": 0,
+    "_time": "12:49.92-13:07.21"
+  },
+  {
+    "type": "id_switch",
+    "frame": 19704,
+    "from": 0,
+    "to": 4,
+    "_time": "13:08.21"
+  },
+  {
+    "type": "trim",
+    "cause": "merged_object",
+    "from": 20016,
+    "to": 20112,
+    "id": 1,
+    "_time": "13:20.64-13:24.48"
+  },
+  {
+    "type": "id_match",
+    "protocol_id": 2698,
+    "description": "White",
+    "tracking_id": 3,
+    "frame": null
+  },
+  {
+    "type": "id_match",
+    "protocol_id": 2772,
+    "description": "Pink right wing",
+    "tracking_id": 1,
+    "frame": null
+  },
+  {
+    "type": "id_match",
+    "protocol_id": 2666,
+    "description": "Dark marbled",
+    "tracking_id": 4,
+    "frame": null
+  }
+]
