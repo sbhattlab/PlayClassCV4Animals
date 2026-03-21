@@ -165,18 +165,20 @@ def merge_id_on_switch(tracks, id_remaps):
     return tracks
 
 
-def trim(tracks, labels, trims, fps):
+def trim(tracks, labels, trims, fps, video_id=""):
     """Drop track rows within each trim's ``[from, to]`` frame range.
 
     If ``id`` is present, only rows for that tracking ID are dropped.
     Otherwise all rows in the range are dropped (global trim) and
-    labels whose time falls within the range are also dropped.
+    labels whose time falls within the range are also dropped (scoped
+    to the current ``video_id``).
     """
     if not trims:
         return tracks, labels
 
     tracks_drop = pd.Series(False, index=tracks.index)
     labels_drop = pd.Series(False, index=labels.index)
+    video_mask = labels["video_id"] == video_id if video_id else True
 
     for t in trims:
         f_from, f_to = t["from"], t["to"]
@@ -189,7 +191,7 @@ def trim(tracks, labels, trims, fps):
             in_range = in_range & (tracks["tracking_id"] == t["id"])
             tag += f" ID {t['id']}"
         else:
-            labels_drop |= labels["time"].between(t_from, t_to)
+            labels_drop |= video_mask & labels["time"].between(t_from, t_to)
 
         tracks_drop |= in_range
 
@@ -269,6 +271,10 @@ def check_postprocessing(entries):
             problems.append(
                 f"  entry {i}: id_switch at frame {e.get('frame')} — 'to' is null"
             )
+        if etype == "id_switch" and e.get("from") is None:
+            problems.append(
+                f"  entry {i}: id_switch at frame {e.get('frame')} — 'from' is null"
+            )
         if etype == "id_match" and e.get("tracking_id") is None:
             problems.append(
                 f"  entry {i}: id_match for protocol_id {e.get('protocol_id')} "
@@ -278,7 +284,7 @@ def check_postprocessing(entries):
         raise ValueError("Postprocessing has unfilled entries:\n" + "\n".join(problems))
 
 
-def process_tracks(tracks, labels, postprocessing=None, fps=25.0):
+def process_tracks(tracks, labels, postprocessing=None, fps=25.0, video_id=""):
     entries = postprocessing or []
     check_postprocessing(entries)
 
@@ -286,7 +292,7 @@ def process_tracks(tracks, labels, postprocessing=None, fps=25.0):
     remaps = [e for e in entries if e["type"] == "id_switch"]
     id_matches = [e for e in entries if e["type"] == "id_match"]
 
-    tracks, labels = trim(tracks, labels, trims, fps)
+    tracks, labels = trim(tracks, labels, trims, fps, video_id=video_id)
     tracks = merge_id_on_switch(tracks, remaps)
     tracks = match_bird_ids(tracks, id_matches)
     return tracks, labels
