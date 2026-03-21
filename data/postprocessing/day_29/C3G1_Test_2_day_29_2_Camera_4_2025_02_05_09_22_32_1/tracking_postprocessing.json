@@ -26,13 +26,6 @@
   {
     "type": "id_switch",
     "frame": 8882,
-    "from": null,
-    "to": 0,
-    "_time": "05:55.23"
-  },
-  {
-    "type": "id_switch",
-    "frame": 8882,
     "from": 3,
     "to": 5,
     "_time": "05:55.23"

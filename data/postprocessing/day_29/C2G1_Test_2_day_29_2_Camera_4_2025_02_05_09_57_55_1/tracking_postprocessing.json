@@ -192,15 +192,15 @@
   },
   {
     "type": "id_switch",
-    "frame" : 10275,
-    "from": 3, 
+    "frame": 10275,
+    "from": 3,
     "to": 2
   },
   {
     "type": "id_switch",
-    "frame" : 10275,
-    "from": 3, 
-    "to": 2
+    "frame": 10275,
+    "from": 2,
+    "to": 3
   },
   {
     "type": "trim",
@@ -332,7 +332,6 @@
     "id": 0,
     "_time": "13:06.43-13:08.95"
   },
-  {"here" : true},
   {
     "type": "trim",
     "cause": "overlap",
