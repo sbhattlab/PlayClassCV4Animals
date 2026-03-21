@@ -1,0 +1,199 @@
+[
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "from": 244,
+    "to": 1595,
+    "id": 2,
+    "_time": "00:09.76-01:03.80"
+  },
+  {
+    "type": "id_switch",
+    "frame": 1596,
+    "from": 1,
+    "to": 2
+  },
+  {
+    "type": "id_switch",
+    "frame": 1596,
+    "from": 2,
+    "to": 1
+  },
+  {
+    "type": "trim",
+    "cause": "merged_object",
+    "from": 1998,
+    "to": 2085,
+    "id": 0,
+    "_time": "05:02.93-05:05.05"
+  },
+  {
+    "type": "trim",
+    "cause": "merged_object",
+    "from": 2310,
+    "to": 2351,
+    "id": 0,
+    "_time": "05:02.93-05:05.05"
+  },
+  {
+    "type": "trim",
+    "cause": "merged_object",
+    "from": 3957,
+    "to": 3957,
+    "id": 0,
+    "_time": "05:02.93-05:05.05"
+  },
+  {
+    "type": "id_switch",
+    "frame": 4507,
+    "from": 0,
+    "to": 2
+  },
+  {
+    "type": "id_switch",
+    "frame": 4507,
+    "from": 2,
+    "to": 0
+  },
+  {    
+    "type": "merged_object",
+    "cause": "overlap",
+    "from": 4777,
+    "to": 4777,
+    "id": 0,
+    "_time": "05:02.93-05:05.05"
+  },
+  {    
+    "type": "trim",
+    "cause": "overlap",
+    "from": 7675,
+    "to": 8234,
+    "id": 0,
+    "_time": "05:02.93-05:05.05"
+  },
+  {    
+    "type": "trim",
+    "cause": "overlap",
+    "from": 7675,
+    "to": 8084,
+    "id": 2,
+    "_time": "05:02.93-05:05.05"
+  },
+  {    
+    "type": "trim",
+    "cause": "overlap",
+    "from": 8235,
+    "to": 9105,
+    "id": 0,
+    "_time": "05:02.93-05:05.05"
+  },
+  {    
+    "type": "trim",
+    "cause": "merged_object",
+    "from": 14324,
+    "to": 14324,
+    "id": 2,
+    "_time": "05:02.93-05:05.05"
+  },
+  {    
+    "type": "trim",
+    "cause": "overlap",
+    "from": 15553,
+    "to": 15627,
+    "id": 0,
+    "_time": "05:02.93-05:05.05"
+  },
+  {    
+    "type": "trim",
+    "cause": "merged_object",
+    "from": 15838,
+    "to": 15853,
+    "id": 1,
+    "_time": "05:02.93-05:05.05"
+  },
+  {    
+    "type": "trim",
+    "cause": "overlap",
+    "from": 16676,
+    "to": 16897,
+    "id": 2,
+    "_time": "05:02.93-05:05.05"
+  },
+  {    
+    "type": "trim",
+    "cause": "overlap",
+    "from": 17061,
+    "to": 17204,
+    "id": 2,
+    "_time": "05:02.93-05:05.05"
+  },
+  {    
+    "type": "trim",
+    "cause": "overlap",
+    "from": 17288,
+    "to": 17354,
+    "id": 2,
+    "_time": "05:02.93-05:05.05"
+  },
+  {    
+    "type": "trim",
+    "cause": "overlap",
+    "from": 17383,
+    "to": 17471,
+    "id": 2,
+    "_time": "05:02.93-05:05.05"
+  },
+  {    
+    "type": "trim",
+    "cause": "overlap",
+    "from": 17604,
+    "to": 17678,
+    "id": 2,
+    "_time": "05:02.93-05:05.05"
+  },
+  {    
+    "type": "trim",
+    "cause": "overlap",
+    "from": 17746,
+    "to": 17854,
+    "id": 2,
+    "_time": "05:02.93-05:05.05"
+  },
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "from": 21404,
+    "to": 22515,
+    "id": 1,
+    "_time": "14:16.20-15:00.64"
+  },
+  {    
+    "type": "trim",
+    "cause": "overlap",
+    "from": 21976,
+    "to": 21989,
+    "id": 2,
+    "_time": "05:02.93-05:05.05"
+  },
+  {
+    "type": "id_match",
+    "protocol_id": 2780,
+    "description": "Black head",
+    "tracking_id": 0,
+    "frame": null
+  },
+  {
+    "type": "id_match",
+    "protocol_id": 2648,
+    "description": "Green head",
+    "tracking_id": 1,
+    "frame": null
+  },
+  {
+    "type": "id_match",
+    "protocol_id": 2674,
+    "description": "Dark marbled",
+    "tracking_id": 2,
+    "frame": null
+  }
+]

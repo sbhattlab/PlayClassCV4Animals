@@ -1,0 +1,35 @@
+{
+  "low_score2": {
+    "type": "low_score",
+    "start": 1267,
+    "end": 1324,
+    "start_time": 50.68,
+    "end_time": 52.96,
+    "id": 2,
+    "low_score_rows": 53,
+    "total_rows": 58,
+    "min_score": 0.66
+  },
+  "low_score0": {
+    "type": "low_score",
+    "start": 17033,
+    "end": 17105,
+    "start_time": 681.34,
+    "end_time": 684.22,
+    "id": 1,
+    "low_score_rows": 73,
+    "total_rows": 73,
+    "min_score": 0.703
+  },
+  "low_score1": {
+    "type": "low_score",
+    "start": 17396,
+    "end": 17752,
+    "start_time": 695.86,
+    "end_time": 710.1,
+    "id": 1,
+    "low_score_rows": 357,
+    "total_rows": 357,
+    "min_score": 0.144
+  }
+}

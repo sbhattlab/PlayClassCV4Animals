@@ -1,0 +1,159 @@
+[
+  {
+    "type": "id_switch",
+    "frame": 1281,
+    "from": 1,
+    "to": 4,
+    "_time": "00:51.24"
+  },
+  {
+    "type": "trim",
+    "cause": "merged_object",
+    "from": 3649,
+    "to": 3698,
+    "id": 0
+  },
+  {
+    "type": "trim",
+    "cause": "merged_object",
+    "from": 3787,
+    "to": 4196,
+    "id": 0
+  },
+  {
+    "type": "trim",
+    "cause": "merged_object",
+    "from": 5395,
+    "to": 5515,
+    "id": 2
+  },
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "from": 9247,
+    "to": 10695,
+    "id": 4,
+    "_time": "06:09.87-07:07.79"
+  },
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "from": 9247,
+    "to": 9344,
+    "id": 2,
+    "_time": "06:09.87-07:07.79"
+  },
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "from": 9403,
+    "to": 9419,
+    "id": 0,
+    "_time": "06:09.87-07:07.79"
+  },
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "from": 9804,
+    "to": 10102,
+    "id": 4,
+    "_time": "06:09.87-07:07.79"
+  },
+  {
+    "type": "id_switch",
+    "frame": 10696,
+    "from": 4,
+    "to": 5,
+    "_time": "00:51.24"
+  },
+  {
+    "type": "id_switch",
+    "frame": 10696,
+    "from": 2,
+    "to": 4,
+    "_time": "00:51.24"
+  },
+  {
+    "type": "trim",
+    "cause": "artefact_head",
+    "from": 10696,
+    "to": 10774,
+    "id": 4,
+    "_time": "07:34.14-07:35.86"
+  },
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "from": 11375,
+    "to": 11600,
+    "id": 4,
+    "_time": "07:34.14-07:35.86"
+  },
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "from": 18248,
+    "to": 19053,
+    "id": 4,
+    "_time": "12:09.90-12:55.41"
+  },
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "from": 18248,
+    "to": 19386,
+    "id": 5,
+    "_time": "12:09.90-12:55.41"
+  },
+  {
+    "type": "id_switch",
+    "frame": 19387,
+    "from": 5,
+    "to": 1,
+    "_time": "12:55.45"
+  },
+  {
+    "type": "id_switch",
+    "frame": 19387,
+    "from": 4,
+    "to": 5,
+    "_time": "12:55.45"
+  },
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "from": 19570,
+    "to": 19700,
+    "id": 1,
+    "_time": "13:04.61-13:04.85"
+  },
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "from": 19616,
+    "to": 19622,
+    "id": 0,
+    "_time": "13:04.61-13:04.85"
+  },
+  {
+    "type": "id_match",
+    "protocol_id": 2776,
+    "description": "Light brown",
+    "tracking_id": 0,
+    "frame": null
+  },
+  {
+    "type": "id_match",
+    "protocol_id": 2688,
+    "description": "Grey marbled",
+    "tracking_id": 1,
+    "frame": null
+  },
+  {
+    "type": "id_match",
+    "protocol_id": 2696,
+    "description": "Black lower back",
+    "tracking_id": 5,
+    "frame": null
+  }
+]

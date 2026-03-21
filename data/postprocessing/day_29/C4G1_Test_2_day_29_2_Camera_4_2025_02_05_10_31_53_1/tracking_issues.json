@@ -1,0 +1,59 @@
+{
+  "transition0": {
+    "type": "id_switch",
+    "start": 1396,
+    "end": 1396,
+    "start_time": 55.83,
+    "end_time": 55.83,
+    "ids_before": [
+      0,
+      1,
+      2
+    ],
+    "ids_after": [
+      0,
+      1,
+      3
+    ],
+    "lost": [
+      2
+    ],
+    "gained": [
+      3
+    ]
+  },
+  "transition1": {
+    "type": "id_switch",
+    "start": 3234,
+    "end": 3234,
+    "start_time": 129.34,
+    "end_time": 129.34,
+    "ids_before": [
+      0,
+      1,
+      3
+    ],
+    "ids_after": [
+      0,
+      1,
+      4
+    ],
+    "lost": [
+      3
+    ],
+    "gained": [
+      4
+    ]
+  },
+  "low_score0": {
+    "type": "low_score",
+    "start": 20802,
+    "end": 20832,
+    "start_time": 831.93,
+    "end_time": 833.13,
+    "id": 4,
+    "low_score_rows": 31,
+    "total_rows": 31,
+    "min_score": 0.512
+  }
+}

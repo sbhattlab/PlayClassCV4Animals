@@ -1,0 +1,153 @@
+[
+  {
+    "type": "trim",
+    "cause": "merged_object",
+    "from": 3372,
+    "to": 3485,
+    "id": 0
+  },
+  {
+    "type": "trim",
+    "cause": "merged_object",
+    "from": 3464,
+    "to": 3485,
+    "id": 1
+  },
+  {
+    "type": "trim",
+    "cause": "merged_object",
+    "from": 3781,
+    "to": 3846,
+    "id": 2
+  },
+  {
+    "type": "trim",
+    "cause": "artefact_background",
+    "from": 4452,
+    "to": 4452,
+    "id": 2
+  },
+  {
+    "type": "trim",
+    "cause": "merged_object",
+    "from": 5424,
+    "to": 5531,
+    "id": 2
+  },
+  {
+    "type": "id_switch",
+    "frame": 5940,
+    "from": 1,
+    "to": 4,
+    "_time": "03:57.60"
+  },
+  {
+    "type": "trim",
+    "cause": "merged_object",
+    "from": 6604,
+    "to": 6633,
+    "id": 4
+  },
+  {
+    "type": "trim",
+    "cause": "merged_object",
+    "from": 7109,
+    "to": 7189,
+    "id": 4
+  },
+  {
+    "type": "trim",
+    "cause": "non_subject",
+    "from": 10491,
+    "to": 15172,
+    "id": 5
+  },
+  {
+    "type": "trim",
+    "cause": "merged_object",
+    "from": 10999,
+    "to": 11019,
+    "id": 0
+  },
+  {
+    "type": "id_switch",
+    "frame": 12032,
+    "from": 4,
+    "to": 6,
+    "_time": "08:01.28"
+  },
+  {
+    "type": "trim",
+    "cause": "artefact_head",
+    "from": 13881,
+    "to": 13964,
+    "id": 0
+  },
+  {
+    "type": "trim",
+    "cause": "non_subject",
+    "from": 16655,
+    "to": 20599,
+    "id": 7
+  },
+  {
+    "type": "trim",
+    "cause": "merged_object",
+    "from": 17078,
+    "to": 17356,
+    "id": 6,
+    "_time": "12:12.20-12:13.36"
+  },
+  {
+    "type": "trim",
+    "cause": "merged_object",
+    "from": 17714,
+    "to": 17768,
+    "id": 2,
+    "_time": "12:12.20-12:13.36"
+  },
+  {
+    "type": "trim",
+    "cause": "merged_object",
+    "from": 20079,
+    "to": 21156,
+    "id": 2,
+    "_time": "13:22.88-13:23.88"
+  },
+  {
+    "type": "trim",
+    "cause": "merged_object",
+    "from": 20133,
+    "to": 20195,
+    "id": 6,
+    "_time": "13:22.88-13:23.88"
+  },
+  {
+    "type": "id_switch",
+    "frame": 20560,
+    "from": 2,
+    "to": 7,
+    "_time": "03:57.60"
+  },
+  {
+    "type": "id_match",
+    "protocol_id": 2778,
+    "description": "Light brown/grey",
+    "tracking_id": 0,
+    "frame": null
+  },
+  {
+    "type": "id_match",
+    "protocol_id": 2782,
+    "description": "Dark marbled",
+    "tracking_id": 6,
+    "frame": null
+  },
+  {
+    "type": "id_match",
+    "protocol_id": 2771,
+    "description": "Pink upper back",
+    "tracking_id": 7,
+    "frame": null
+  }
+]

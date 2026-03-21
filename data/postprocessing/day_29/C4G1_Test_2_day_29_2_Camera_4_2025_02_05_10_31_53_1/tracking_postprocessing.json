@@ -1,0 +1,182 @@
+[
+  {
+    "type": "id_switch",
+    "frame": 1396,
+    "from": 2,
+    "to": 3,
+    "_time": "00:55.83"
+  },
+  {
+    "type": "trim",
+    "cause": "merged_object",
+    "from": 2782,
+    "to": 2854,
+    "id": 1,
+    "_time": "13:51.93-13:53.13"
+  },
+  {
+    "type": "trim",
+    "cause": "merged_object",
+    "from": 2909,
+    "to": 3128,
+    "id": 1,
+    "_time": "13:51.93-13:53.13"
+  },
+  {
+    "type": "id_switch",
+    "frame": 3234,
+    "from": 0,
+    "to": 1,
+    "_time": "02:09.34"
+  },
+  {
+    "type": "id_switch",
+    "frame": 3234,
+    "from": 3,
+    "to": 4,
+    "_time": "02:09.34"
+  },
+  {
+    "type": "id_switch",
+    "frame": 3234,
+    "from": 1,
+    "to": 0,
+    "_time": "02:09.34"
+  },
+  {
+    "type": "trim",
+    "cause": "merged_object",
+    "from": 3312,
+    "to": 3365,
+    "id": 0
+  },
+  {
+    "type": "trim",
+    "cause": "merged_object",
+    "from": 3463,
+    "to": 3518,
+    "id": 4
+  },
+  {
+    "type": "trim",
+    "cause": "artefact_head",
+    "from": 3840,
+    "to": 4059,
+    "id": 4
+  },
+  {
+    "type": "trim",
+    "cause": "artefact_head",
+    "from": 9606,
+    "to": 9726,
+    "id": 4
+  },
+  {
+    "type": "trim",
+    "cause": "merged_object",
+    "from": 10121,
+    "to": 10829,
+    "id": 1
+  },
+  {
+    "type": "trim",
+    "cause": "merged_object",
+    "from": 11101,
+    "to": 11286,
+    "id": 1
+  },
+  {
+    "type": "trim",
+    "cause": "merged_object",
+    "from": 11961,
+    "to": 12045,
+    "id": 1
+  },
+  {
+    "type": "trim",
+    "cause": "merged_object",
+    "from": 12523,
+    "to": 12594,
+    "id": 0
+  },
+  {
+    "type": "trim",
+    "cause": "non_subject",
+    "from": 12595,
+    "to": 12676,
+    "id": 0
+  },
+  {
+    "type": "trim",
+    "cause": "merged_object",
+    "from": 13459,
+    "to": 13634,
+    "id": 0
+  },
+  {
+    "type": "trim",
+    "cause": "merged_object",
+    "from": 13616,
+    "to": 13634,
+    "id": 1
+  },
+  {
+    "type": "trim",
+    "cause": "merged_object",
+    "from": 14306,
+    "to": 14445,
+    "id": 0
+  },
+  {
+    "type": "trim",
+    "cause": "merged_object",
+    "from": 14442,
+    "to": 14487,
+    "id": 1
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "from": 21032,
+    "to": 21081,
+    "id": 0,
+    "_time": "13:51.93-13:53.13"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "from": 21707,
+    "to": 21823,
+    "id": 0,
+    "_time": "13:51.93-13:53.13"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "from": 22053,
+    "to": 22141,
+    "id": 0,
+    "_time": "13:51.93-13:53.13"
+  },
+  {
+    "type": "id_match",
+    "protocol_id": 2785,
+    "description": "Black",
+    "tracking_id": 1,
+    "frame": null
+  },
+  {
+    "type": "id_match",
+    "protocol_id": 2678,
+    "description": "Blue right wing",
+    "tracking_id": 4,
+    "frame": null
+  },
+  {
+    "type": "id_match",
+    "protocol_id": 2694,
+    "description": "Light brown/creme",
+    "tracking_id": 0,
+    "frame": null
+  }
+]

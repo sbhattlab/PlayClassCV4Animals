@@ -1,0 +1,344 @@
+{
+  "overlap5": {
+    "type": "overlap",
+    "start": 2409,
+    "end": 3157,
+    "start_time": 96.34,
+    "end_time": 126.25,
+    "ids": [
+      1,
+      2
+    ]
+  },
+  "transition0": {
+    "type": "id_switch",
+    "start": 3229,
+    "end": 3229,
+    "start_time": 129.13,
+    "end_time": 129.13,
+    "ids_before": [
+      0,
+      1,
+      2
+    ],
+    "ids_after": [
+      0,
+      2,
+      3
+    ],
+    "lost": [
+      1
+    ],
+    "gained": [
+      3
+    ]
+  },
+  "overlap6": {
+    "type": "overlap",
+    "start": 6813,
+    "end": 6853,
+    "start_time": 272.46,
+    "end_time": 274.06,
+    "ids": [
+      2,
+      3
+    ]
+  },
+  "overlap7": {
+    "type": "overlap",
+    "start": 9020,
+    "end": 9776,
+    "start_time": 360.72,
+    "end_time": 390.96,
+    "ids": [
+      2,
+      3
+    ]
+  },
+  "low_score0": {
+    "type": "low_score",
+    "start": 9470,
+    "end": 9558,
+    "start_time": 378.72,
+    "end_time": 382.24,
+    "id": 0,
+    "low_score_rows": 67,
+    "total_rows": 89,
+    "min_score": 0.734
+  },
+  "low_score1": {
+    "type": "low_score",
+    "start": 9593,
+    "end": 9662,
+    "start_time": 383.64,
+    "end_time": 386.4,
+    "id": 0,
+    "low_score_rows": 69,
+    "total_rows": 70,
+    "min_score": 0.68
+  },
+  "overlap8": {
+    "type": "overlap",
+    "start": 9911,
+    "end": 10249,
+    "start_time": 396.36,
+    "end_time": 409.87,
+    "ids": [
+      2,
+      3
+    ]
+  },
+  "low_score2": {
+    "type": "low_score",
+    "start": 9925,
+    "end": 10155,
+    "start_time": 396.92,
+    "end_time": 406.11,
+    "id": 0,
+    "low_score_rows": 231,
+    "total_rows": 231,
+    "min_score": 0.025
+  },
+  "overlap9": {
+    "type": "overlap",
+    "start": 13259,
+    "end": 14927,
+    "start_time": 530.25,
+    "end_time": 596.95,
+    "ids": [
+      2,
+      3
+    ]
+  },
+  "low_score6": {
+    "type": "low_score",
+    "start": 15371,
+    "end": 15405,
+    "start_time": 614.71,
+    "end_time": 616.07,
+    "id": 3,
+    "low_score_rows": 27,
+    "total_rows": 35,
+    "min_score": 0.754
+  },
+  "overlap10": {
+    "type": "overlap",
+    "start": 19665,
+    "end": 19728,
+    "start_time": 786.43,
+    "end_time": 788.95,
+    "ids": [
+      2,
+      3
+    ]
+  },
+  "low_score3": {
+    "type": "low_score",
+    "start": 19667,
+    "end": 19703,
+    "start_time": 786.51,
+    "end_time": 787.95,
+    "id": 2,
+    "low_score_rows": 21,
+    "total_rows": 37,
+    "min_score": 0.699
+  },
+  "overlap11": {
+    "type": "overlap",
+    "start": 19834,
+    "end": 19919,
+    "start_time": 793.19,
+    "end_time": 796.59,
+    "ids": [
+      2,
+      3
+    ]
+  },
+  "low_score4": {
+    "type": "low_score",
+    "start": 19948,
+    "end": 20006,
+    "start_time": 797.75,
+    "end_time": 800.07,
+    "id": 2,
+    "low_score_rows": 57,
+    "total_rows": 59,
+    "min_score": 0.447
+  },
+  "overlap12": {
+    "type": "overlap",
+    "start": 19982,
+    "end": 20021,
+    "start_time": 799.11,
+    "end_time": 800.67,
+    "ids": [
+      2,
+      3
+    ]
+  },
+  "overlap13": {
+    "type": "overlap",
+    "start": 20084,
+    "end": 20122,
+    "start_time": 803.19,
+    "end_time": 804.71,
+    "ids": [
+      2,
+      3
+    ]
+  },
+  "overlap14": {
+    "type": "overlap",
+    "start": 20181,
+    "end": 20446,
+    "start_time": 807.07,
+    "end_time": 817.67,
+    "ids": [
+      2,
+      3
+    ]
+  },
+  "low_score5": {
+    "type": "low_score",
+    "start": 20214,
+    "end": 20342,
+    "start_time": 808.39,
+    "end_time": 813.51,
+    "id": 2,
+    "low_score_rows": 129,
+    "total_rows": 129,
+    "min_score": 0.613
+  },
+  "overlap0": {
+    "type": "overlap",
+    "start": 20251,
+    "end": 20252,
+    "start_time": 809.87,
+    "end_time": 809.91,
+    "ids": [
+      0,
+      2
+    ]
+  },
+  "overlap15": {
+    "type": "overlap",
+    "start": 20658,
+    "end": 20740,
+    "start_time": 826.14,
+    "end_time": 829.42,
+    "ids": [
+      2,
+      3
+    ]
+  },
+  "overlap1": {
+    "type": "overlap",
+    "start": 20775,
+    "end": 20990,
+    "start_time": 830.82,
+    "end_time": 839.42,
+    "ids": [
+      0,
+      2
+    ]
+  },
+  "low_score7": {
+    "type": "low_score",
+    "start": 21172,
+    "end": 21282,
+    "start_time": 846.7,
+    "end_time": 851.1,
+    "id": 3,
+    "low_score_rows": 101,
+    "total_rows": 111,
+    "min_score": 0.621
+  },
+  "low_score8": {
+    "type": "low_score",
+    "start": 21349,
+    "end": 21741,
+    "start_time": 853.78,
+    "end_time": 869.46,
+    "id": 3,
+    "low_score_rows": 393,
+    "total_rows": 393,
+    "min_score": 0.543
+  },
+  "overlap3": {
+    "type": "overlap",
+    "start": 21708,
+    "end": 21708,
+    "start_time": 868.14,
+    "end_time": 868.14,
+    "ids": [
+      0,
+      3
+    ]
+  },
+  "low_score9": {
+    "type": "low_score",
+    "start": 21920,
+    "end": 21991,
+    "start_time": 876.61,
+    "end_time": 879.45,
+    "id": 3,
+    "low_score_rows": 59,
+    "total_rows": 72,
+    "min_score": 0.691
+  },
+  "low_score10": {
+    "type": "low_score",
+    "start": 22017,
+    "end": 22135,
+    "start_time": 880.49,
+    "end_time": 885.21,
+    "id": 3,
+    "low_score_rows": 119,
+    "total_rows": 119,
+    "min_score": 0.605
+  },
+  "low_score11": {
+    "type": "low_score",
+    "start": 22216,
+    "end": 22268,
+    "start_time": 888.45,
+    "end_time": 890.53,
+    "id": 3,
+    "low_score_rows": 53,
+    "total_rows": 53,
+    "min_score": 0.602
+  },
+  "overlap4": {
+    "type": "overlap",
+    "start": 22297,
+    "end": 22524,
+    "start_time": 891.69,
+    "end_time": 900.77,
+    "ids": [
+      0,
+      3
+    ]
+  },
+  "overlap2": {
+    "type": "overlap",
+    "start": 22423,
+    "end": 22425,
+    "start_time": 896.73,
+    "end_time": 896.81,
+    "ids": [
+      0,
+      2
+    ]
+  },
+  "overlap16": {
+    "type": "overlap",
+    "start": 22423,
+    "end": 22427,
+    "start_time": 896.73,
+    "end_time": 896.89,
+    "ids": [
+      2,
+      3
+    ]
+  }
+}
