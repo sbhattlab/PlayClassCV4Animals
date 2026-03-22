@@ -127,7 +127,7 @@ Auto-generated on each run, saved to `run_dir/visualizations/`: ID timeline (tra
 
 Extracts handcrafted features from tracking masks. All functions are vectorized (no row-by-row iteration):
 
-- **`extract_spatial_features`**: Batch `pycocotools.mask.area()` for mask areas, numpy array math for bbox metrics, batch `mask_util.decode()` + `scipy.ndimage.center_of_mass` for centroids. Masks grouped by `size` (pycocotools requirement) and chunked at 500 to cap memory.
+- **`extract_spatial_features`**: Batch `pycocotools.mask.area()` for mask areas, numpy array math for bbox metrics, batch `mask_util.decode()` + `scipy.ndimage.center_of_mass` for centroids. Masks grouped by `size` (pycocotools requirement) and chunked at 256 to cap memory.
 - **`extract_temporal_features`**: `pandas.groupby().diff()` / `.shift()` for frame-to-frame deltas.
 - **`extract_pairwise_features`**: Numpy broadcasting for `(M, M)` distance matrices per frame.
 - **`summarize_features_by_window`**: Single `groupby().agg()` call with `[mean, std, min, max, median]`.

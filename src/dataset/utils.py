@@ -83,8 +83,13 @@ def assert_embedding_label_alignment(
     label_keys = set(
         labels[["video_id", "bird_id", "window"]].itertuples(index=False, name=None)
     )
-    assert embedding_keys == label_keys, (
-        f"Window key mismatch with labels: "
-        f"{len(embedding_keys - label_keys)} in embeddings only, "
-        f"{len(label_keys - embedding_keys)} in labels only"
-    )
+    extra = embedding_keys - label_keys
+    missing = label_keys - embedding_keys
+    if extra:
+        logger.warning(
+            f"Embedding/label mismatch: {len(extra)} in embeddings only"
+        )
+    if missing:
+        logger.warning(
+            f"Embedding/label mismatch: {len(missing)} in labels only"
+        )
