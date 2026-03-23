@@ -78,6 +78,7 @@ test_labels = "python -m pytest tests/test_labels.py -v"
 test_features = "python -m pytest tests/test_features.py -v"
 test_postprocessing = "python -m pytest tests/test_tracking_postprocessing.py -v"
 test_post_build = "python -m pytest tests/test_post_build_dataset.py -v"
+test_postprocessing_smoke = "python -m tests.test_postprocessing_smoke"
 
 # ======= Embeddings dependencies ======
 [feature.embeddings.pypi-dependencies]
