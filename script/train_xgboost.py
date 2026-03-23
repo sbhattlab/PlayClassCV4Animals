@@ -78,6 +78,7 @@ def main():
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     run_dir = Path(DEFAULT_CHECKPOINT_DIR) / f"{timestamp}_xgboost"
     run_dir.mkdir(parents=True, exist_ok=True)
+    logger.add(run_dir / "train.log", level="INFO")
     json.dump(vars(args), (run_dir / "cfg.json").open("w"), default=str, indent=2)
 
     splitter = LOCO() if args.cv == "loco" else LOVO()
