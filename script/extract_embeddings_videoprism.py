@@ -41,7 +41,7 @@ import tensorflow as tf
 tf.config.set_visible_devices([], "GPU")
 tf.config.set_visible_devices([], "TPU")
 
-from src._config import DEFAULT_DATASET_DIR, DEFAULT_TRACKING_DIR
+from src._config import DEFAULT_DATASET_DIR, DEFAULT_TRACKING_DIR, DEFAULT_VIDEO_DIR
 from src.dataset.crops import (
     CROP_MODES,
     compute_union_bbox,
@@ -61,7 +61,7 @@ def parse_args():
     )
     parser.add_argument("--dataset-dir", type=Path, default=DEFAULT_DATASET_DIR)
     parser.add_argument("--tracking-dir", type=Path, default=DEFAULT_TRACKING_DIR)
-    parser.add_argument("--video-dir", type=Path, nargs="+", required=True)
+    parser.add_argument("--video-dir", type=Path, nargs="+", default=None, help=f"Directory(ies) with .mp4 files (default: all subdirs of {DEFAULT_VIDEO_DIR}/)")
     parser.add_argument("--device", type=int, default=0)
     parser.add_argument(
         "--model-name",
@@ -257,6 +257,12 @@ def main():
 
     # Set JAX device
     os.environ["CUDA_VISIBLE_DEVICES"] = str(args.device)
+
+    # Resolve video dirs
+    if args.video_dir is None:
+        root = Path(DEFAULT_VIDEO_DIR)
+        args.video_dir = sorted(p for p in root.iterdir() if p.is_dir())
+        logger.info(f"Auto-discovered {len(args.video_dir)} video dir(s) under {root}")
 
     tracks_path = args.dataset_dir / "tracks.parquet"
     if not tracks_path.exists():

@@ -38,7 +38,7 @@ from PIL import Image
 from tqdm import tqdm
 from transformers import AutoModel, AutoVideoProcessor
 
-from src._config import DEFAULT_DATASET_DIR, DEFAULT_TRACKING_DIR
+from src._config import DEFAULT_DATASET_DIR, DEFAULT_TRACKING_DIR, DEFAULT_VIDEO_DIR
 from src.dataset.crops import CROP_MODES, compute_union_origin, crop_frame
 from src.dataset.utils import assert_embedding_label_alignment, resolve_video_path
 from src.io import load_video_frames_torchcodec as load_video_frames
@@ -63,7 +63,8 @@ def parse_args():
         "--video-dir",
         type=Path,
         nargs="+",
-        required=True,
+        default=None,
+        help=f"Directory(ies) with .mp4 files (default: all subdirs of {DEFAULT_VIDEO_DIR}/)",
     )
     parser.add_argument(
         "--model-name",
@@ -298,6 +299,12 @@ def main():
     if not tracks_path.exists():
         logger.error(f"tracks.parquet not found in {args.dataset_dir}")
         sys.exit(1)
+
+    # Resolve video dirs
+    if args.video_dir is None:
+        root = Path(DEFAULT_VIDEO_DIR)
+        args.video_dir = sorted(p for p in root.iterdir() if p.is_dir())
+        logger.info(f"Auto-discovered {len(args.video_dir)} video dir(s) under {root}")
 
     load_cols = ["video_id", "bird_id", "frame_idx", "window", "bbox"]
     tracks = pd.read_parquet(tracks_path, columns=load_cols)
