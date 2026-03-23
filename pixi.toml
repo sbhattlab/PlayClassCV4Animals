@@ -95,7 +95,7 @@ torchcodec = "==0.9"
 scikit-learn = ">=1.7.0"
 
 [feature.embeddings.tasks]
-extract_embeddings = "python -m script.extract_embeddings"
+extract_embeddings_dinov3 = "python -m script.extract_embeddings_dinov3"
 extract_embeddings_vjepa2 = "python -m script.extract_embeddings_vjepa2"
 test_crops = "python -m tests.test_crop_smoke --video-dir data/video/batch"
 
