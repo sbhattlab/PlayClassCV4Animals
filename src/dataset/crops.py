@@ -10,15 +10,13 @@ import numpy as np
 CROP_MODES = ("bbox", "plain256", "plain384", "union512", "darken512", "roi512")
 
 
-def compute_union_bbox(bboxes, bbox_scale=1.0):
+def compute_union_bbox(bboxes):
     """Compute the union bounding box across all frames in a window.
 
     Parameters
     ----------
     bboxes : array-like, shape (N, 4)
         Bounding boxes ``[x1, y1, x2, y2]``.
-    bbox_scale : float
-        Optional scale factor applied to the union bbox.
 
     Returns
     -------
@@ -28,11 +26,6 @@ def compute_union_bbox(bboxes, bbox_scale=1.0):
     bboxes = np.asarray(bboxes)
     x1, y1 = bboxes[:, 0].min(), bboxes[:, 1].min()
     x2, y2 = bboxes[:, 2].max(), bboxes[:, 3].max()
-    if bbox_scale != 1.0:
-        cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
-        w, h = (x2 - x1) * bbox_scale, (y2 - y1) * bbox_scale
-        x1, y1 = cx - w / 2, cy - h / 2
-        x2, y2 = cx + w / 2, cy + h / 2
     return int(x1), int(y1), int(x2), int(y2)
 
 
@@ -58,7 +51,7 @@ def compute_union_origin(bboxes, frame_h, frame_w, crop_size=512):
     return ox, oy
 
 
-def crop_frame(frame_np, bbox, crop_mode, *, bbox_scale=1.0, union_origin=None, darken_factor=0.4, patch_grid=16):
+def crop_frame(frame_np, bbox, crop_mode, *, union_origin=None, darken_factor=0.4, patch_grid=16):
     """Crop a single frame according to the specified crop mode.
 
     Parameters
@@ -69,8 +62,6 @@ def crop_frame(frame_np, bbox, crop_mode, *, bbox_scale=1.0, union_origin=None, 
         ``[x1, y1, x2, y2]`` bounding box for the object in this frame.
     crop_mode : str
         One of :data:`CROP_MODES`.
-    bbox_scale : float
-        Scale factor for ``bbox`` mode (1.0 = tight crop).
     union_origin : tuple[int, int] or None
         ``(ox, oy)`` from :func:`compute_union_origin`. Required for
         ``union512``, ``darken512``, and ``roi512``.
@@ -142,11 +133,6 @@ def crop_frame(frame_np, bbox, crop_mode, *, bbox_scale=1.0, union_origin=None, 
         raise ValueError(f"Unknown crop mode: {crop_mode!r}")
 
     # Default: bbox mode
-    if bbox_scale != 1.0:
-        cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
-        bw, bh = (x2 - x1) * bbox_scale, (y2 - y1) * bbox_scale
-        x1, y1 = int(cx - bw / 2), int(cy - bh / 2)
-        x2, y2 = int(cx + bw / 2), int(cy + bh / 2)
     x1, y1 = max(0, x1), max(0, y1)
     x2, y2 = min(w, x2), min(h, y2)
     if x2 <= x1 or y2 <= y1:

@@ -70,7 +70,6 @@ def parse_args():
     )
     parser.add_argument("--num-frames", type=int, default=16)
     parser.add_argument("--frame-size", type=int, default=288)
-    parser.add_argument("--bbox-scale", type=float, default=1.0)
     parser.add_argument(
         "--crop-mode",
         type=str,
@@ -107,8 +106,6 @@ def _build_output_name(args):
         parts.append("temporal")
     if args.crop_mode != "bbox":
         parts.append(args.crop_mode)
-    if args.bbox_scale != 1.0:
-        parts.append(str(int(args.bbox_scale * 100)))
     return "_".join(parts) + ".pt"
 
 
@@ -118,7 +115,6 @@ def extract_videoprism_embeddings(
     forward_fn,
     num_frames=16,
     frame_size=288,
-    bbox_scale=1.0,
     crop_mode="bbox",
     raw=False,
     temporal=False,
@@ -159,7 +155,7 @@ def extract_videoprism_embeddings(
                 fh, fw = frames[first_local].shape[:2]
                 union_origin = compute_union_origin(all_bboxes, fh, fw)
         elif crop_mode == "union":
-            union_bbox = compute_union_bbox(all_bboxes, bbox_scale=bbox_scale)
+            union_bbox = compute_union_bbox(all_bboxes)
 
         # Process all frames via non-overlapping clips of num_frames
         n = len(group_rows)
@@ -188,7 +184,6 @@ def extract_videoprism_embeddings(
                         frame_np,
                         row["bbox"],
                         crop_mode,
-                        bbox_scale=bbox_scale,
                         union_origin=union_origin,
                     )
                     if extra is not None and "patch_bounds" in extra:
@@ -304,7 +299,6 @@ def main():
             forward_fn,
             num_frames=args.num_frames,
             frame_size=args.frame_size,
-            bbox_scale=args.bbox_scale,
             crop_mode=args.crop_mode,
             raw=args.raw,
             temporal=args.temporal,

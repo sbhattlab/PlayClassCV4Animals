@@ -235,14 +235,13 @@ pixi run -e embeddings python -m script.extract_embeddings \
     --video-dir data/video --device 0 \
     --model-name facebook/dinov3-vitb16-pretrain-lvd1689m
 
-# Custom resolution / bbox scale / LoRA adapter
+# Custom resolution
 pixi run -e embeddings python -m script.extract_embeddings \
     --video-dir data/video --device 0 \
-    --resolution 256 --bbox-scale 1.25 \
-    --lora-weights data/eval/<timestamp>_finetune/lora_adapter
+    --resolution 256
 ```
 
-Output filename encodes variant: `embeddings.pt` (default), `embeddings_vitb.pt`, `embeddings_125.pt`, `embeddings_r256.pt`, `embeddings_lora.pt`. Dict keyed by `(video_id, bird_id, window)` with `Tensor(F_w, D)` values.
+Output filename encodes variant: `embeddings.pt` (default), `embeddings_vitb.pt`, `embeddings_r256.pt`. Dict keyed by `(video_id, bird_id, window)` with `Tensor(F_w, D)` values.
 
 ### Step 3b: Video embeddings (`extract_embeddings_vjepa2` / `extract_embeddings_videoprism`)
 
@@ -289,9 +288,6 @@ pixi run -e classifier train --model temporal_mlp --input embeddings --exclude s
 # Temporal hybrid mode (temporal embeddings + flat windowed features)
 pixi run -e classifier train --model temporal_cnn2 --input features+embeddings --exclude social
 
-# LoRA-finetuned embeddings
-pixi run -e classifier train --model mlp --input features+embeddings_lora --exclude social
-
 # Dry run (first fold, 1 batch, no checkpoints)
 pixi run -e classifier train --model mlp --input features --dry-run
 ```
@@ -320,7 +316,7 @@ data/eval/20260304_174946_mlp/
 | `temporal_mlp` | `TemporalMLP` | Yes (segment-pooled, gated attention) |
 | `temporal_cnn2` | `TemporalCNNv2` | Yes (GELU bottleneck + single conv) |
 
-Input is specified separately via `--input`: `features`, `embeddings`, `embeddings_250`, `features+embeddings`, `features+embeddings_lora`, etc. Any `embeddings[_variant]` maps to `{name}.pt` in the dataset dir. Multiple embedding files can be concatenated: `features+embeddings+embeddings_union512` loads both and concatenates along the feature dimension (multi-scale). Non-temporal models mean-pool embeddings and use windowed feature stats; temporal models segment-pool embeddings and use binned feature tensors. Temporal models also support **hybrid mode**: e.g. `--model temporal_mlp --input features+embeddings` passes temporal embeddings through the backbone and concatenates flat windowed features before the classification head.
+Input is specified separately via `--input`: `features`, `embeddings`, `embeddings_250`, `features+embeddings`, etc. Any `embeddings[_variant]` maps to `{name}.pt` in the dataset dir. Multiple embedding files can be concatenated: `features+embeddings+embeddings_union512` loads both and concatenates along the feature dimension (multi-scale). Non-temporal models mean-pool embeddings and use windowed feature stats; temporal models segment-pool embeddings and use binned feature tensors. Temporal models also support **hybrid mode**: e.g. `--model temporal_mlp --input features+embeddings` passes temporal embeddings through the backbone and concatenates flat windowed features before the classification head.
 
 Additional training args: `--dropout` (override model dropout), `--d-hidden` (override hidden dim), `--label-smoothing` (CE label smoothing), `--feature-dropout` (dropout on flat features only), `--n-segments` (temporal bins, default 12).
 
@@ -350,7 +346,6 @@ Training config: 5 fixed epochs, inv-sqrt class weights, label smoothing 0.1, be
 - **Best result: 0.737 pooled F1** — TemporalCNNv2 (GELU bottleneck + single conv) on multi-scale DINOv3 embeddings (tight bbox + union512 crops) with K=24 temporal segments.
 - **Multi-scale embeddings help**: concatenating tight bbox CLS + 512-crop CLS adds spatial context that improves worm detection. 512 alone is terrible (0.569) but complementary with tight bbox.
 - **Dropout 0.0 is optimal**: models were over-regularized at default dropout=0.3. Removing dropout gained +0.010 pooled.
-- **LoRA fine-tuning doesn't help**: LOVO LoRA (0.699) matches frozen embeddings. Biased LoRA gains (0.766) were entirely data leakage.
 - **Video models (V-JEPA 2, VideoPrism) underperform DINOv3**: domain shift from full-scene pretraining to small bbox crops. Best video model: V-JEPA 2 at 0.722 pooled (SSv2 pooler).
 - **Raw token classifiers (PriVi, attentive pooler) fail**: too many tokens, too few training samples.
 - **Worm class is kinematically incoherent**: mixes stationary pecking (looks like none) and active running/chasing (looks like locomotor).

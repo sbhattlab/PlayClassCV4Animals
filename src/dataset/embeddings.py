@@ -21,7 +21,6 @@ def extract_embeddings(
     processor,
     *,
     batch_size: int = 32,
-    bbox_scale: float = 1.0,
     raw: bool = False,
     n_sample_frames: int | None = None,
     crop_mode: str = "bbox",
@@ -42,9 +41,6 @@ def extract_embeddings(
         DINOv3 image processor.
     batch_size : int
         Number of crops to process per forward pass.
-    bbox_scale : float
-        Scale factor for the bounding box crop. 1.0 uses the original bbox;
-        1.25 adds 25% padding on each side (clamped to frame bounds).
     crop_mode : str
         One of ``'bbox'``, ``'plain256'``, ``'union512'``, ``'darken512'``,
         ``'roi512'``. See :mod:`src.dataset.crops` for details.
@@ -113,7 +109,6 @@ def extract_embeddings(
                 frames[local_idx],
                 row["bbox"],
                 crop_mode,
-                bbox_scale=bbox_scale,
                 union_origin=union_origin,
             )
             if crop is None:
@@ -220,7 +215,6 @@ def extract_bodypart_embeddings(
     processor,
     *,
     batch_size: int = 32,
-    bbox_scale: float = 1.0,
     n_sample_frames: int | None = None,
 ) -> dict[tuple, torch.Tensor]:
     """Extract body-part-pooled DINOv3 embeddings (tip_a + center + tip_b).
@@ -281,12 +275,6 @@ def extract_bodypart_embeddings(
 
             bbox = row["bbox"]
             x1, y1, x2, y2 = int(bbox[0]), int(bbox[1]), int(bbox[2]), int(bbox[3])
-
-            if bbox_scale != 1.0:
-                cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
-                bw, bh = (x2 - x1) * bbox_scale, (y2 - y1) * bbox_scale
-                x1, y1 = int(cx - bw / 2), int(cy - bh / 2)
-                x2, y2 = int(cx + bw / 2), int(cy + bh / 2)
 
             frame_np = frames[local_idx]
             h, w = frame_np.shape[:2]
