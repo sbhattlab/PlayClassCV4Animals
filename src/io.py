@@ -6,7 +6,6 @@ from pathlib import Path
 
 import cv2
 from loguru import logger
-from torchcodec.decoders import VideoDecoder
 
 
 def get_video_metadata(video_path: str | Path) -> tuple[float, int]:
@@ -32,6 +31,8 @@ def load_video_frames_torchcodec(
 
     When *device* is ``"cuda"``, decoding is offloaded to NVDEC hardware.
     """
+    from torchcodec.decoders import VideoDecoder
+
     key = str(video_path)
     if key not in _torchcodec_decoder_cache:
         logger.info(
