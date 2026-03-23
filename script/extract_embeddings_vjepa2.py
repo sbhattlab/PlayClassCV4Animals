@@ -110,6 +110,12 @@ def parse_args():
         default=None,
         help="Output filename (default: auto-generated from model name)",
     )
+    parser.add_argument(
+        "--cid-checkpoint",
+        type=Path,
+        default=None,
+        help="Path to CID checkpoint (encoder_only.pt) to load adapted weights",
+    )
     return parser.parse_args()
 
 
@@ -132,6 +138,8 @@ def _build_output_name(args):
             parts.append("vith")
     else:
         parts = ["embeddings", "video"]
+    if hasattr(args, "cid_checkpoint") and args.cid_checkpoint:
+        parts.append("cid")
     if args.num_frames != 64:
         parts.append(f"f{args.num_frames}")
     if args.crop_mode != "bbox":
@@ -141,7 +149,6 @@ def _build_output_name(args):
     elif args.temporal:
         parts.append("temporal")
     return "_".join(parts) + ".pt"
-
 
 
 # ---- V-JEPA 2.1 torch.hub support ----------------------------------------
@@ -213,12 +220,18 @@ def extract_video_embeddings(
 
         # Pre-compute union origin for union-based crop modes
         union_origin = None
-        if crop_mode in ("union512", "darken512", "roi512"):
+        _prefix = next(
+            (p for p in ("union", "darken", "roi") if crop_mode.startswith(p)), None
+        )
+        if _prefix is not None:
+            _crop_sz = int(crop_mode.removeprefix(_prefix))
             first_local = int(group_rows.iloc[0]["frame_idx"]) - min_frame
             if first_local < len(frames):
                 fh, fw = frames[first_local].shape[:2]
                 all_bboxes = group_rows["bbox"].tolist()
-                union_origin = compute_union_origin(all_bboxes, fh, fw)
+                union_origin = compute_union_origin(
+                    all_bboxes, fh, fw, crop_size=_crop_sz
+                )
 
         # Process all frames via non-overlapping clips of num_frames
         n = len(group_rows)
@@ -317,13 +330,15 @@ def main():
 
     if _is_hub_model(args.model_name):
         # V-JEPA 2.1 via torch.hub (no HF checkpoint yet).
-        # Temporarily evict our src package from sys.modules so torch.hub
-        # can import the hub repo's own src/ without collision.
         processor = AutoVideoProcessor.from_pretrained("facebook/vjepa2-vitl-fpc64-256")
         encoder, _predictor = torch.hub.load("facebookresearch/vjepa2", args.model_name)
         del _predictor
+        if args.cid_checkpoint:
+            state_dict = torch.load(args.cid_checkpoint, map_location="cpu")
+            encoder.load_state_dict(state_dict["ema_encoder"], strict=True)
+            logger.info(f"Loaded CID checkpoint from {args.cid_checkpoint}")
         model = _VJEPA21Wrapper(encoder, device)
-        d_model = 1024  # ViT-L hidden size
+        d_model = encoder.embed_dim
     else:
         processor = AutoVideoProcessor.from_pretrained(args.model_name)
         model = AutoModel.from_pretrained(args.model_name, dtype=torch.bfloat16)
