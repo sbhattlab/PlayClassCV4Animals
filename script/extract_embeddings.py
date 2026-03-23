@@ -19,7 +19,7 @@ import torch
 from loguru import logger
 from transformers import AutoImageProcessor, AutoModel
 
-from src._config import DEFAULT_DATASET_DIR, DEFAULT_TRACKING_DIR
+from src._config import DEFAULT_DATASET_DIR, DEFAULT_TRACKING_DIR, DEFAULT_VIDEO_DIR
 from src.dataset.embeddings import extract_bodypart_embeddings, extract_embeddings
 from src.dataset.utils import assert_embedding_label_alignment, resolve_video_path
 from src.memory import free_gpu_memory
@@ -45,8 +45,8 @@ def parse_args():
         "--video-dir",
         type=Path,
         nargs="+",
-        required=True,
-        help="Directory(ies) with .mp4 files matching tracking subdir names",
+        default=None,
+        help=f"Directory(ies) with .mp4 files (default: all subdirs of {DEFAULT_VIDEO_DIR}/)",
     )
     parser.add_argument(
         "--batch-size",
@@ -133,6 +133,12 @@ def main():
         logger.error(f"tracks.parquet not found in {args.dataset_dir}")
         logger.error("Run build_dataset first to generate it.")
         sys.exit(1)
+
+    # Resolve video dirs: default to all subdirs of DEFAULT_VIDEO_DIR
+    if args.video_dir is None:
+        root = Path(DEFAULT_VIDEO_DIR)
+        args.video_dir = sorted(p for p in root.iterdir() if p.is_dir())
+        logger.info(f"Auto-discovered {len(args.video_dir)} video dir(s) under {root}")
 
     load_cols = ["video_id", "bird_id", "frame_idx", "window", "bbox"]
     if args.bodyparts:

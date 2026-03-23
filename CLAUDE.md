@@ -320,38 +320,33 @@ Input is specified separately via `--input`: `features`, `embeddings`, `embeddin
 
 Additional training args: `--dropout` (override model dropout), `--d-hidden` (override hidden dim), `--label-smoothing` (CE label smoothing), `--feature-dropout` (dropout on flat features only), `--n-segments` (temporal bins, default 12).
 
-### Classification results (2026-03-17)
+### Classification results (2026-03-23)
 
-Dataset: 3 tracking runs (incl. re-tracked C1G1), 15 videos, 3-class (excluding social — only 67 samples, 0% recall). LOVO with group-matched val rotation (each video is val at most once).
+Dataset: 30 videos (15 day 28 + 15 day 29), 5 cages, 3-class (excluding social). LOCO cross-validation (leave-one-cage-out, 5 folds).
 
-Training config: 5 fixed epochs, inv-sqrt class weights, label smoothing 0.1, best val_loss checkpoint, no early stopping. See `notes/ablation_features.md` and `notes/ablation_embeddings.md` for full ablation studies.
+Training config: 5 fixed epochs, inv-sqrt class weights, label smoothing 0.1, dropout 0.0, best val_loss checkpoint. See `notes/ablation_v2.md` for full results.
 
-**Best results** (v2 val rotation, proper group-matched):
+**Best results**:
 
-| Model | Input | Mean Test F1 | Pooled Test F1 | Run ID | Notes |
-|-------|-------|-------------|----------------|--------|-------|
-| TemporalCNNv2 | feat + multi-scale DINOv3 (bbox+512) | 0.716 | 0.737 | `20260315_180947` | **best overall**, K=24 |
-| TemporalCNNv2 | feat + multi-scale DINOv3 (bbox+512) | 0.716 | 0.735 | `20260315_174859` | K=12 |
-| Temporal MLP | feat + multi-scale DINOv3 (bbox+512) | 0.714 | 0.732 | `20260315_173902` | |
-| BiGRU | feat + multi-scale + feat_drop=0.2 | 0.718 | 0.732 | `20260315_175138` | |
-| Temporal MLP | feat + DINOv3 ViT-L, dropout=0.0 | 0.714 | 0.731 | `20260315_123332` | best single-scale |
-| Temporal GRU | feat + DINOv3 ViT-L, dropout=0.0 | 0.714 | 0.727 | `20260315_124030` | |
-| XGBoost | features (max_depth=3) | 0.699 | 0.718 | `20260315_115343` | |
-| MLP | features | 0.693 | 0.711 | `20260315_115542` | |
-| V-JEPA2 | feat + SSv2 pooler (MLP) | 0.707 | 0.722 | `20260314_134337` | best video model |
-| VP-Base | feat + temporal | 0.705 | 0.714 | `20260314_145632` | |
+| Model | Input | Pooled Test F1 |
+|-------|-------|----------------|
+| TemporalCNNv2 (K=32) | features + plain256 + V-JEPA 2.1 | **0.773** |
+| TemporalCNNv2 (K=32) | features + multi-scale DINOv3 + V-JEPA 2.1 | 0.771 |
+| TemporalCNNv2 (K=32) | features + V-JEPA 2.1 | 0.770 |
+| TemporalCNNv2 (K=24) | features + 3-scale DINOv3 | 0.765 |
+| V-JEPA 2.1 only (TemporalCNNv2 K=32) | V-JEPA 2.1 | 0.763 |
+| TemporalCNNv2 (K=24) | features + DINOv3 plain256 | 0.759 |
+| MLP | features + V-JEPA 2.1 | 0.761 |
+| MLP | features + DINOv3 | 0.752 |
+| XGBoost (depth=3) | features only | 0.748 |
 
 **Key findings**:
 
-- **Best result: 0.737 pooled F1** — TemporalCNNv2 (GELU bottleneck + single conv) on multi-scale DINOv3 embeddings (tight bbox + union512 crops) with K=24 temporal segments.
-- **Multi-scale embeddings help**: concatenating tight bbox CLS + 512-crop CLS adds spatial context that improves worm detection. 512 alone is terrible (0.569) but complementary with tight bbox.
-- **Dropout 0.0 is optimal**: models were over-regularized at default dropout=0.3. Removing dropout gained +0.010 pooled.
-- **Video models (V-JEPA 2, VideoPrism) underperform DINOv3**: domain shift from full-scene pretraining to small bbox crops. Best video model: V-JEPA 2 at 0.722 pooled (SSv2 pooler).
-- **Raw token classifiers (PriVi, attentive pooler) fail**: too many tokens, too few training samples.
-- **Worm class is kinematically incoherent**: mixes stationary pecking (looks like none) and active running/chasing (looks like locomotor).
-- XGBoost max_depth=3 (0.718) is a strong features-only baseline.
-
-Previous best (old val rotation): Temporal GRU + feat + DINOv3 ViT-L = 0.732 pooled (inflated by biased val splits).
+- **V-JEPA 2.1 is the strongest backbone** (0.763 alone, 0.770 with features), reversing v1 where DINOv3 led. The video model's temporal understanding now outperforms per-frame image embeddings.
+- **Features remain essential**: +0.7 on top of V-JEPA 2.1 (0.763 → 0.770), +1.3 on DINOv3 (0.740 → 0.752). Handcrafted mask features provide complementary spatial/kinematic signal.
+- **Multi-scale DINOv3 disappoints**: union512 alone hurts (0.743 < 0.745 single-scale). 3-scale (bbox+256+512) recovers to 0.765 but doesn't beat V-JEPA 2.1.
+- **Temporal modeling matters**: MLP mean-pools V-JEPA 2.1 to 0.729; TemporalCNNv2 preserves temporal structure for 0.763 (+3.4 points).
+- **XGBoost features-only at 0.748** remains a strong baseline, beating several embedding configurations.
 
 ## Utilities
 

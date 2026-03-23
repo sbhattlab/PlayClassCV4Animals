@@ -38,7 +38,7 @@ from PIL import Image
 from tqdm import tqdm
 from transformers import AutoModel, AutoVideoProcessor
 
-from src._config import DEFAULT_DATASET_DIR, DEFAULT_TRACKING_DIR
+from src._config import DEFAULT_DATASET_DIR, DEFAULT_TRACKING_DIR, DEFAULT_VIDEO_DIR
 from src.dataset.crops import CROP_MODES, compute_union_origin, crop_frame
 from src.dataset.utils import assert_embedding_label_alignment, resolve_video_path
 from src.io import load_video_frames_torchcodec as load_video_frames
@@ -63,7 +63,8 @@ def parse_args():
         "--video-dir",
         type=Path,
         nargs="+",
-        required=True,
+        default=None,
+        help=f"Directory(ies) with .mp4 files (default: all subdirs of {DEFAULT_VIDEO_DIR}/)",
     )
     parser.add_argument(
         "--model-name",
@@ -109,6 +110,12 @@ def parse_args():
         default=None,
         help="Output filename (default: auto-generated from model name)",
     )
+    parser.add_argument(
+        "--cid-checkpoint",
+        type=Path,
+        default=None,
+        help="Path to CID checkpoint (encoder_only.pt) to load adapted weights",
+    )
     return parser.parse_args()
 
 
@@ -131,6 +138,8 @@ def _build_output_name(args):
             parts.append("vith")
     else:
         parts = ["embeddings", "video"]
+    if hasattr(args, "cid_checkpoint") and args.cid_checkpoint:
+        parts.append("cid")
     if args.num_frames != 64:
         parts.append(f"f{args.num_frames}")
     if args.crop_mode != "bbox":
@@ -140,7 +149,6 @@ def _build_output_name(args):
     elif args.temporal:
         parts.append("temporal")
     return "_".join(parts) + ".pt"
-
 
 
 # ---- V-JEPA 2.1 torch.hub support ----------------------------------------
@@ -212,12 +220,18 @@ def extract_video_embeddings(
 
         # Pre-compute union origin for union-based crop modes
         union_origin = None
-        if crop_mode in ("union512", "darken512", "roi512"):
+        _prefix = next(
+            (p for p in ("union", "darken", "roi") if crop_mode.startswith(p)), None
+        )
+        if _prefix is not None:
+            _crop_sz = int(crop_mode.removeprefix(_prefix))
             first_local = int(group_rows.iloc[0]["frame_idx"]) - min_frame
             if first_local < len(frames):
                 fh, fw = frames[first_local].shape[:2]
                 all_bboxes = group_rows["bbox"].tolist()
-                union_origin = compute_union_origin(all_bboxes, fh, fw)
+                union_origin = compute_union_origin(
+                    all_bboxes, fh, fw, crop_size=_crop_sz
+                )
 
         # Process all frames via non-overlapping clips of num_frames
         n = len(group_rows)
@@ -299,6 +313,12 @@ def main():
         logger.error(f"tracks.parquet not found in {args.dataset_dir}")
         sys.exit(1)
 
+    # Resolve video dirs
+    if args.video_dir is None:
+        root = Path(DEFAULT_VIDEO_DIR)
+        args.video_dir = sorted(p for p in root.iterdir() if p.is_dir())
+        logger.info(f"Auto-discovered {len(args.video_dir)} video dir(s) under {root}")
+
     load_cols = ["video_id", "bird_id", "frame_idx", "window", "bbox"]
     tracks = pd.read_parquet(tracks_path, columns=load_cols)
     video_ids = sorted(tracks["video_id"].unique())
@@ -310,13 +330,15 @@ def main():
 
     if _is_hub_model(args.model_name):
         # V-JEPA 2.1 via torch.hub (no HF checkpoint yet).
-        # Temporarily evict our src package from sys.modules so torch.hub
-        # can import the hub repo's own src/ without collision.
         processor = AutoVideoProcessor.from_pretrained("facebook/vjepa2-vitl-fpc64-256")
         encoder, _predictor = torch.hub.load("facebookresearch/vjepa2", args.model_name)
         del _predictor
+        if args.cid_checkpoint:
+            state_dict = torch.load(args.cid_checkpoint, map_location="cpu", weights_only=True)
+            encoder.load_state_dict(state_dict["ema_encoder"], strict=True)
+            logger.info(f"Loaded CID checkpoint from {args.cid_checkpoint}")
         model = _VJEPA21Wrapper(encoder, device)
-        d_model = 1024  # ViT-L hidden size
+        d_model = encoder.embed_dim
     else:
         processor = AutoVideoProcessor.from_pretrained(args.model_name)
         model = AutoModel.from_pretrained(args.model_name, dtype=torch.bfloat16)

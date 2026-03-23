@@ -7,7 +7,7 @@ arrays; model-specific resizing is handled by the caller.
 
 import numpy as np
 
-CROP_MODES = ("bbox", "plain256", "plain384", "union512", "darken512", "roi512")
+CROP_MODES = ("bbox", "plain256", "plain384", "union384", "union512", "darken512", "roi512")
 
 
 def compute_union_bbox(bboxes):
@@ -69,8 +69,7 @@ def crop_frame(frame_np, bbox, crop_mode, *, union_origin=None, darken_factor=0.
     Returns
     -------
     crop : ndarray or None
-        Cropped region, or ``None`` if the crop is invalid (empty bbox or
-        bird not fully contained in the fixed crop).
+        Cropped region, or ``None`` if the crop is invalid (empty bbox).
     extra : dict or None
         Extra metadata. For ``roi512``, contains
         ``'patch_bounds': (py1, py2, px1, px2)`` mapping the bird bbox
@@ -95,9 +94,6 @@ def crop_frame(frame_np, bbox, crop_mode, *, union_origin=None, darken_factor=0.
     if prefix in ("union", "darken", "roi"):
         assert union_origin is not None, f"{crop_mode} requires union_origin"
         ox, oy = union_origin
-        # Skip frames where bird is not fully contained in the fixed crop
-        if x1 < ox or y1 < oy or x2 > ox + crop_size or y2 > oy + crop_size:
-            return None, None
         crop = frame_np[oy:oy + crop_size, ox:ox + crop_size]
 
         extra = None

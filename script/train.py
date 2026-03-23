@@ -366,6 +366,9 @@ def main():
     run_dir = Path(DEFAULT_CHECKPOINT_DIR) / f"{timestamp}_{args.model}"
     run_dir.mkdir(parents=True, exist_ok=True)
 
+    # Log to file in run dir
+    logger.add(run_dir / "train.log", level="INFO")
+
     # Save CLI args for reproducibility
     cfg = {k: str(v) if isinstance(v, Path) else v for k, v in vars(args).items()}
     with open(run_dir / "cfg.json", "w", encoding="utf-8") as f:
