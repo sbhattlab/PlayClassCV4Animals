@@ -2,7 +2,7 @@
 
 Usage::
 
-    pixi run -e dataset python -m script.smoke_test_dataset
+    pixi run -e dataset test_postprocessing_smoke
 """
 
 import sys

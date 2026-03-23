@@ -69,8 +69,7 @@ def crop_frame(frame_np, bbox, crop_mode, *, union_origin=None, darken_factor=0.
     Returns
     -------
     crop : ndarray or None
-        Cropped region, or ``None`` if the crop is invalid (empty bbox or
-        bird not fully contained in the fixed crop).
+        Cropped region, or ``None`` if the crop is invalid (empty bbox).
     extra : dict or None
         Extra metadata. For ``roi512``, contains
         ``'patch_bounds': (py1, py2, px1, px2)`` mapping the bird bbox

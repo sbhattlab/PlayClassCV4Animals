@@ -334,7 +334,7 @@ def main():
         encoder, _predictor = torch.hub.load("facebookresearch/vjepa2", args.model_name)
         del _predictor
         if args.cid_checkpoint:
-            state_dict = torch.load(args.cid_checkpoint, map_location="cpu")
+            state_dict = torch.load(args.cid_checkpoint, map_location="cpu", weights_only=True)
             encoder.load_state_dict(state_dict["ema_encoder"], strict=True)
             logger.info(f"Loaded CID checkpoint from {args.cid_checkpoint}")
         model = _VJEPA21Wrapper(encoder, device)
