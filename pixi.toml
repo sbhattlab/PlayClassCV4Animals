@@ -125,6 +125,7 @@ videoprism = { git = "https://github.com/google-deepmind/videoprism" }
 einshape = ">=1.0"
 mediapy = ">=1.2.0"
 pillow = ">=12.1.0,<13"
+opencv-python-headless = ">=4.10"
 
 [feature.videoprism.tasks]
 extract_videoprism = "python -m script.extract_embeddings_videoprism"
