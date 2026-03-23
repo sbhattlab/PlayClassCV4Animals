@@ -34,6 +34,7 @@ def parse_args():
     parser.add_argument(
         "--video-dir",
         type=Path,
+        default="data/video",
         nargs="+",
         required=True,
         help="Directory(ies) with .mp4 files",
@@ -162,10 +163,17 @@ def main():
         indices = np.linspace(0, len(window_tracks) - 1, N_FRAMES, dtype=int)
         sampled = window_tracks.iloc[indices]
 
-        # Pre-compute union origin
+        # Pre-compute union origins per crop size
         all_bboxes = window_tracks["bbox"].tolist()
         fh, fw = frames[0].shape[:2]
-        union_origin = compute_union_origin(all_bboxes, fh, fw)
+        _UNION_PREFIXES = ("union", "darken", "roi")
+        union_origins = {}
+        for mode in CROP_MODES:
+            prefix = next((p for p in _UNION_PREFIXES if mode.startswith(p)), None)
+            if prefix is not None:
+                crop_sz = int(mode.removeprefix(prefix))
+                if crop_sz not in union_origins:
+                    union_origins[crop_sz] = compute_union_origin(all_bboxes, fh, fw, crop_size=crop_sz)
 
         # --- Crop mode comparison ---
         for fi, (_, trow) in enumerate(sampled.iterrows()):
@@ -178,11 +186,12 @@ def main():
             x1, y1, x2, y2 = int(bbox[0]), int(bbox[1]), int(bbox[2]), int(bbox[3])
 
             for mode in CROP_MODES:
-                origin = (
-                    union_origin
-                    if mode in ("union512", "darken512", "roi512")
-                    else None
-                )
+                prefix = next((p for p in _UNION_PREFIXES if mode.startswith(p)), None)
+                if prefix is not None:
+                    crop_sz = int(mode.removeprefix(prefix))
+                    origin = union_origins[crop_sz]
+                else:
+                    origin = None
                 crop_np, _ = crop_frame(
                     frame_np,
                     bbox,
@@ -193,13 +202,16 @@ def main():
                     continue
 
                 # Annotate with bbox rectangle for context crops
-                if mode in ("plain256", "union512", "darken512", "roi512"):
-                    if mode == "plain256":
+                if mode.startswith(("plain", "union", "darken", "roi")) and mode != "bbox":
+                    if mode.startswith("plain"):
+                        plain_sz = int(mode.removeprefix("plain"))
                         cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
-                        ox = max(0, min(cx - 128, fw - 256))
-                        oy = max(0, min(cy - 128, fh - 256))
+                        half = plain_sz // 2
+                        ox = max(0, min(cx - half, fw - plain_sz))
+                        oy = max(0, min(cy - half, fh - plain_sz))
                     else:
-                        ox, oy = union_origin
+                        crop_sz = int(mode.removeprefix(prefix))
+                        ox, oy = union_origins[crop_sz]
                     crop_np = draw_bbox_on_crop(crop_np, (x1, y1, x2, y2), (ox, oy))
 
                 out_path = OUTPUT_DIR / f"{behav}_{mode}_f{fi}.png"
