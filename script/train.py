@@ -71,7 +71,7 @@ def parse_args():
         required=True,
         help=(
             "Input data: 'features', 'embeddings', 'embeddings_250', "
-            "'features+embeddings', 'features+embeddings_lora', etc."
+            "'features+embeddings', etc."
         ),
     )
     parser.add_argument(

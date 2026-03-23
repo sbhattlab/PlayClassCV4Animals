@@ -67,23 +67,11 @@ def parse_args():
         help="Device (e.g. cuda:0, cuda:1, cpu)",
     )
     parser.add_argument(
-        "--bbox-scale",
-        type=float,
-        default=1.0,
-        help="Scale factor for bbox crops (1.0 = tight, 1.25 = 25%% padding, default: 1.0)",
-    )
-    parser.add_argument(
         "--resolution",
         type=int,
         default=None,
         help="Override processor resize resolution (default: use processor config, typically 224). "
         "DINOv3 was trained at 256, adapted up to 768. Local crops used 112-336.",
-    )
-    parser.add_argument(
-        "--lora-weights",
-        type=Path,
-        default=None,
-        help="Path to LoRA adapter directory (from finetune_dino.py)",
     )
     parser.add_argument(
         "--crop-mode",
@@ -128,10 +116,6 @@ def _build_output_name(args) -> str:
         parts.append("vits")
     if args.resolution is not None:
         parts.append(f"r{args.resolution}")
-    if args.bbox_scale != 1.0:
-        parts.append(str(int(args.bbox_scale * 100)))
-    if args.lora_weights is not None:
-        parts.append("lora")
     if args.crop_mode != "bbox":
         parts.append(args.crop_mode)
     if args.raw:
@@ -167,15 +151,6 @@ def main():
         )
     processor = AutoImageProcessor.from_pretrained(args.model_name, **proc_kwargs)
     model = AutoModel.from_pretrained(args.model_name, dtype=torch.bfloat16)
-    if args.lora_weights is not None:
-        from peft import PeftModel
-
-        logger.info(f"Loading LoRA adapter from {args.lora_weights}")
-        model = PeftModel.from_pretrained(model, str(args.lora_weights))
-        model = (
-            model.merge_and_unload()
-        )  # merge LoRA into base weights for fast inference
-        logger.info("LoRA adapter merged into base model")
     device = torch.device(args.device)
     model = model.to(device).eval()
     logger.info(f"Model loaded on {device} (bfloat16)")
@@ -210,7 +185,6 @@ def main():
                 model,
                 processor,
                 batch_size=args.batch_size,
-                bbox_scale=args.bbox_scale,
                 n_sample_frames=args.n_sample_frames,
             )
         else:
@@ -220,7 +194,6 @@ def main():
                 model,
                 processor,
                 batch_size=args.batch_size,
-                bbox_scale=args.bbox_scale,
                 raw=args.raw,
                 n_sample_frames=args.n_sample_frames,
                 crop_mode=args.crop_mode,

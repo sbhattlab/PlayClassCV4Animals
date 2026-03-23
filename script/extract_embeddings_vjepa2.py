@@ -82,11 +82,6 @@ def parse_args():
         help="Frames per clip (must match model's pretrained frame count, default: 64)",
     )
     parser.add_argument(
-        "--bbox-scale",
-        type=float,
-        default=1.0,
-    )
-    parser.add_argument(
         "--crop-mode",
         type=str,
         choices=list(CROP_MODES),
@@ -144,8 +139,6 @@ def _build_output_name(args):
         parts.append("raw")
     elif args.temporal:
         parts.append("temporal")
-    if args.bbox_scale != 1.0:
-        parts.append(str(int(args.bbox_scale * 100)))
     return "_".join(parts) + ".pt"
 
 
@@ -187,7 +180,6 @@ def extract_video_embeddings(
     processor,
     device,
     num_frames=64,
-    bbox_scale=1.0,
     crop_mode="bbox",
     temporal=False,
     raw=False,
@@ -244,7 +236,6 @@ def extract_video_embeddings(
                     frames[local_idx],
                     row["bbox"],
                     crop_mode,
-                    bbox_scale=bbox_scale,
                     union_origin=union_origin,
                 )
                 if crop_np is None:
@@ -358,7 +349,6 @@ def main():
             processor,
             device,
             num_frames=args.num_frames,
-            bbox_scale=args.bbox_scale,
             crop_mode=args.crop_mode,
             temporal=args.temporal,
             raw=args.raw,
