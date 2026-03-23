@@ -131,11 +131,11 @@ def process_tracking_subdir(tracking_dir, bird_info):
     if pp_path.exists():
         postprocessing = _load_json(pp_path)
         logger.info(
-            f"Processing {tracking_dir.name} "
+            f"Loading tracking data for {tracking_dir.name} "
             f"({len(postprocessing)} postprocessing entry/ies, {len(tracks)} rows)"
         )
     else:
-        logger.info(f"Processing {tracking_dir.name} (new)")
+        logger.info(f"Loading tracking data for {tracking_dir.name} (new)")
         logger.info(f"  FPS: {fps:.2f}, {len(tracks)} tracking rows")
 
         issues = detect_tracking_issues(tracks, fps)
@@ -263,12 +263,14 @@ def main():
     all_tracks = []
     fps_lookup = {}
     for r in results:
+        logger.info(f"--- {r['video_id']} ---")
         try:
             tracks_clean, labels = process_tracks(
                 tracks=r["tracks"],
                 labels=labels,
                 postprocessing=r["postprocessing"],
                 fps=r["fps"],
+                video_id=r["video_id"],
             )
         except ValueError as e:
             logger.error(f"Cannot process tracks for {r['video_id']}: {e}")

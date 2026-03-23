@@ -26,6 +26,14 @@
   {
     "type": "trim",
     "cause": "low_score",
+    "from": 972,
+    "to": 973,
+    "id": 2,
+    "_time": "00:38.88-00:38.92"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
     "from": 1272,
     "to": 1451,
     "id": 0,
@@ -64,24 +72,24 @@
   },
   {
     "type": "id_switch",
-    "frame": 1500,
+    "frame": 1507,
     "from": 0,
     "to": 1,
-    "_time": "01:00.00"
+    "_time": "01:00.28"
   },
   {
     "type": "id_switch",
-    "frame": 1529,
+    "frame": 1507,
     "from": 3,
     "to": 2,
-    "_time": "01:01.15"
+    "_time": "01:00.28"
   },
   {
     "type": "id_switch",
-    "frame": 1538,
+    "frame": 1507,
     "from": 1,
     "to": 3,
-    "_time": "01:01.51"
+    "_time": "01:00.28"
   },
   {
     "type": "id_switch",

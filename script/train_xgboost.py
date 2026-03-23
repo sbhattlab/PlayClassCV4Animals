@@ -1,4 +1,4 @@
-"""XGBoost baseline for behaviour classification with LOVO cross-validation.
+"""XGBoost baseline for behaviour classification with LOCO cross-validation.
 
 Usage::
 
@@ -20,12 +20,12 @@ from xgboost import XGBClassifier
 
 from src._config import DEFAULT_CHECKPOINT_DIR, DEFAULT_DATASET_DIR, LABEL_ORDER
 from src.classification.datamodule import LabelEncoder
-from src.classification.model_selection import LOVO
+from src.classification.model_selection import LOCO, LOVO
 from src.classification.stats import aggregate_metrics
 
 
 def parse_args():
-    parser = ArgumentParser(description="XGBoost behaviour classifier (LOVO).")
+    parser = ArgumentParser(description="XGBoost behaviour classifier (LOCO).")
     parser.add_argument(
         "--dataset-dir",
         type=Path,
@@ -33,6 +33,13 @@ def parse_args():
         help="Directory containing dataset files (default: %(default)s)",
     )
     parser.add_argument("--exclude", type=str, default=None)
+    parser.add_argument(
+        "--cv",
+        type=str,
+        default="loco",
+        choices=["lovo", "loco"],
+        help="Cross-validation: loco (leave-one-cage-out, default) or lovo (leave-one-video-out)",
+    )
     return parser.parse_args()
 
 
@@ -73,17 +80,21 @@ def main():
     run_dir.mkdir(parents=True, exist_ok=True)
     json.dump(vars(args), (run_dir / "cfg.json").open("w"), default=str, indent=2)
 
-    splitter = LOVO()
+    splitter = LOCO() if args.cv == "loco" else LOVO()
     folds = list(splitter.split(all_videos))
-    logger.info(f"LOVO: {len(folds)} folds")
+    logger.info(f"{args.cv.upper()}: {len(folds)} folds")
 
     fold_results = []
     for fold_idx, (test_video, val_video) in enumerate(folds):
         logger.info(f"Fold {fold_idx}: test={test_video}, val={val_video}")
 
-        train_mask = ~np.isin(video_ids, [test_video, val_video])
-        val_mask = video_ids == val_video
-        test_mask = video_ids == test_video
+        if args.cv == "loco":
+            test_mask = np.array([v.startswith(test_video) for v in video_ids])
+            val_mask = np.array([v.startswith(val_video) for v in video_ids])
+        else:
+            test_mask = video_ids == test_video
+            val_mask = video_ids == val_video
+        train_mask = ~(test_mask | val_mask)
 
         X_train, y_train = X[train_mask], y[train_mask]
         X_val, y_val = X[val_mask], y[val_mask]
@@ -141,7 +152,7 @@ def main():
         )
 
     # Aggregate
-    aggregate_metrics(fold_results, run_dir, label_order)
+    aggregate_metrics(fold_results, run_dir, label_order, prefix=args.cv)
 
 
 if __name__ == "__main__":

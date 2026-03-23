@@ -84,13 +84,6 @@
   },
   {
     "type": "id_switch",
-    "frame": 1509,
-    "from": 16,
-    "to": 3,
-    "_time": "01:00.36"
-  },
-  {
-    "type": "id_switch",
     "frame": 3317,
     "from": 3,
     "to": 5,

@@ -1,0 +1,196 @@
+[
+  {
+    "type": "trim",
+    "cause": "merged_object",
+    "from": 2568,
+    "to": 2650,
+    "id": 2,
+    "_time": "01:42.72-01:46.00"
+  },
+  {
+    "type": "trim",
+    "cause": "merged_object",
+    "from": 3312,
+    "to": 3504,
+    "id": 2,
+    "_time": "02:12.48-02:20.16"
+  },
+  {
+    "type": "trim",
+    "cause": "merged_object",
+    "from": 3504,
+    "to": 3533,
+    "id": 0,
+    "_time": "02:20.16-02:21.32"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "from": 4073,
+    "to": 4259,
+    "id": 2,
+    "_time": "02:42.92-02:50.36"
+  },
+  {
+    "type": "trim",
+    "cause": "merged_object",
+    "from": 4752,
+    "to": 4774,
+    "id": 0,
+    "_time": "03:10.08-03:10.96"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "from": 9240,
+    "to": 9744,
+    "id": 1,
+    "_time": "06:09.60-06:29.76"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "from": 9240,
+    "to": 9744,
+    "id": 2,
+    "_time": "06:09.60-06:29.76"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "from": 9744,
+    "to": 10080,
+    "id": 2,
+    "_time": "06:29.76-06:43.20"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "from": 10560,
+    "to": 10920,
+    "id": 0,
+    "_time": "07:02.40-07:16.80"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "from": 10848,
+    "to": 11232,
+    "id": 2,
+    "_time": "07:13.92-07:29.28"
+  },
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "from": 14040,
+    "to": 14294,
+    "id": 2,
+    "_time": "09:21.60-09:31.77"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "from": 14040,
+    "to": 14294,
+    "id": 1,
+    "_time": "09:21.60-09:31.77"
+  },
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "from": 14294,
+    "to": 14340,
+    "id": 1,
+    "_time": "09:31.77-09:33.60"
+  },
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "from": 14400,
+    "to": 14520,
+    "id": 2,
+    "_time": "09:36.00-09:40.80"
+  },
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "from": 14724,
+    "to": 14880,
+    "id": 2,
+    "_time": "09:48.96-09:55.20"
+  },
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "from": 14928,
+    "to": 15048,
+    "id": 1,
+    "_time": "09:57.12-10:01.92"
+  },
+  {
+    "type": "id_switch",
+    "frame": 18180,
+    "from": 2,
+    "to": 3,
+    "_time": "12:07.20"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "from": 15120,
+    "to": 18840,
+    "_time": "10:04.80-12:33.60"
+  },
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "from": 21120,
+    "to": 21264,
+    "id": 0,
+    "_time": "14:04.80-14:10.56"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "from": 21240,
+    "to": 21322,
+    "id": 3,
+    "_time": "14:09.61-14:12.89"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "from": 21461,
+    "to": 21489,
+    "id": 3,
+    "_time": "14:18.45-14:19.57"
+  },
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "from": 22368,
+    "to": 22500,
+    "_time": "14:54.72-15:00.00"
+  },
+  {
+    "type": "id_match",
+    "protocol_id": 2700,
+    "description": "Green right wing",
+    "tracking_id": 1,
+    "frame": null
+  },
+  {
+    "type": "id_match",
+    "protocol_id": 2774,
+    "description": "Dark brown",
+    "tracking_id": 0,
+    "frame": null
+  },
+  {
+    "type": "id_match",
+    "protocol_id": 2652,
+    "description": "Black right wing",
+    "tracking_id": 3,
+    "frame": null
+  }
+]

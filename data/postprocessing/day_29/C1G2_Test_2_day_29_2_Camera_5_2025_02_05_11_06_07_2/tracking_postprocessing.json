@@ -1,19 +1,35 @@
 [
   {
     "type": "trim",
-    "cause": "merged_object",
-    "from": 2249,
-    "to": 2257,
-    "id": 1,
-    "_time": "11:21.34-11:24.22"
+    "cause": "low_score",
+    "from": 1267,
+    "to": 1324,
+    "id": 2,
+    "_time": "00:50.68-00:52.96"
   },
   {
     "type": "trim",
     "cause": "merged_object",
-    "from": 3051,
-    "to": 3118,
+    "from": 3048,
+    "to": 3120,
     "id": 1,
-    "_time": "11:21.34-11:24.22"
+    "_time": "02:01.92-02:04.80"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "from": 4968,
+    "to": 5064,
+    "id": 1,
+    "_time": "03:18.72-03:22.56"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "from": 6312,
+    "to": 6456,
+    "id": 1,
+    "_time": "04:12.48-04:18.24"
   },
   {
     "type": "trim",
@@ -21,63 +37,39 @@
     "from": 9997,
     "to": 10019,
     "id": 0,
-    "_time": "11:21.34-11:24.22"
+    "_time": "06:39.88-06:40.76"
   },
   {
     "type": "trim",
-    "cause": "merged_object",
-    "from": 9997,
-    "to": 10019,
+    "cause": "low_score",
+    "from": 12144,
+    "to": 13200,
     "id": 0,
-    "_time": "11:21.34-11:24.22"
+    "_time": "08:05.76-08:48.00"
   },
   {
     "type": "trim",
     "cause": "merged_object",
-    "from": 12116,
-    "to": 13228,
-    "id": 0,
-    "_time": "11:21.34-11:24.22"
-  },
-  {
-    "type": "trim",
-    "cause": "merged_object",
-    "from": 13785,
-    "to": 13899,
+    "from": 13776,
+    "to": 13894,
     "id": 1,
-    "_time": "11:21.34-11:24.22"
+    "_time": "09:11.04-09:15.76"
   },
   {
     "type": "trim",
-    "cause": "merged_object",
-    "from": 15300,
-    "to": 15433,
+    "cause": "overlap",
+    "from": 16128,
+    "to": 16296,
     "id": 0,
-    "_time": "11:21.34-11:24.22"
+    "_time": "10:45.12-10:51.84"
   },
   {
     "type": "trim",
-    "cause": "merged_object",
-    "from": 15806,
-    "to": 15875,
-    "id": 0,
-    "_time": "11:21.34-11:24.22"
-  },
-  {
-      "type": "trim",
-      "cause": "merged_object",
-      "from": 16228,
-      "to": 16293,
-      "id": 0,
-      "_time": "11:21.34-11:24.22"
-  },
-  {
-      "type": "trim",
-      "cause": "merged_object",
-      "from": 16275,
-      "to": 16917,
-      "id": 1,
-      "_time": "11:21.34-11:24.22"
+    "cause": "overlap",
+    "from": 16296,
+    "to": 16990,
+    "id": 1,
+    "_time": "10:51.84-11:19.60"
   },
   {
     "type": "trim",
@@ -86,6 +78,30 @@
     "to": 17105,
     "id": 1,
     "_time": "11:21.34-11:24.22"
+  },
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "from": 17280,
+    "to": 17362,
+    "id": 1,
+    "_time": "11:32.00-11:34.48"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "from": 17362,
+    "to": 17813,
+    "id": 1,
+    "_time": "11:34.48-11:52.52"
+  },
+  {
+    "type": "trim",
+    "cause": "artefact",
+    "from": 19920,
+    "to": 21144,
+    "id": 2,
+    "_time": "13:16.80-14:05.76"
   },
   {
     "type": "id_match",

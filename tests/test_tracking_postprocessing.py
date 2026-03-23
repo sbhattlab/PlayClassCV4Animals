@@ -120,6 +120,39 @@ class TestTrim:
         # Labels at 1.0, 2.0, 3.0 fall in [1.0, 3.0] → dropped
         assert set(labels_out["time"].tolist()) == {0.0}
 
+    def test_trim_global_scoped_to_video(self):
+        """Global trim for one video must not drop labels from another video.
+
+        Regression test for cross-video label contamination bug where
+        trim() dropped labels by time range across ALL videos.
+        """
+        labels = pd.DataFrame(
+            {
+                "video_id": ["v1", "v1", "v2", "v2"],
+                "bird_id": [1, 1, 1, 1],
+                "time": [1.0, 2.0, 1.0, 2.0],
+                "behav": ["idle", "walk", "peck", "idle"],
+            }
+        )
+        tracks = pd.DataFrame(
+            {
+                "frame_idx": list(range(100)),
+                "tracking_id": [0] * 100,
+                "tracker_score": [0.9] * 100,
+            }
+        )
+        # Global trim at [25, 75] = 1.0–3.0s, scoped to v1
+        trims = [{"from": 25, "to": 75}]
+        _, labels_out = trim(tracks, labels, trims, FPS, video_id="v1")
+
+        # v1 labels in [1.0, 3.0] dropped
+        v1 = labels_out.query("video_id == 'v1'")
+        assert set(v1["time"].tolist()) == set()
+
+        # v2 labels untouched
+        v2 = labels_out.query("video_id == 'v2'")
+        assert set(v2["time"].tolist()) == {1.0, 2.0}
+
 
 # ── merge_id_on_switch ───────────────────────────────────────────────
 
@@ -222,6 +255,12 @@ class TestCheckPostprocessing:
     def test_null_id_switch_to(self):
         """id_switch entry with to=null → ValueError raised."""
         entries = [{"type": "id_switch", "frame": 50, "from": 0, "to": None}]
+        with pytest.raises(ValueError, match="unfilled"):
+            check_postprocessing(entries)
+
+    def test_null_id_switch_from(self):
+        """id_switch entry with from=null → ValueError raised."""
+        entries = [{"type": "id_switch", "frame": 50, "from": None, "to": 1}]
         with pytest.raises(ValueError, match="unfilled"):
             check_postprocessing(entries)
 

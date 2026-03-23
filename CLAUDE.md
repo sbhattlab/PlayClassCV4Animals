@@ -14,12 +14,20 @@ Multi-object tracking and segmentation of chickens in video data using SAM3 (Hug
 # Fetch git submodules
 git submodule update --init --recursive
 
-# Install main environment
-pixi install -e sam3-hf        # SAM3 HuggingFace (main pipeline)
-pixi shell -e sam3-hf          # Enter shell
+# Install all environments
+pixi install
 ```
 
-Other environments exist (`sam3-native`, `gs2`, `yolo`) but are not actively used. The `classifier` environment adds PyTorch Lightning, wandb, and torchmetrics for classification training. The `videoprism` environment provides JAX + VideoPrism for video embedding extraction. Platform is Linux-only (CUDA 12.6).
+Pixi environments (defined in `pixi.toml`):
+
+- **`default`** — base deps (python, torch, pandas, loguru, matplotlib, pytest, ruff)
+- **`tracker`** — SAM3 tracking + YOLO scan (transformers, accelerate, omegaconf, ultralytics)
+- **`dataset`** — build_dataset + extract_features (CPU-only, lightweight)
+- **`embeddings`** — DINOv3/V-JEPA extraction (transformers, accelerate, peft, timm, einops)
+- **`classifier`** — classification training (lightning, wandb, torchmetrics, xgboost)
+- **`videoprism`** — JAX + VideoPrism
+
+Platform is Linux-only (CUDA 12.6).
 
 ## Running Scripts
 
@@ -27,9 +35,9 @@ Scripts are run as Python modules from the project root. CUDA device is specifie
 
 ```sh
 # Main pipeline (defaults to config/sam3_hf_config.yaml)
-pixi run -e sam3-hf sam3-hf-tracker
+pixi run -e tracker tracker
 # Custom config:
-pixi run -e sam3-hf python -m script.sam3.run_sam3_hf --config config/sam3_hf_manual_chunking.yaml
+pixi run -e tracker python -m script.sam3.run_sam3_hf --config config/sam3_hf_manual_chunking.yaml
 ```
 
 **Pixi quoting caveat**: `pixi run -e <env> python -c "..."` breaks on spaces in paths, f-string curly braces, and other special characters. **Never use inline `-c` with pixi.** Instead, write a temporary `.py` file in `tmp/` (project-local, gitignored) and run it with `pixi run -e <env> python tmp/<script>.py`.
@@ -37,9 +45,8 @@ pixi run -e sam3-hf python -m script.sam3.run_sam3_hf --config config/sam3_hf_ma
 ## Running Tests
 
 ```sh
-CUDA_VISIBLE_DEVICES=1 pixi run test-sam3-hf-image  # Single image inference
-CUDA_VISIBLE_DEVICES=1 pixi run test-sam3-hf-video  # Video chunking test
-pixi run -e sam3-hf test_features                    # Dataset feature extraction tests (pytest)
+CUDA_VISIBLE_DEVICES=1 pixi run -e tracker test_tracker  # SAM3 tracking test
+pixi run -e dataset test_features                         # Dataset feature extraction tests (pytest)
 ```
 
 SAM3 tests are standalone scripts in `src/test/`, not pytest-based. Pixi tasks invoke them as `python -m test.<name>` (the `src/` package root is on the module path). Dataset tests in `tests/` use pytest.
@@ -120,7 +127,7 @@ Auto-generated on each run, saved to `run_dir/visualizations/`: ID timeline (tra
 
 Extracts handcrafted features from tracking masks. All functions are vectorized (no row-by-row iteration):
 
-- **`extract_spatial_features`**: Batch `pycocotools.mask.area()` for mask areas, numpy array math for bbox metrics, batch `mask_util.decode()` + `scipy.ndimage.center_of_mass` for centroids. Masks grouped by `size` (pycocotools requirement) and chunked at 500 to cap memory.
+- **`extract_spatial_features`**: Batch `pycocotools.mask.area()` for mask areas, numpy array math for bbox metrics, batch `mask_util.decode()` + `scipy.ndimage.center_of_mass` for centroids. Masks grouped by `size` (pycocotools requirement) and chunked at 256 to cap memory.
 - **`extract_temporal_features`**: `pandas.groupby().diff()` / `.shift()` for frame-to-frame deltas.
 - **`extract_pairwise_features`**: Numpy broadcasting for `(M, M)` distance matrices per frame.
 - **`summarize_features_by_window`**: Single `groupby().agg()` call with `[mean, std, min, max, median]`.
@@ -129,7 +136,7 @@ Feature set (`_FEATURE_COLS`): `mask_area`, `aspect_ratio`, `velocity`, `area_ch
 
 ### Embeddings module (`src/dataset/embeddings.py`)
 
-Extracts DINOv3 CLS-token embeddings from bbox crops of tracked objects. Output is `{(video_id, bird_id, window): Tensor(F_w, D)}` — one variable-length sequence per window, aligned with the feature summarization grouping. `D` depends on the model (768 for ViT-B, 1024 for ViT-L), read from `model.config.hidden_size`. Crops are plain bbox cutouts (no mask-based background attenuation). Bboxes are clamped to frame dimensions to handle SAM3 bbox overshoot (known upstream issue where center+size→corner conversion produces coordinates slightly outside the image). Extraction uses **bfloat16** (float16 produces all-NaN with DINOv3 ViT-L). Uses `load_video_frames_sequential` for frame-accurate loading (see Misc. notes on H.264 seeking). Extraction script: `script/extract_embeddings.py` (GPU required, run via `pixi run -e sam3-hf extract-embeddings`).
+Extracts DINOv3 CLS-token embeddings from bbox crops of tracked objects. Output is `{(video_id, bird_id, window): Tensor(F_w, D)}` — one variable-length sequence per window, aligned with the feature summarization grouping. `D` depends on the model (768 for ViT-B, 1024 for ViT-L), read from `model.config.hidden_size`. Crops are plain bbox cutouts (no mask-based background attenuation). Bboxes are clamped to frame dimensions to handle SAM3 bbox overshoot (known upstream issue where center+size→corner conversion produces coordinates slightly outside the image). Extraction uses **bfloat16** (float16 produces all-NaN with DINOv3 ViT-L). Uses `load_video_frames_sequential` for frame-accurate loading (see Misc. notes on H.264 seeking). Extraction script: `script/extract_embeddings.py` (GPU required, run via `pixi run -e embeddings extract_embeddings`).
 
 ### Classification package (`src/classification/`)
 
@@ -162,7 +169,7 @@ Behaviour classification from dataset outputs. Uses PyTorch Lightning (pixi env 
   - `data/labels/` — Registration protocols Excel files (behaviour labels + bird info)
   - `data/tracking/` — Symlinks to tracking run output dirs (gitignored)
   - `data/dataset/` — Combined dataset outputs from the dataset pipeline (tracks, labels, features, embeddings)
-  - `data/postprocessing/` — Version-controlled copies of per-video JSONs (`tracking_postprocessing.json`, `tracking_issues.json`, `bird_info.json`, `chunk_info.json`), organized as `{run_id}/{video_subdir}/`
+  - `data/postprocessing/` — Version-controlled per-video JSONs + `tracking_outputs.parquet`, organized as `day_{N}/{video_subdir}/`. Source of truth for `build_dataset`.
 - `ext-data/` — Symlink to `/mnt/birds/rebecca2025/` (longer videos, output results, image sequences)
   - `ext-data/test/batch_mode_test_set/` — 3 × 2-min clips (`test_video_1/2/3.mp4`) for batch mode testing
 - `video-data/` — Symlink to `/mnt/birds/rebecca2025/raw` (raw video files)
@@ -183,21 +190,21 @@ Three-step pipeline. Steps 2 and 3 are independent and can run in parallel (diff
 
 ```sh
 # 1. Labels, postprocessing, windows (fast, ~seconds)
-pixi run -e sam3-hf build_dataset
+pixi run -e dataset build_dataset
 
 # 2. Mask features (slow, ~2 min, CPU-only)
-pixi run -e sam3-hf extract_features
+pixi run -e dataset extract_features
 
 # 3. DINOv3 embeddings (slow, GPU required)
-pixi run -e sam3-hf extract_embeddings \
-    --video-dir video-data/batch
+pixi run -e embeddings extract_embeddings \
+    --video-dir data/video/batch
 ```
 
-All scripts default to `data/tracking/` (input) and `data/dataset/` (output). Override with `--tracking-dir` / `--dataset-dir` / `--output-dir`.
+All scripts default to `data/postprocessing/` (input) and `data/dataset/` (output). Override with `--tracking-dir` / `--dataset-dir` / `--output-dir`.
 
 ### Step 1: `build_dataset`
 
-`script/build_dataset.py` discovers all `tracking_outputs.parquet` files recursively under `data/tracking/` (across multiple tracking runs), parses labels from Excel, detects issues, applies postprocessing, assigns windows, and filters incomplete windows. On first run it generates `tracking_postprocessing.json` templates; manually fill in `to` (id_switch) and `tracking_id` (id_match) fields, then rerun.
+`script/build_dataset.py` discovers all `tracking_outputs.parquet` files recursively under `data/postprocessing/` (across day directories), parses labels from Excel, detects issues, applies postprocessing, assigns windows, and filters incomplete windows. On first run it generates `tracking_postprocessing.json` templates; manually fill in `to` (id_switch) and `tracking_id` (id_match) fields, then rerun.
 
 Per-video JSON files (`tracking_postprocessing.json`) support three entry types:
 
@@ -205,7 +212,7 @@ Per-video JSON files (`tracking_postprocessing.json`) support three entry types:
 - **`id_switch`** — Remap `from` ID to `to` ID for all rows before `frame` (merges split tracks).
 - **`id_match`** — Rename tracker `tracking_id` to real `protocol_id` (bird identity).
 
-Output: `tracks.parquet` + `labels.parquet` in `data/dataset/`. JSON files are copied to `data/postprocessing/` for version control.
+Output: `tracks.parquet` + `labels.parquet` in `data/dataset/`.
 
 ### Step 2: `extract_features`
 
@@ -220,16 +227,16 @@ Output: `features_all.parquet` (per-frame) + `features_windowed.parquet` (per-wi
 `script/extract_embeddings.py` reads `tracks.parquet` from `data/dataset/`, crops bbox regions from video frames, and extracts DINOv3 CLS-token embeddings per (video_id, bird_id, window).
 
 ```sh
-pixi run -e sam3-hf python -m script.extract_embeddings \
+pixi run -e embeddings python -m script.extract_embeddings \
     --video-dir data/video --device 0
 
 # Alternative backbone (ViT-B)
-pixi run -e sam3-hf python -m script.extract_embeddings \
+pixi run -e embeddings python -m script.extract_embeddings \
     --video-dir data/video --device 0 \
     --model-name facebook/dinov3-vitb16-pretrain-lvd1689m
 
 # Custom resolution / bbox scale / LoRA adapter
-pixi run -e sam3-hf python -m script.extract_embeddings \
+pixi run -e embeddings python -m script.extract_embeddings \
     --video-dir data/video --device 0 \
     --resolution 256 --bbox-scale 1.25 \
     --lora-weights data/eval/<timestamp>_finetune/lora_adapter
@@ -241,12 +248,12 @@ Output filename encodes variant: `embeddings.pt` (default), `embeddings_vitb.pt`
 
 Two scripts for video-model embedding extraction. Both use shared `CROP_MODES` from `src/dataset/crops.py` (`--crop-mode`: bbox, plain256, union512, darken512, roi512).
 
-- **`script/extract_embeddings_vjepa2.py`** (sam3-hf env) — V-JEPA 2 embeddings. Feeds K frames as a video clip through the backbone. Supports `--temporal` (per-timestep spatial-mean-pool).
+- **`script/extract_embeddings_vjepa2.py`** (embeddings env) — V-JEPA 2 embeddings. Feeds K frames as a video clip through the backbone. Supports `--temporal` (per-timestep spatial-mean-pool).
 - **`script/extract_embeddings_videoprism.py`** (videoprism env, JAX) — VideoPrism embeddings. Supports `--temporal`, `--raw` (full patch tokens).
 
 ```sh
-# V-JEPA 2 temporal (sam3-hf env)
-pixi run -e sam3-hf python -m script.extract_embeddings_vjepa2 \
+# V-JEPA 2 temporal (embeddings env)
+pixi run -e embeddings python -m script.extract_embeddings_vjepa2 \
     --video-dir data/video/batch data/video/batch2 --device 0 --temporal
 
 # VideoPrism temporal (videoprism env)
@@ -358,7 +365,7 @@ Previous best (old val rotation): Temporal GRU + feat + DINOv3 ViT-L = 0.732 poo
 Recompute scan metrics and chunk boundaries from an existing `yolo_tracking.parquet` without re-running YOLO inference:
 
 ```sh
-pixi run -e sam3-hf python -m script.compute_chunk_boundaries \
+pixi run -e tracker python -m script.compute_chunk_boundaries \
     --run-dir ext-data/output/results/yolo_scan/20260223_231859_yolo_scan
 ```
 
@@ -388,7 +395,7 @@ Default thresholds (`occlusion_iou_threshold: 0.15`, `high_occlusion_threshold: 
 ### YOLO-Scan-Only Mode
 
 ```sh
-pixi run -e sam3-hf python -m script.sam3.run_sam3_hf --config config/sam3_hf_yolo_scan_only.yaml
+pixi run -e tracker python -m script.sam3.run_sam3_hf --config config/sam3_hf_yolo_scan_only.yaml
 ```
 
 Note: the pixi task `yolo-prescan` exists but references a non-existent config (`prescan_only.yaml`); use the command above instead.

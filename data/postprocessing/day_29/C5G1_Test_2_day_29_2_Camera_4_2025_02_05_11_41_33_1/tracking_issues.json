@@ -1,0 +1,435 @@
+{
+  "overlap0": {
+    "type": "overlap",
+    "start": 1002,
+    "end": 1002,
+    "start_time": 40.07,
+    "end_time": 40.07,
+    "ids": [
+      0,
+      1
+    ]
+  },
+  "transition0": {
+    "type": "id_switch",
+    "start": 3257,
+    "end": 3257,
+    "start_time": 130.24,
+    "end_time": 130.24,
+    "ids_before": [
+      0,
+      1,
+      2
+    ],
+    "ids_after": [
+      0,
+      1,
+      3
+    ],
+    "lost": [
+      2
+    ],
+    "gained": [
+      3
+    ]
+  },
+  "overlap1": {
+    "type": "overlap",
+    "start": 6805,
+    "end": 6805,
+    "start_time": 272.12,
+    "end_time": 272.12,
+    "ids": [
+      0,
+      1
+    ]
+  },
+  "low_score4": {
+    "type": "low_score",
+    "start": 8494,
+    "end": 8527,
+    "start_time": 339.67,
+    "end_time": 340.98,
+    "id": 3,
+    "low_score_rows": 34,
+    "total_rows": 34,
+    "min_score": 0.574
+  },
+  "overlap6": {
+    "type": "overlap",
+    "start": 8496,
+    "end": 8525,
+    "start_time": 339.75,
+    "end_time": 340.9,
+    "ids": [
+      0,
+      3
+    ]
+  },
+  "low_score0": {
+    "type": "low_score",
+    "start": 8554,
+    "end": 8594,
+    "start_time": 342.06,
+    "end_time": 343.66,
+    "id": 0,
+    "low_score_rows": 41,
+    "total_rows": 41,
+    "min_score": 0.375
+  },
+  "overlap2": {
+    "type": "overlap",
+    "start": 8601,
+    "end": 10740,
+    "start_time": 343.94,
+    "end_time": 429.48,
+    "ids": [
+      0,
+      1
+    ]
+  },
+  "low_score5": {
+    "type": "low_score",
+    "start": 9460,
+    "end": 9751,
+    "start_time": 378.29,
+    "end_time": 389.93,
+    "id": 3,
+    "low_score_rows": 288,
+    "total_rows": 292,
+    "min_score": 0.045
+  },
+  "overlap7": {
+    "type": "overlap",
+    "start": 9981,
+    "end": 10054,
+    "start_time": 399.13,
+    "end_time": 402.05,
+    "ids": [
+      0,
+      3
+    ]
+  },
+  "overlap10": {
+    "type": "overlap",
+    "start": 9981,
+    "end": 10054,
+    "start_time": 399.13,
+    "end_time": 402.05,
+    "ids": [
+      1,
+      3
+    ]
+  },
+  "low_score6": {
+    "type": "low_score",
+    "start": 10195,
+    "end": 10398,
+    "start_time": 407.69,
+    "end_time": 415.8,
+    "id": 3,
+    "low_score_rows": 183,
+    "total_rows": 204,
+    "min_score": 0.5
+  },
+  "overlap8": {
+    "type": "overlap",
+    "start": 10240,
+    "end": 10249,
+    "start_time": 409.49,
+    "end_time": 409.85,
+    "ids": [
+      0,
+      3
+    ]
+  },
+  "overlap11": {
+    "type": "overlap",
+    "start": 10240,
+    "end": 10249,
+    "start_time": 409.49,
+    "end_time": 409.85,
+    "ids": [
+      1,
+      3
+    ]
+  },
+  "transition1": {
+    "type": "id_switch",
+    "start": 10741,
+    "end": 10741,
+    "start_time": 429.52,
+    "end_time": 429.52,
+    "ids_before": [
+      0,
+      1,
+      3
+    ],
+    "ids_after": [
+      0,
+      3,
+      4
+    ],
+    "lost": [
+      1
+    ],
+    "gained": [
+      4
+    ]
+  },
+  "low_score7": {
+    "type": "low_score",
+    "start": 11816,
+    "end": 11944,
+    "start_time": 472.51,
+    "end_time": 477.63,
+    "id": 3,
+    "low_score_rows": 112,
+    "total_rows": 129,
+    "min_score": 0.586
+  },
+  "low_score8": {
+    "type": "low_score",
+    "start": 12308,
+    "end": 12333,
+    "start_time": 492.18,
+    "end_time": 493.18,
+    "id": 3,
+    "low_score_rows": 26,
+    "total_rows": 26,
+    "min_score": 0.562
+  },
+  "low_score9": {
+    "type": "low_score",
+    "start": 13068,
+    "end": 13263,
+    "start_time": 522.57,
+    "end_time": 530.37,
+    "id": 3,
+    "low_score_rows": 193,
+    "total_rows": 196,
+    "min_score": 0.543
+  },
+  "low_score10": {
+    "type": "low_score",
+    "start": 13663,
+    "end": 13752,
+    "start_time": 546.37,
+    "end_time": 549.93,
+    "id": 3,
+    "low_score_rows": 84,
+    "total_rows": 90,
+    "min_score": 0.512
+  },
+  "overlap12": {
+    "type": "overlap",
+    "start": 13685,
+    "end": 13694,
+    "start_time": 547.25,
+    "end_time": 547.61,
+    "ids": [
+      3,
+      4
+    ]
+  },
+  "overlap13": {
+    "type": "overlap",
+    "start": 13721,
+    "end": 13725,
+    "start_time": 548.69,
+    "end_time": 548.85,
+    "ids": [
+      3,
+      4
+    ]
+  },
+  "low_score11": {
+    "type": "low_score",
+    "start": 13781,
+    "end": 14264,
+    "start_time": 551.09,
+    "end_time": 570.4,
+    "id": 3,
+    "low_score_rows": 462,
+    "total_rows": 484,
+    "min_score": 0.189
+  },
+  "overlap14": {
+    "type": "overlap",
+    "start": 14053,
+    "end": 14067,
+    "start_time": 561.96,
+    "end_time": 562.52,
+    "ids": [
+      3,
+      4
+    ]
+  },
+  "overlap15": {
+    "type": "overlap",
+    "start": 14181,
+    "end": 14185,
+    "start_time": 567.08,
+    "end_time": 567.24,
+    "ids": [
+      3,
+      4
+    ]
+  },
+  "overlap9": {
+    "type": "overlap",
+    "start": 14328,
+    "end": 15203,
+    "start_time": 572.96,
+    "end_time": 607.95,
+    "ids": [
+      0,
+      4
+    ]
+  },
+  "transition2": {
+    "type": "id_switch",
+    "start": 15204,
+    "end": 15204,
+    "start_time": 607.99,
+    "end_time": 607.99,
+    "ids_before": [
+      0,
+      3,
+      4
+    ],
+    "ids_after": [
+      0,
+      2,
+      3
+    ],
+    "lost": [
+      4
+    ],
+    "gained": [
+      2
+    ]
+  },
+  "low_score1": {
+    "type": "low_score",
+    "start": 17493,
+    "end": 17525,
+    "start_time": 699.52,
+    "end_time": 700.8,
+    "id": 0,
+    "low_score_rows": 30,
+    "total_rows": 33,
+    "min_score": 0.57
+  },
+  "low_score12": {
+    "type": "low_score",
+    "start": 19435,
+    "end": 19865,
+    "start_time": 777.18,
+    "end_time": 794.38,
+    "id": 3,
+    "low_score_rows": 431,
+    "total_rows": 431,
+    "min_score": 0.039
+  },
+  "low_score2": {
+    "type": "low_score",
+    "start": 20138,
+    "end": 20210,
+    "start_time": 805.29,
+    "end_time": 808.17,
+    "id": 0,
+    "low_score_rows": 73,
+    "total_rows": 73,
+    "min_score": 0.256
+  },
+  "low_score13": {
+    "type": "low_score",
+    "start": 20311,
+    "end": 20407,
+    "start_time": 812.21,
+    "end_time": 816.05,
+    "id": 3,
+    "low_score_rows": 97,
+    "total_rows": 97,
+    "min_score": 0.032
+  },
+  "low_score14": {
+    "type": "low_score",
+    "start": 20448,
+    "end": 20910,
+    "start_time": 817.69,
+    "end_time": 836.17,
+    "id": 3,
+    "low_score_rows": 463,
+    "total_rows": 463,
+    "min_score": 0.023
+  },
+  "overlap3": {
+    "type": "overlap",
+    "start": 20738,
+    "end": 20925,
+    "start_time": 829.29,
+    "end_time": 836.77,
+    "ids": [
+      0,
+      2
+    ]
+  },
+  "overlap4": {
+    "type": "overlap",
+    "start": 20969,
+    "end": 20989,
+    "start_time": 838.53,
+    "end_time": 839.33,
+    "ids": [
+      0,
+      2
+    ]
+  },
+  "overlap5": {
+    "type": "overlap",
+    "start": 21047,
+    "end": 21219,
+    "start_time": 841.64,
+    "end_time": 848.52,
+    "ids": [
+      0,
+      2
+    ]
+  },
+  "transition3": {
+    "type": "id_switch",
+    "start": 21220,
+    "end": 21220,
+    "start_time": 848.56,
+    "end_time": 848.56,
+    "ids_before": [
+      0,
+      2,
+      3
+    ],
+    "ids_after": [
+      2,
+      3,
+      4
+    ],
+    "lost": [
+      0
+    ],
+    "gained": [
+      4
+    ]
+  },
+  "low_score3": {
+    "type": "low_score",
+    "start": 22169,
+    "end": 22195,
+    "start_time": 886.51,
+    "end_time": 887.55,
+    "id": 2,
+    "low_score_rows": 27,
+    "total_rows": 27,
+    "min_score": 0.508
+  }
+}

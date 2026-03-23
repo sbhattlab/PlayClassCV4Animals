@@ -1,0 +1,190 @@
+[
+  {
+    "type": "trim",
+    "cause": "merged_object",
+    "from": 408,
+    "to": 451,
+    "id": 0,
+    "_time": "00:16.32-00:18.04"
+  },
+  {
+    "type": "id_switch",
+    "frame": 9310,
+    "from": 3,
+    "to": 4,
+    "_time": "06:12.42"
+  },
+  {
+    "type": "id_switch",
+    "frame": 10714,
+    "from": 0,
+    "to": 1,
+    "_time": "07:08.59"
+  },
+  {
+    "type": "id_switch",
+    "frame": 10714,
+    "from": 2,
+    "to": 3,
+    "_time": "07:08.59"
+  },
+  {
+    "type": "id_switch",
+    "frame": 10714,
+    "from": 4,
+    "to": 2,
+    "_time": "07:08.59"
+  },
+  {
+    "type": "trim",
+    "cause": "merged_object",
+    "from": 12132,
+    "to": 12163,
+    "id": 3,
+    "_time": "08:05.28-08:06.52"
+  },
+  {
+    "type": "trim",
+    "cause": "merged_object",
+    "from": 12216,
+    "to": 12307,
+    "id": 3,
+    "_time": "08:08.64-08:12.28"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "from": 12696,
+    "to": 12744,
+    "id": 3,
+    "_time": "08:27.84-08:29.76"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "from": 12864,
+    "to": 13049,
+    "id": 2,
+    "_time": "08:34.56-08:41.96"
+  },
+  {
+    "type": "id_switch",
+    "frame": 13711,
+    "from": 2,
+    "to": 1,
+    "_time": "09:08.47"
+  },
+  {
+    "type": "id_switch",
+    "frame": 13711,
+    "from": 1,
+    "to": 0,
+    "_time": "09:08.47"
+  },
+  {
+    "type": "id_switch",
+    "frame": 13711,
+    "from": 3,
+    "to": 4,
+    "_time": "09:08.47"
+  },
+  {
+    "type": "trim",
+    "cause": "merged_object",
+    "from": 14556,
+    "to": 14580,
+    "id": 1,
+    "_time": "09:42.24-09:43.20"
+  },
+  {
+    "type": "trim",
+    "cause": "merged_object",
+    "from": 14616,
+    "to": 14640,
+    "id": 0,
+    "_time": "09:44.64-09:45.60"
+  },
+  {
+    "type": "trim",
+    "cause": "merged_object",
+    "from": 14676,
+    "to": 14784,
+    "id": 1,
+    "_time": "09:47.04-09:51.36"
+  },
+  {
+    "type": "id_switch",
+    "frame": 19365,
+    "from": 1,
+    "to": 4,
+    "_time": "12:54.65"
+  },
+  {
+    "type": "id_switch",
+    "frame": 19365,
+    "from": 4,
+    "to": 3,
+    "_time": "12:54.65"
+  },
+  {
+    "type": "trim",
+    "cause": "overlap",
+    "from": 21192,
+    "to": 21312,
+    "id": 0,
+    "_time": "14:07.68-14:12.48"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "from": 21735,
+    "to": 21881,
+    "id": 0,
+    "_time": "14:29.45-14:35.29"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "from": 21918,
+    "to": 21949,
+    "id": 0,
+    "_time": "14:36.77-14:38.01"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "from": 21948,
+    "to": 22188,
+    "id": 4,
+    "_time": "14:37.92-14:47.52"
+  },
+  {
+    "type": "trim",
+    "cause": "low_score",
+    "from": 22209,
+    "to": 22509,
+    "id": 0,
+    "_time": "14:48.41-15:00.41"
+  },
+  {
+    "type": "id_match",
+    "protocol_id": 2654,
+    "description": "Pink left wing",
+    "tracking_id": 4,
+    "frame": null
+  },
+  {
+    "type": "id_match",
+    "protocol_id": 2784,
+    "description": "Yellow left wing",
+    "tracking_id": 3,
+    "frame": null
+  },
+  {
+    "type": "id_match",
+    "protocol_id": 2662,
+    "description": "Dark brown",
+    "tracking_id": 0,
+    "frame": null
+  }
+]
