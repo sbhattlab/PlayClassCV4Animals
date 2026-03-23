@@ -7,7 +7,6 @@ import pycocotools.mask as mask_util
 import torch
 from loguru import logger
 from PIL import Image
-from sklearn.decomposition import PCA as skPCA
 from tqdm import tqdm
 
 from src.dataset.crops import compute_union_origin, crop_frame
@@ -186,7 +185,9 @@ def _split_mask_thirds(mask_binary):
     if len(xs) < 10:
         return None
     coords = np.column_stack([xs, ys])
-    pca = skPCA(n_components=min(2, coords.shape[0]))
+    from sklearn.decomposition import PCA
+
+    pca = PCA(n_components=min(2, coords.shape[0]))
     pca.fit(coords)
     axis = pca.components_[0]
     center = pca.mean_

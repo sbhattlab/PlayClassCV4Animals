@@ -106,14 +106,13 @@ def parse_args():
 
 
 def _build_output_name(args) -> str:
-    """Build output filename reflecting active transforms, e.g. embeddings_vitb_125_blur.pt."""
-    parts = ["embeddings"]
-    # Encode model variant (skip default vitl)
-    model_lower = args.model_name.lower()
-    if "vitb" in model_lower:
-        parts.append("vitb")
-    elif "vits" in model_lower:
-        parts.append("vits")
+    """Build output filename, e.g. embeddings_dinov3_vitl.pt."""
+    from src.dataset.utils import parse_model_size
+
+    parts = ["embeddings", "dinov3"]
+    size = parse_model_size(args.model_name)
+    if size:
+        parts.append(size)
     if args.resolution is not None:
         parts.append(f"r{args.resolution}")
     if args.crop_mode != "bbox":
