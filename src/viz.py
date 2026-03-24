@@ -218,7 +218,12 @@ def _decode_rle_mask(counts, size):
 
 
 def _read_video_frame(video_path, frame_idx):
-    """Extract a single frame from a video file. Returns BGR or None."""
+    """Extract a single frame from a video file. Returns BGR or None.
+
+    .. deprecated::
+        Uses CAP_PROP_POS_FRAMES seeking — unreliable for H.264.
+        Use :func:`_read_video_frames_batch` instead.
+    """
     cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
         return None
@@ -228,6 +233,37 @@ def _read_video_frame(video_path, frame_idx):
     if not ret:
         return None
     return frame
+
+
+def _read_video_frames_batch(video_path, frame_indices):
+    """Read specific frames from a video sequentially. Returns {frame_idx: BGR array}.
+
+    Uses sequential grab/read to avoid H.264 seeking issues.
+    Frames not in the video are silently omitted from the result.
+    """
+    if not frame_indices:
+        return {}
+
+    frame_set = set(frame_indices)
+    max_frame = max(frame_set)
+
+    cap = cv2.VideoCapture(str(video_path))
+    if not cap.isOpened():
+        return {}
+
+    result = {}
+    for i in range(max_frame + 1):
+        if i in frame_set:
+            ret, frame = cap.read()
+            if ret:
+                result[i] = frame
+            if len(result) == len(frame_set):
+                break
+        else:
+            cap.grab()  # advance without full decode
+
+    cap.release()
+    return result
 
 
 def _get_chunk_boundaries(chunk_info):
@@ -646,10 +682,12 @@ def plot_mask_evolution(tracking_df, chunk_info, video_path, fps=None, output_di
     if not boundaries:
         return
 
+    # Build per-boundary display frame lists and collect all needed indices
+    boundary_display_frames = []
+    all_frame_indices = set()
     for boundary in boundaries:
         boundary_frame = boundary["boundary_frame"]
         source_frame = boundary["source_frame_idx"]
-        chunk_idx = boundary["chunk_idx"]
 
         if source_frame is not None:
             display_frames = [
@@ -669,6 +707,15 @@ def plot_mask_evolution(tracking_df, chunk_info, video_path, fps=None, output_di
                 boundary_frame + 2,
                 boundary_frame + 5,
             ]
+        boundary_display_frames.append(display_frames)
+        all_frame_indices.update(f for f in display_frames if f >= 0)
+
+    # Batch-read all frames sequentially (H.264-safe)
+    frame_cache = _read_video_frames_batch(video_path, sorted(all_frame_indices))
+
+    for boundary, display_frames in zip(boundaries, boundary_display_frames):
+        boundary_frame = boundary["boundary_frame"]
+        chunk_idx = boundary["chunk_idx"]
 
         fig, axes = plt.subplots(2, 3, figsize=(18, 10))
         axes_flat = axes.flatten()
@@ -676,7 +723,7 @@ def plot_mask_evolution(tracking_df, chunk_info, video_path, fps=None, output_di
         for ax_idx, fidx in enumerate(display_frames):
             ax = axes_flat[ax_idx]
 
-            frame_bgr = _read_video_frame(video_path, fidx)
+            frame_bgr = frame_cache.get(fidx)
             if frame_bgr is None:
                 ax.text(
                     0.5,
@@ -843,10 +890,20 @@ def plot_prompt_points(tracking_df, chunk_info, video_path, fps=None, output_dir
     if sample_masks:
         h, w = next(iter(sample_masks.values())).shape
     else:
-        frame = _read_video_frame(video_path, 0)
+        # Read frame 0 sequentially (just one frame)
+        frames_0 = _read_video_frames_batch(video_path, [0])
+        frame = frames_0.get(0)
         if frame is None:
             return
         h, w = frame.shape[:2]
+
+    # Collect all needed frame indices and batch-read (H.264-safe)
+    all_frame_indices = set()
+    for boundary in boundaries:
+        if boundary["source_frame_idx"] is not None:
+            all_frame_indices.add(boundary["source_frame_idx"])
+            all_frame_indices.add(boundary["boundary_frame"])
+    frame_cache = _read_video_frames_batch(video_path, sorted(all_frame_indices))
 
     for boundary in boundaries:
         chunk_idx = boundary["chunk_idx"]
@@ -857,8 +914,8 @@ def plot_prompt_points(tracking_df, chunk_info, video_path, fps=None, output_dir
         if source_frame is None:
             continue
 
-        src_frame_bgr = _read_video_frame(video_path, source_frame)
-        tgt_frame_bgr = _read_video_frame(video_path, target_frame)
+        src_frame_bgr = frame_cache.get(source_frame)
+        tgt_frame_bgr = frame_cache.get(target_frame)
         if src_frame_bgr is None or tgt_frame_bgr is None:
             continue
 
@@ -1202,8 +1259,6 @@ def plot_chunk_boundary_frames(
             Optional; cells show '?' when not provided.
         save_path: Path to save the PNG. If None the plot is shown interactively.
     """
-    import cv2
-
     video_path = Path(video_path)
     if not video_path.exists():
         logger.warning(
@@ -1211,17 +1266,9 @@ def plot_chunk_boundary_frames(
         )
         return
 
-    cap = cv2.VideoCapture(str(video_path))
-    if not cap.isOpened():
-        logger.warning(
-            f"plot_chunk_boundary_frames: could not open video ({video_path}), skipping"
-        )
-        return
-
     _fps = fps or 25.0
     chunks = chunk_info.get("chunks", [])
     if not chunks:
-        cap.release()
         return
 
     # Build n_obj lookup from yolo_scan_df if available
@@ -1233,10 +1280,13 @@ def plot_chunk_boundary_frames(
     ):
         n_obj_lookup = dict(zip(yolo_scan_df["frame_idx"], yolo_scan_df["num_objects"]))
 
-    def _grab(frame_idx: int):
-        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
-        ret, frame = cap.read()
-        return cv2.cvtColor(frame, cv2.COLOR_BGR2RGB) if ret else None
+    # Collect all frame indices and batch-read (H.264-safe)
+    all_frame_indices = set()
+    for c in chunks:
+        start, end = c["frame_range"]
+        all_frame_indices.add(start)
+        all_frame_indices.add(end - 1)
+    frame_cache = _read_video_frames_batch(video_path, sorted(all_frame_indices))
 
     def _ts(frame_idx: int) -> str:
         total_s = frame_idx / _fps
@@ -1258,10 +1308,10 @@ def plot_chunk_boundary_frames(
         mtype = c.get("model_type", "")
         model_short = "video" if mtype == "Sam3VideoModel" else "tracker"
         for j, (frame_idx, label) in enumerate([(start, "start"), (end - 1, "end")]):
-            img = _grab(frame_idx)
+            frame_bgr = frame_cache.get(frame_idx)
             ax = axes[i][j]
-            if img is not None:
-                ax.imshow(img)
+            if frame_bgr is not None:
+                ax.imshow(cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB))
             else:
                 ax.set_facecolor("black")
                 ax.text(
@@ -1280,8 +1330,6 @@ def plot_chunk_boundary_frames(
                 fontsize=8,
             )
             ax.axis("off")
-
-    cap.release()
 
     stem = Path(save_path).stem if save_path else "chunk_boundaries"
     fig.suptitle(f"Chunk boundary frames — {stem}", fontsize=12, fontweight="bold")
