@@ -52,11 +52,12 @@ def extract_videoprism_embeddings(
         all_bboxes = group_rows["bbox"].tolist()
         union_origin = None
         union_bbox = None
-        if crop_mode in ("union512", "darken512", "roi512"):
+        if crop_mode != "union" and crop_mode.startswith(("union", "darken", "roi")):
+            crop_sz = int("".join(ch for ch in crop_mode if ch.isdigit()) or "512")
             first_local = int(group_rows.iloc[0]["frame_idx"]) - min_frame
             if first_local < len(frames):
                 fh, fw = frames[first_local].shape[:2]
-                union_origin = compute_union_origin(all_bboxes, fh, fw)
+                union_origin = compute_union_origin(all_bboxes, fh, fw, crop_size=crop_sz)
         elif crop_mode == "union":
             union_bbox = compute_union_bbox(all_bboxes)
 

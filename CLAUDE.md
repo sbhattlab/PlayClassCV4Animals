@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-End-to-end pipeline for automated play-behaviour classiciation.
+End-to-end pipeline for automated play-behaviour classification.
 
 The pipeline (i) tracks individual birds (three per pen) across 15-minute recordings using chunked SAM 3 with YOLO-guided adaptive boundary selection and text-grounded re-initialisation, (ii) extracts per-bird DINOv3 and V-JEPA 2.1 appearance embeddings and handcrafted motion features from decoded masks, and (iii) classifies locomotor play, object play, and no-play windows.
 

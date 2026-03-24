@@ -26,11 +26,9 @@ This downloads the checkpoint and patches the torch.hub cache to rename
 """
 
 import sys
-import warnings
 from argparse import ArgumentParser
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 import torch
 from loguru import logger

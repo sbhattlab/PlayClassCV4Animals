@@ -33,7 +33,7 @@ class VJEPA21Wrapper:
     def get_vision_features(self, pixel_values_videos, **kwargs):
         # HF processor outputs (B, T, C, H, W), hub encoder expects (B, C, T, H, W)
         x = pixel_values_videos.permute(0, 2, 1, 3, 4)
-        with warnings.catch_warnings(), torch.autocast("cuda", dtype=torch.bfloat16):
+        with warnings.catch_warnings(), torch.autocast(self.device.type, dtype=torch.bfloat16):
             warnings.filterwarnings("ignore", message=".*sdp_kernel.*")
             return self.encoder(x)
 

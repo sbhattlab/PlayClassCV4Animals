@@ -9,9 +9,10 @@ from src._config import DEFAULT_FPS
 
 
 def parse_model_size(model_name: str) -> str | None:
-    """Extract model size tag (e.g. 'vitb', 'vitl', 'large') from a model name.
+    """Extract normalized model size tag (e.g. 'vitb', 'vitl', 'vitg') from a model name.
 
     Works with HuggingFace IDs, torch.hub names, and VideoPrism config names.
+    Keywords like 'base', 'large', 'giant', 'huge' are mapped to 'vit*' tags.
 
     Returns None if no size can be inferred.
     """
