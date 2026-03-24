@@ -33,7 +33,12 @@ from transformers import (
     Sam3VideoProcessor,
 )
 
-from src.config import create_run_directory, sanitize_filename, setup_logger
+from src.config import (
+    create_run_directory,
+    create_video_run_directory,
+    sanitize_filename,
+    setup_logger,
+)
 from src.io import get_video_metadata, load_video_frames_torchcodec
 from src.memory import free_gpu_memory, free_system_memory
 from src.metrics import (
@@ -1145,7 +1150,7 @@ def _run_single_video(cfg, run_dir: Path, config_path: Path | None = None):
 # ---------------------------------------------------------------------------
 
 
-def _run_batch(cfg, video_dir: Path, job_type: str, config_path: Path):
+def _run_batch(cfg, batch_dir: Path, video_dir: Path, config_path: Path):
     """Process all video files in video_dir, each in its own subdirectory."""
     VIDEO_EXTENSIONS = {
         ext for e in [".mp4", ".avi", ".mov", ".mkv", ".m4v"] for ext in (e, e.upper())
@@ -1158,18 +1163,13 @@ def _run_batch(cfg, video_dir: Path, job_type: str, config_path: Path):
     if not video_files:
         raise ValueError(f"No video files found in {video_dir}")
 
-    # Shared batch directory (one timestamp for the whole batch)
-    batch_dir = create_run_directory(Path(cfg.output_dir), job_type)
-
     reuse_chunk_info = cfg.get("reuse_chunk_info", False)
     reuse_run_dir_base = (
         Path(cfg.reuse_run_dir) if cfg.get("reuse_run_dir", None) else None
     )
 
     for video_file in video_files:
-        sanitized = sanitize_filename(video_file.stem)
-        video_run_dir = batch_dir / sanitized
-        video_run_dir.mkdir(parents=True, exist_ok=True)
+        video_run_dir = create_video_run_directory(batch_dir, video_file.stem)
         (video_run_dir / "metrics").mkdir(parents=True, exist_ok=True)
 
         # Build per-video config with updated video_path
@@ -1179,6 +1179,7 @@ def _run_batch(cfg, video_dir: Path, job_type: str, config_path: Path):
 
         # Resolve per-video reuse_run_dir in batch mode
         if reuse_chunk_info and reuse_run_dir_base:
+            sanitized = sanitize_filename(video_file.stem)
             per_video_reuse = reuse_run_dir_base / sanitized
             if (per_video_reuse / "chunk_info.json").exists():
                 video_cfg.reuse_run_dir = str(per_video_reuse)
@@ -1213,8 +1214,12 @@ def run(cfg, config_path: str | Path):
 
     job_type = "yolo_scan" if cfg.get("yolo_scan_only", False) else cfg.job_type
 
+    # Timestamped parent isolates each run from previous ones
+    batch_dir = create_run_directory(Path(cfg.output_dir), job_type)
+
     if video_dir:
-        _run_batch(cfg, Path(video_dir), job_type, config_path=config_path)
+        _run_batch(cfg, batch_dir, Path(video_dir), config_path=config_path)
     else:
-        run_dir = create_run_directory(Path(cfg.output_dir), job_type)
+        video_stem = Path(video_path).stem
+        run_dir = create_video_run_directory(batch_dir, video_stem)
         _run_single_video(cfg, run_dir, config_path=config_path)
