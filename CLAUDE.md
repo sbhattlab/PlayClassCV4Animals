@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-End-to-end pipeline for automated play-behaviour classiciation. 
+End-to-end pipeline for automated play-behaviour classification.
 
 The pipeline (i) tracks individual birds (three per pen) across 15-minute recordings using chunked SAM 3 with YOLO-guided adaptive boundary selection and text-grounded re-initialisation, (ii) extracts per-bird DINOv3 and V-JEPA 2.1 appearance embeddings and handcrafted motion features from decoded masks, and (iii) classifies locomotor play, object play, and no-play windows.
 
@@ -75,7 +75,11 @@ src/
     tracking_postprocessing.py  # Remediation: prefill from issues, ID-scoped trims, ID remaps, process_tracks
     labels.py               # Behaviour label parsing from Excel registration protocols
     features.py             # Handcrafted mask features: spatial, temporal, pairwise, window summarization (vectorized)
-    embeddings.py           # DINOv3 CLS-token embedding extraction from bbox crops of tracked objects
+    embeddings/             # Embedding extraction package
+      __init__.py           # Re-exports for backwards compat
+      dinov3.py             # DINOv3 CLS-token embedding extraction from bbox crops
+      vjepa2.py             # V-JEPA 2/2.1 video embedding extraction
+      videoprism.py         # VideoPrism video embedding extraction
     crops.py              # Shared crop modes: crop_frame, compute_union_origin, compute_union_bbox
   classification/           # Behaviour classification package
     models.py               # Backbones: SimpleLinear, SimpleMLP, TemporalMLP, TemporalCNNv2. MODEL_REGISTRY maps names to (cls, temporal_flag).
@@ -85,12 +89,16 @@ src/
   debug/                    # Interactive debugging utilities and standalone grounding test script
 
 script/
-  build_dataset.py             # Labels, postprocessing, windowing → tracks + labels parquets (output to data/dataset/)
-  extract_features.py          # Mask feature extraction + window summarization (CPU-only, ~2 min)
-  extract_embeddings.py        # DINOv3 CLS-token embeddings from bbox crops (GPU required)
-  train.py                     # Classification training CLI (PyTorch Lightning)
-  compute_chunk_boundaries.py  # User script: recompute metrics + boundaries from existing yolo_tracking.parquet
-  convert_video_clean.py       # Video format/resolution conversion utility
+  build_dataset.py                 # Labels, postprocessing, windowing → tracks + labels parquets
+  extract_features.py              # Mask feature extraction + window summarization (CPU-only)
+  extract_embeddings_dinov3.py     # DINOv3 CLS-token embeddings (GPU required)
+  extract_embeddings_vjepa2.py     # V-JEPA 2/2.1 video embeddings (GPU required)
+  extract_embeddings_videoprism.py # VideoPrism video embeddings (JAX/GPU)
+  save_cid_crops.py                # Save union384 crops to disk for CID pretraining
+  cid_vjepa21.py                   # CID pretraining of V-JEPA 2.1
+  train.py                         # Classification training CLI (PyTorch Lightning)
+  train_xgboost.py                 # XGBoost baseline (LOCO/LOVO)
+  compute_chunk_boundaries.py      # Recompute metrics + boundaries from yolo_tracking.parquet
 
 config/                     # YAML configs (OmegaConf)
 tests/                      # pytest tests (dataset features, labels, postprocessing)
@@ -134,9 +142,15 @@ Extracts handcrafted features from tracking masks. All functions are vectorized 
 
 Feature set (`_FEATURE_COLS`): `mask_area`, `aspect_ratio`, `velocity`, `area_change_rate`, `min_dist_to_other`, `mean_dist_to_other`. Additionally `bbox_area` is output by spatial features as a debugging column (not in `_FEATURE_COLS`) for detecting saltatory bbox spikes.
 
-### Embeddings module (`src/dataset/embeddings.py`)
+### Embeddings package (`src/dataset/embeddings/`)
 
-Extracts DINOv3 CLS-token embeddings from bbox crops of tracked objects. Output is `{(video_id, bird_id, window): Tensor(F_w, D)}` — one variable-length sequence per window, aligned with the feature summarization grouping. `D` depends on the model (768 for ViT-B, 1024 for ViT-L), read from `model.config.hidden_size`. Crops are plain bbox cutouts (no mask-based background attenuation). Bboxes are clamped to frame dimensions to handle SAM3 bbox overshoot (known upstream issue where center+size→corner conversion produces coordinates slightly outside the image). Extraction uses **bfloat16** (float16 produces all-NaN with DINOv3 ViT-L). Uses `load_video_frames_sequential` for frame-accurate loading (see Misc. notes on H.264 seeking). Extraction script: `script/extract_embeddings.py` (GPU required, run via `pixi run -e embeddings extract_embeddings`).
+Embedding extraction from tracked objects. Three backends:
+
+- **`dinov3.py`**: DINOv3 CLS-token extraction. Collects all bbox crops across windows, batch-processes through the model. Uses bfloat16.
+- **`vjepa2.py`**: V-JEPA 2/2.1 video embeddings. Processes non-overlapping clips of `num_frames`, spatially mean-pools per timestep. Includes `VJEPA21Wrapper` for torch.hub models.
+- **`videoprism.py`**: VideoPrism (JAX/Flax). Same clip-based approach as V-JEPA but uses JAX arrays.
+
+All backends output `{(video_id, bird_id, window): Tensor(F_w, D)}`. Embedding filenames follow `embeddings_{backbone}_{size}[_{variant}].pt` (e.g. `embeddings_dinov3_vitl.pt`, `embeddings_vjepa21_vitb_temporal.pt`). Model size is inferred via `parse_model_size()` in `src/dataset/utils.py`.
 
 ### Classification package (`src/classification/`)
 
@@ -172,7 +186,7 @@ Behaviour classification from dataset outputs. Uses PyTorch Lightning (pixi env 
   - `data/postprocessing/` — Version-controlled per-video JSONs + `tracking_outputs.parquet`, organized as `day_{N}/{video_subdir}/`. Source of truth for `build_dataset`.
 - `ext-data/` — Symlink to `/mnt/birds/rebecca2025/` (longer videos, output results, image sequences)
   - `ext-data/test/batch_mode_test_set/` — 3 × 2-min clips (`test_video_1/2/3.mp4`) for batch mode testing
-- `video-data/` — Symlink to `/mnt/birds/rebecca2025/raw` (raw video files)
+- `data/video/` — Symlinks to video directories (`batch/`, `batch2/`, `week_1_day_2/` → `/mnt/birds/rebecca2025/raw/`)
 - `Grounded-SAM-2-fork/` — Git submodule (backburner)
 
 ## Key Dependencies
@@ -428,7 +442,7 @@ pixi run ruff format src/ script/
 ## Misc. notes
 
 - **H.264 frame seeking is broken**: `cv2.CAP_PROP_POS_FRAMES` seeking returns wrong frames for H.264-encoded videos (only accurate at keyframes/I-frames; inter-coded P/B-frames return incorrect data). Two frame-loading functions exist in `src/utils.py`:
-  - `load_video_frames_range` — Uses `CAP_PROP_POS_FRAMES` seeking. **Fast but unreliable for H.264.** 
+  - `load_video_frames_range` — Uses `CAP_PROP_POS_FRAMES` seeking. **Fast but unreliable for H.264.**
   - `load_video_frames_sequential` — Reads sequentially from frame 0. **Slower but frame-accurate** for all codecs. Used by `extract_embeddings` and the diagnostic notebook.
   - **Known impact**: The SAM3 tracking pipeline (`run_sam3_hf.py`) uses `load_video_frames_range` to load each chunk's frames, so chunks after chunk 0 may start from slightly wrong frames due to seek inaccuracy. Tracking results appear fine in practice (SAM3 is robust to small frame offsets), but this should be fixed.
 - SAM3 (both HF-transformers and native) is extremely unstable when run in Jupyter notebooks and frequently crashes the kernel. Prefer running SAM3 via scripts; for notebooks, load SAM3 first, free GPU memory, then load lighter models (e.g., DINOv3).

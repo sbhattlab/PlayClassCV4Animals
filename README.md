@@ -9,13 +9,10 @@ with postprocessing, feature extraction, and behaviour classification.
 
 ```sh
 git submodule update --init --recursive
-
-# Install environments
-pixi install -e tracker
-pixi install -e classifier
+pixi install
 ```
 
-Other environments (`gs2`, `yolo`) exist but are not actively used. The `classifier` environment adds PyTorch Lightning + torchmetrics. The `videoprism` environment provides JAX + VideoPrism. Platform is Linux-only (CUDA 12.6).
+Pixi environments: `default` (base), `tracker` (SAM3), `dataset` (build + features), `embeddings` (DINOv3/V-JEPA), `classifier` (training), `videoprism` (JAX). Platform is Linux-only (CUDA 12.6).
 
 ## Data
 
@@ -23,40 +20,38 @@ Other environments (`gs2`, `yolo`) exist but are not actively used. The `classif
 data/
   labels/          Registration protocol Excel files (behaviour labels + bird info)
   tracking/        Symlinks to tracking run output dirs (gitignored)
+  postprocessing/  Version-controlled per-video postprocessing JSONs + parquets (day_28/, day_29/)
   dataset/         Combined dataset outputs (tracks, labels, features, embeddings)
-  postprocessing/  Version-controlled per-video postprocessing JSONs
+  video/           Symlinks to video directories (batch/, batch2/, week_1_day_2/)
 ext-data/          Symlink to /mnt/birds/rebecca2025/ (results, image sequences)
-```
-
-```sh
-# ku-01: symlink video and external data
-ln -s "/mnt/birds/rebecca2025/raw" data/video
-ln -s "/mnt/birds/rebecca2025/" ext-data
 ```
 
 ### Dataset
 
-Built from tracking outputs + registration protocol Excel files in three steps
-(see `src/dataset/README.md` for full details):
+Built from tracking outputs + registration protocol Excel files in three steps:
 
 ```sh
 # 1. Labels, postprocessing, windows (fast, ~seconds)
-pixi run -e sam3-hf build_dataset
+pixi run -e dataset build_dataset
 
 # 2. Mask features (CPU-only)
-pixi run -e sam3-hf extract_features
+pixi run -e dataset extract_features
 
-# 3. DINOv3 embeddings (GPU required)
-pixi run -e sam3-hf extract_embeddings --video-dir video-data/batch
+# 3. Embeddings (GPU required, multiple backbones available)
+pixi run -e embeddings extract_embeddings_dinov3                                      # DINOv3 ViT-L (default)
+pixi run -e embeddings python -m script.extract_embeddings_vjepa2 --temporal          # V-JEPA 2.1 ViT-L
+pixi run -e videoprism extract_videoprism --temporal                                  # VideoPrism Base
 ```
 
-All scripts auto-discover tracking runs under `data/tracking/` and write outputs to `data/dataset/`:
+All scripts default to `data/postprocessing/` (input) and `data/dataset/` (output). Video dirs are auto-discovered under `data/video/`.
+
+Outputs in `data/dataset/`:
 
 - `tracks.parquet` — postprocessed tracks with protocol bird IDs and window column
 - `labels.parquet` — behaviour labels aligned to tracking windows
 - `features_all.parquet` — per-frame mask features (spatial, temporal, pairwise)
 - `features_windowed.parquet` — per-window feature summaries
-- `embeddings.pt` — DINOv3 CLS-token embeddings per (video, bird, window)
+- `embeddings_{backbone}_{size}[_{variant}].pt` — embeddings per (video, bird, window)
 
 ## Tasks
 
@@ -74,10 +69,6 @@ pixi run tracker
 
 # Custom config
 pixi run -e tracker python -m script.run_tracker --config config/tracker_manual_chunking.yaml
-
-# Basic tracker test
-CUDA_VISIBLE_DEVICES=1 pixi run test-sam3-hf-image
-CUDA_VISIBLE_DEVICES=1 pixi run test-sam3-hf-video
 ```
 
 ### Post-tracking
@@ -86,41 +77,38 @@ CUDA_VISIBLE_DEVICES=1 pixi run test-sam3-hf-video
 |--------|-------------|
 | `script/build_dataset.py` | Postprocess tracking outputs, match bird IDs, build dataset parquets |
 | `script/extract_features.py` | Extract mask features + window summaries from dataset tracks (CPU) |
-| `script/extract_embeddings.py` | Extract DINOv3 embeddings from dataset tracks (GPU) |
+| `script/extract_embeddings_dinov3.py` | Extract DINOv3 embeddings from dataset tracks (GPU) |
+| `script/extract_embeddings_vjepa2.py` | Extract V-JEPA 2/2.1 video embeddings (GPU) |
+| `script/extract_embeddings_videoprism.py` | Extract VideoPrism video embeddings (GPU, JAX) |
 | `script/compute_chunk_boundaries.py` | Recompute YOLO scan metrics + chunk boundaries |
-| `script/viz_chunk_boundaries.py` | Visualize chunk boundary frames |
-| `script/viz_grounding.py` | Render grounding phase outputs onto video |
-| `script/extract_embeddings_vjepa2.py` | Extract V-JEPA 2 video embeddings from dataset tracks (GPU) |
-| `script/extract_embeddings_videoprism.py` | Extract VideoPrism video embeddings from dataset tracks (GPU, JAX) |
-| `script/train.py` | Classification training with LOVO cross-validation (PyTorch Lightning) |
-| `script/train_xgboost.py` | XGBoost baseline with LOVO cross-validation |
+| `script/train.py` | Classification training with LOCO cross-validation (PyTorch Lightning) |
+| `script/train_xgboost.py` | XGBoost baseline with LOCO cross-validation |
 
 ## Tests
 
-> [!IMPORTANT]
-> Set `CUDA_VISIBLE_DEVICES` explicitly before running GPU tests.
-
 ```sh
 # Dataset tests (pytest)
-pixi run -e sam3-hf test_features
-pixi run -e sam3-hf test_postprocessing                     # Tracking postprocessing tests (pytest)
-pixi run -e classifier pytest tests/test_pooling.py         # Segment pooling + attention tests (pytest)
-pixi run -e sam3-hf pytest tests/test_post_build_dataset.py # Dataset integrity checks (pytest)
+pixi run -e dataset test_features
+pixi run -e dataset test_postprocessing
+pixi run -e dataset test_post_build
+
+# Tracker test (standalone, not pytest)
+pixi run -e tracker test_tracker
 ```
 
 ## Classification
 
-Behaviour classification using LOVO (Leave-One-Video-Out) cross-validation.
-Best result: **0.744 pooled macro F1** (TemporalCNNv2 on multi-scale DINOv3 embeddings + handcrafted features).
-See `notes/ablation_final.md` for full ablation tables.
+Behaviour classification using LOCO (Leave-One-Cage-Out) cross-validation.
+Best result: **0.773 pooled macro F1** (TemporalCNNv2 on features + DINOv3 plain256 + V-JEPA 2.1).
+See `notes/ablation_v2.md` for full ablation tables.
 
 ```sh
 # Features only (MLP baseline)
 pixi run -e classifier train --model mlp --input features --exclude social
 
-# Best model: temporal CNN on features + multi-scale embeddings
-pixi run -e classifier train --model temporal_cnn2 --input features+embeddings+embeddings_plain256+embeddings_union512 --exclude social --dropout 0.0 --n-segments 24
+# Best model: temporal CNN on features + V-JEPA 2.1
+pixi run -e classifier train --model temporal_cnn2 --input features+embeddings_vjepa21_vitl_temporal --exclude social --dropout 0.0 --n-segments 32
 
 # XGBoost baseline
-pixi run -e classifier python -m script.train_xgboost --exclude social
+pixi run -e classifier train_xgboost --exclude social
 ```

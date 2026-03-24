@@ -8,6 +8,26 @@ from loguru import logger
 from src._config import DEFAULT_FPS
 
 
+def parse_model_size(model_name: str) -> str | None:
+    """Extract normalized model size tag (e.g. 'vitb', 'vitl', 'vitg') from a model name.
+
+    Works with HuggingFace IDs, torch.hub names, and VideoPrism config names.
+    Keywords like 'base', 'large', 'giant', 'huge' are mapped to 'vit*' tags.
+
+    Returns None if no size can be inferred.
+    """
+    m = model_name.lower()
+    # ViT pattern: vit followed by size letter
+    match = re.search(r"vit([bslgh7])", m)
+    if match:
+        return "vit" + match.group(1)
+    # Keyword fallback
+    for keyword, tag in [("base", "vitb"), ("large", "vitl"), ("giant", "vitg"), ("huge", "vith")]:
+        if keyword in m:
+            return tag
+    return None
+
+
 def get_video_fps(tracking_dir):
     """Read video FPS from yolo_scan_summary.parquet in the tracking dir."""
     tracking_dir = Path(tracking_dir)
