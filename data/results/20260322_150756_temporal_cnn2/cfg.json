@@ -1,0 +1,18 @@
+{
+  "dataset_dir": "data/dataset",
+  "model": "temporal_cnn2",
+  "input": "features+embeddings_vjepa21_vitl_temporal",
+  "exclude": "social",
+  "epochs": 5,
+  "batch_size": 32,
+  "lr": 0.001,
+  "device": "cuda:1",
+  "dry_run": false,
+  "n_segments": 32,
+  "dropout": 0.0,
+  "d_hidden": null,
+  "label_smoothing": 0.1,
+  "feature_dropout": 0.0,
+  "class_weights": "inv-sqrt",
+  "cv": "loco"
+}

@@ -1,0 +1,5 @@
+{
+  "dataset_dir": "data/dataset",
+  "exclude": "social",
+  "cv": "loco"
+}
