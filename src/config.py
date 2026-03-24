@@ -30,7 +30,7 @@ def set_env_vars(cfg):
 
 
 def setup_logger(
-    log_dir: Path = Path("sandbox/logs/sam3-hf"),
+    log_dir: Path = Path("tmp/logs"),
     job_type: str = "sam3_hf",
     debug: bool = False,
 ) -> Path:

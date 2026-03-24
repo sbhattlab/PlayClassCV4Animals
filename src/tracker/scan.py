@@ -6,8 +6,7 @@ Runs YOLO+ByteTrack on a video and returns a per-detection DataFrame
 occlusion periods, separation windows, and adaptive chunking — lives in
 ``src.yolo.boundaries``.
 
-Re-exports from ``src.yolo.boundaries`` are provided so that existing callers
-(e.g. ``script.sam3.run_sam3_hf``) continue to work unchanged.
+Re-exports from ``src.yolo.boundaries`` are provided so that existing callers continue to work unchanged.
 """
 
 from pathlib import Path

@@ -9,7 +9,7 @@ Processes video in chunks:
 The process is heavily inspired by the Grounded SAM 2 pipeline, the main difference being that both the grounding and tracking stages are run with a Sam3-based model from HuggingFace, rather two separate models (i.e. groundedDINO + SAM2).
 
 Usage:
-    python -m script.run_tracker_main --config config/sam3_hf_config.yaml
+    python -m script.run_tracker --config config/tracker.yaml
 """
 
 import json
@@ -345,7 +345,7 @@ def _process_tracker_chunk(chunk_frames, start_idx, all_prompt_points, cfg, devi
             # Convert object_score_logits → probabilities via sigmoid
             # These are raw logits from the mask decoder's obj_score_head;
             # the video model applies sigmoid internally before storing as
-            # tracker_score (see modeling_sam3_video.py).
+            # tracker_score (see modeling_sam3_video.py in huggingface transformers codebase).
             if tracker_output.object_score_logits is not None:
                 obj_scores = (
                     torch.sigmoid(tracker_output.object_score_logits)
