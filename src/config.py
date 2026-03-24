@@ -77,6 +77,30 @@ def create_run_directory(base_output_dir: Path, job_type: str) -> Path:
     return run_dir
 
 
+def create_video_run_directory(base_output_dir: Path, video_stem: str) -> Path:
+    """Create a dataset-aligned run directory: ``{base}/day_{N}/{sanitized_stem}/``.
+
+    Parses the video ID from *video_stem* via
+    :func:`~src.dataset.utils.extract_video_id` to obtain the day number.
+    Falls back to a flat ``{base}/{sanitized_stem}/`` if parsing fails.
+    """
+    from src.dataset.utils import extract_video_id
+
+    sanitized = sanitize_filename(video_stem)
+    video_id = extract_video_id(video_stem)
+    if video_id is not None:
+        day = video_id[5:]  # "C1G3D28" → "28"
+        run_dir = base_output_dir / f"day_{day}" / sanitized
+    else:
+        logger.warning(
+            f"Could not parse video ID from '{video_stem}'; "
+            "output will not be grouped by day"
+        )
+        run_dir = base_output_dir / sanitized
+    run_dir.mkdir(parents=True, exist_ok=True)
+    return run_dir
+
+
 def sanitize_filename(name: str) -> str:
     """Sanitize a stem string for use as a directory name."""
     sanitized = re.sub(r"[^\w\-]", "_", name)
