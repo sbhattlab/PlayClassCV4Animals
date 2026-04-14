@@ -51,7 +51,7 @@ __marimo__/
 .mypy_cache/
 
 # macOS
-.DS_Store/
+*.DS_Store
 
 # Models
 model/
