@@ -5,19 +5,19 @@ authors = [
     "David Duchêne <david.duchene@sund.ku.dk>",
 ]
 channels = ["conda-forge"]
-platforms = ["linux-64"]
+platforms = ["linux-64", "osx-arm64"]
 name = "birdplay"
 version = "0.1.0"
 
-[system-requirements]
+[feature.cuda.system-requirements]
 cuda = "12.6"
 
 # ======= Environments ======
 [environments]
-tracker = ["tracker"]
-dataset = ["dataset"]
-embeddings = ["embeddings"]
-classifier = ["classifier"]
+tracker = ["tracker", "cuda"]
+dataset = ["dataset", "cuda"]
+embeddings = ["embeddings", "cuda"]
+classifier = ["classifier", "cuda"]
 videoprism = ["videoprism"]
 
 # ======= Default dependencies ======
@@ -39,11 +39,13 @@ tqdm = ">=4.67.1,<5"
 pyarrow = ">=23.0.0,<24"
 ipykernel = ">=7.1.0"
 ipywidgets = ">=8.1.8"
-torch = "==2.9.1+cu126"
-torchvision = "==0.24.1+cu126"
 matplotlib = ">=3.7.0,<4"
 seaborn = ">=0.13.2"
 nbconvert = ">=7.16.6,<8"
+
+[target.linux-64.pypi-dependencies]
+torch = "==2.9.1+cu126"
+torchvision = "==0.24.1+cu126"
 
 # ======= Tracker dependencies ======
 [feature.tracker.pypi-dependencies]
@@ -121,7 +123,7 @@ test_val_rotation = "python -m pytest tests/test_val_rotation.py -v"
 [feature.videoprism.system-requirements]
 cuda = "12"
 
-[feature.videoprism.pypi-dependencies]
+[feature.videoprism.target.linux-64.pypi-dependencies]
 jax = { version = "*", extras = ["cuda12"] }
 opt-einsum = ">=3.3,<3.4"
 videoprism = { git = "https://github.com/google-deepmind/videoprism" }
