@@ -1,0 +1,37 @@
+# YOLO scan only — batch over all 15 day_37 videos (CVPR revision tracker benchmark).
+# Inherits all defaults from tracker_scan.yaml; overrides:
+#   - video_dir (batch mode)
+#   - output_dir (under tracker_benchmark/predictions/A_yolo_botsort/ per plan)
+#   - CUDA_VISIBLE_DEVICES (use GPU 0; both A6000s are free)
+
+job_type: "yolo_scan"
+
+CUDA_VISIBLE_DEVICES: "0"
+PYTORCH_ALLOC_CONF: "expandable_segments:True,garbage_collection_threshold:0.6"
+
+video_dir: "/mnt/birds/rebecca2025/raw/day_37"
+text_prompt: "bird"
+
+output_dir: "ext-data/output/results/tracker_benchmark/predictions/A_yolo_botsort"
+
+start_frame: 0
+max_frames_to_track: 0
+
+yolo_scan_only: true
+use_adaptive_chunking: true
+
+chunk_seconds: 60
+adaptive_max_chunk_seconds: 120
+adaptive_search_window_seconds: 10.0
+
+yolo_scan:
+  model: "model/yolo26x.pt"
+  conf_thresh: 0.25
+  iou_thresh: 0.45
+  tracker_config: "config/botsort.yaml"
+  allowed_classes: ["bird"]
+
+  separation_min_objects: 3
+  occlusion_iou_threshold: 0.07
+  separation_min_distance: 0.10
+  clustering_distance_threshold: 0.15

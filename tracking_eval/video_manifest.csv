@@ -1,0 +1,16 @@
+video_id,cage,group,day,path,selected,notes,difficulty,rank_in_cage
+C1G2_day_29,C1,G2,29,ext-data/raw/day_29/C1G2_Test_2_day_29_2_Camera_5_2025_02_05_11_06_07_2.mp4,True,hardest group in C1,77,1
+C1G3_day_29,C1,G3,29,ext-data/raw/day_29/C1G3_Test_2_day_29_2_Camera_8_2025_02_05_11_06_07_3.mp4,False,,66,2
+C1G1_day_29,C1,G1,29,ext-data/raw/day_29/C1G1_Test_2_day_29_2_Camera_4_2025_02_05_11_06_07_1.mp4,False,,52,3
+C2G1_day_29,C2,G1,29,ext-data/raw/day_29/C2G1_Test_2_day_29_2_Camera_4_2025_02_05_09_57_55_1.mp4,True,hardest group in C2,75,1
+C2G3_day_29,C2,G3,29,ext-data/raw/day_29/C2G3_Test_2_day_29_2_Camera_8_2025_02_05_09_57_55_3.mp4,False,,28,2
+C2G2_day_29,C2,G2,29,ext-data/raw/day_29/C2G2_Test_2_day_29_2_Camera_5_2025_02_05_09_57_55_2.mp4,False,,19,3
+C3G2_day_29,C3,G2,29,ext-data/raw/day_29/C3G2_Test_2_day_29_2_Camera_5_2025_02_05_09_22_32_2.mp4,True,hardest group in C3 (overall hardest),90,1
+C3G3_day_29,C3,G3,29,ext-data/raw/day_29/C3G3_Test_2_day_29_2_Camera_8_2025_02_05_09_22_32_3.mp4,False,,58,2
+C3G1_day_29,C3,G1,29,ext-data/raw/day_29/C3G1_Test_2_day_29_2_Camera_4_2025_02_05_09_22_32_1.mp4,False,,43,3
+C4G2_day_29,C4,G2,29,ext-data/raw/day_29/C4G2_Test_2_day_29_2_Camera_5_2025_02_05_10_31_53_2.mp4,True,hardest group in C4,78,1
+C4G1_day_29,C4,G1,29,ext-data/raw/day_29/C4G1_Test_2_day_29_2_Camera_4_2025_02_05_10_31_53_1.mp4,False,,73,2
+C4G3_day_29,C4,G3,29,ext-data/raw/day_29/C4G3_Test_2_day_29_2_Camera_8_2025_02_05_10_31_53_3.mp4,False,,64,3
+C5G1_day_29,C5,G1,29,ext-data/raw/day_29/C5G1_Test_2_day_29_2_Camera_4_2025_02_05_11_41_33_1.mp4,True,hardest group in C5 (but markedly easier than C1-C4),49,1
+C5G2_day_29,C5,G2,29,ext-data/raw/day_29/C5G2_Test_2_day_29_2_Camera_5_2025_02_05_11_41_33_2.mp4,False,,37,2
+C5G3_day_29,C5,G3,29,ext-data/raw/day_29/C5G3_Test_2_day_29_2_Camera_8_2025_02_05_11_41_33_3.mp4,False,,31,3
