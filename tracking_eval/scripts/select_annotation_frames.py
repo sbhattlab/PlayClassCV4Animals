@@ -5,7 +5,8 @@ Plan reference: Phase 1.2 of the CVPR-workshop tracking-evaluation plan.
 For each selected video in ``tracking_eval/video_manifest.csv`` (selected=True),
 this script:
 
-1. Loads cached ``yolo_tracking.parquet`` from the YOLO scan run directory.
+1. Loads cached ``yolo_tracking.parquet`` from the YOLO scan run directory
+   pointed to by the manifest's ``scan_dir`` column.
 2. Recomputes per-frame metrics using ``config/tracker.yaml`` defaults (the
    same parameters used to produce the manuscript's 30-video tracks).
 3. Computes default-parameter adaptive chunk boundaries via
@@ -47,34 +48,10 @@ MANIFEST_PATH = REPO_ROOT / "tracking_eval" / "video_manifest.csv"
 OUTPUT_PATH = REPO_ROOT / "tracking_eval" / "annotation_frames.csv"
 TRACKER_CFG = REPO_ROOT / "config" / "tracker.yaml"
 
-SCAN_DIRS = [
-    REPO_ROOT / "ext-data/output/results/sam3-hf/20260317_162056_sam3_hf",
-    REPO_ROOT / "ext-data/output/results/sam3-hf/20260319_152425_sam3_hf",
-]
-
-# Stem prefix matched against scan subdir names (manifest video_id is the
-# short C{c}G{g}_day_29 form, not the full filename).
-STEM_RE = r"^{cage}{group}_Test_2_day_29_"
-
 UNIFORM_INTERVAL_SECONDS = 30.0
 BOUNDARY_OFFSETS = (-5, 0, 5)
 OCCLUSION_TOP_K = 3
 OCCLUSION_OFFSETS_END = (-3, +3)  # additional pre/post brackets around (start, end)
-
-
-def find_scan_dir(cage: str, group: str) -> Path:
-    """Return the scan subdir for one (cage, group) pair on day 29."""
-    prefix = f"{cage}{group}_Test_2_day_29_"
-    matches = []
-    for scan_dir in SCAN_DIRS:
-        if not scan_dir.exists():
-            continue
-        for sub in scan_dir.iterdir():
-            if sub.is_dir() and sub.name.startswith(prefix):
-                matches.append(sub)
-    if len(matches) != 1:
-        raise RuntimeError(f"Expected exactly one scan dir for {cage}{group}, got {matches}")
-    return matches[0]
 
 
 def select_frames_for_video(
@@ -164,8 +141,10 @@ def main():
     all_rows = []
     summary_rows = []
     for _, row in selected_rows.iterrows():
-        cage, group, video_id = row["cage"], row["group"], row["video_id"]
-        scan_dir = find_scan_dir(cage, group)
+        video_id = row["video_id"]
+        scan_dir = REPO_ROOT / row["scan_dir"]
+        if not scan_dir.exists():
+            raise FileNotFoundError(f"scan_dir from manifest not found: {scan_dir}")
         logger.info(f"  {video_id}  scan={scan_dir.name}")
         frame_rows, info = select_frames_for_video(scan_dir, cfg)
         for f, src in frame_rows:

@@ -11,7 +11,7 @@ PlayClass was accepted at CV4Animals (CVPR 2026 workshop) as a poster, with revi
 
 **Reviewer 2's concerns** (ethogram description, "end-to-end" terminology, precision/recall + class-level metrics, dataset release plan, fine-grained granularity exploration) are **out of scope** for this plan and will be handled separately.
 
-**Strategy** (revised 2026-05-11): Use **in-distribution videos from day 29** as the evaluation set, one per cage, selecting the hardest group per cage via YOLO-scan-based difficulty ranking. The day-37 external-validation approach was dropped after visual inspection showed day-37 birds look markedly different (older plumage) and move significantly less than the days 28–29 birds the manuscript's classification results are built on — benchmarking against day 37 would inflate tracker metrics relative to the actual training/eval distribution. The 5 LOCO folds in the manuscript already produce *disjoint* test partitions (each fold tests one full cage); drawing one video per cage from these natural per-fold test sets gives a 5-video subset that is in-distribution, cross-environment, and genuinely held out for the classifier. Run the SAM3 + adaptive chunking pipeline **fully automated (no manual post-processing)**, alongside the YOLO+BoT-SORT reference tracker, on these 5 bbox-annotated videos. Report standard MOT metrics. This addresses missing metrics, the automation concern, and — by including a generic tracker baseline — the "limited novelty" framing.
+**Strategy** (revised 2026-05-11): Use **in-distribution videos from days 28 and 29** as the evaluation set, one per cage, selecting the hardest group per cage via YOLO-scan-based difficulty ranking across both days jointly. At least 2 of the 5 picks are required to come from day 28 to ensure cross-day representativeness of the manuscript's training distribution. The day-37 external-validation approach was dropped after visual inspection showed day-37 birds look markedly different (older plumage) and move significantly less than the days 28–29 birds the manuscript's classification results are built on — benchmarking against day 37 would inflate tracker metrics relative to the actual training/eval distribution. The 5 LOCO folds in the manuscript already produce *disjoint* test partitions (each fold tests one full cage); drawing one video per cage from these natural per-fold test sets gives a 5-video subset that is in-distribution, cross-environment, and genuinely held out for the classifier. Run the SAM3 + adaptive chunking pipeline **fully automated (no manual post-processing)**, alongside the YOLO+BoT-SORT reference tracker, on these 5 bbox-annotated videos. Report standard MOT metrics. This addresses missing metrics, the automation concern, and — by including a generic tracker baseline — the "limited novelty" framing.
 
 Day-37 scan results are retained on disk (`ext-data/output/results/sam3-hf/`) and the old candidate manifest is archived at `tracking_eval/video_manifest_day_37_superseded.csv` for possible future use, but day 37 is **out of scope** for this evaluation.
 
@@ -30,7 +30,7 @@ Day-37 scan results are retained on disk (`ext-data/output/results/sam3-hf/`) an
 | 1 | **GPU/time budget** | Determines sweep granularity (3 vs 5 values per param) |
 | 2 | **Pipeline version freeze** | Recommend: identical config to days 28–29 paper, for a fair comparison |
 | 3 | **Annotation labour** | Single annotator vs. second-pass agreement on a 30-frame subset |
-| 4 | **C5 difficulty caveat** | C5's hardest group (C5G1, difficulty rank-sum 49) is markedly easier than C1–C4 (75–90). Acceptable as the cage's natural max, but flag in results that C5 sets a softer ceiling |
+| 4 | **No remaining caveat** | After joint-day ranking the 5 picks have rank-sums 158–186 (all in the top ~15% of 30 candidates). The earlier C5 weak-link issue is resolved by swapping to C5G3 day-28. |
 
 ---
 
@@ -39,7 +39,7 @@ Day-37 scan results are retained on disk (`ext-data/output/results/sam3-hf/`) an
 Annotation is the bottleneck. Everything else depends on it.
 
 ### 1.1 Select videos
-**5 videos** from day 29 (in-distribution), one per cage (C1–C5), choosing the hardest group per cage by YOLO-scan-based difficulty ranking. The ranking sums per-video ranks (1–15) across 7 difficulty proxies derived from `yolo_scan_metrics.parquet`:
+**5 videos**, one per cage (C1–C5), choosing the hardest group per cage by YOLO-scan-based difficulty ranking computed **jointly across days 28 and 29** so day-28 and day-29 difficulty scores are directly comparable. The ranking sums per-video ranks (1–30) across 7 difficulty proxies derived from `yolo_scan_metrics.parquet`:
 
 - `frac_high_occlusion` (↑ harder)
 - `mean_overlapping_pairs` (↑ harder)
@@ -49,21 +49,21 @@ Annotation is the bottleneck. Everything else depends on it.
 - `mean_centroid_distance` (↓ harder; ranked inverted)
 - `mean_separation_score` (↓ harder; ranked inverted)
 
-Composite range: 7–105. Ranking script: `tmp/rank_hardest_videos.py` (one-shot, can be promoted to `tracking_eval/scripts/` if needed for reproducibility).
+Composite range: 7–210 across 30 candidates. Ranking script: `tmp/rank_videos_both_days.py` (one-shot, can be promoted to `tracking_eval/scripts/` if needed for reproducibility). At least 2 of the 5 picks are required to come from day 28; the joint ranking naturally produces 2 day-28 picks without forcing.
 
 **Selected (manifest: `tracking_eval/video_manifest.csv`):**
 
-| Cage | Group | Video stem | Rank-sum | Notes |
-|------|-------|-----------|----------|-------|
-| C1 | G2 | `C1G2_Test_2_day_29_2_Camera_5_2025_02_05_11_06_07_2` | 77 | hardest in C1 |
-| C2 | G1 | `C2G1_Test_2_day_29_2_Camera_4_2025_02_05_09_57_55_1` | 75 | hardest in C2 |
-| C3 | G2 | `C3G2_Test_2_day_29_2_Camera_5_2025_02_05_09_22_32_2` | **90** | overall hardest |
-| C4 | G2 | `C4G2_Test_2_day_29_2_Camera_5_2025_02_05_10_31_53_2` | 78 | hardest in C4 |
-| C5 | G1 | `C5G1_Test_2_day_29_2_Camera_4_2025_02_05_11_41_33_1` | 49 | hardest in C5 (softer ceiling — see Open Items #4) |
+| Cage | Group | Day | Video stem | Rank-sum | Notes |
+|------|-------|-----|------------|----------|-------|
+| C1 | G2 | 29 | `C1G2_Test_2_day_29_2_Camera_5_2025_02_05_11_06_07_2` | 160 | hardest in C1 |
+| C2 | G2 | 28 | `C2G2_Test_1_day_28_1_Camera_5_2025_02_04_09_43_25_2` | **186** | overall hardest, hardest in C2 |
+| C3 | G2 | 29 | `C3G2_Test_2_day_29_2_Camera_5_2025_02_05_09_22_32_2` | 183 | hardest in C3 |
+| C4 | G2 | 29 | `C4G2_Test_2_day_29_2_Camera_5_2025_02_05_10_31_53_2` | 158 | hardest in C4 |
+| C5 | G3 | 28 | `C5G3_Test_1_day_28_1_Camera_8_2025_02_04_11_35_00_3` | 176 | hardest in C5 |
 
-Source scan dirs: `ext-data/output/results/sam3-hf/20260317_162056_sam3_hf` (14 videos) and `ext-data/output/results/sam3-hf/20260319_152425_sam3_hf` (C2G2). Day-29 YOLO scans cover all 15 candidate videos, so the per-cage comparison is complete. Day-28 scans exist but were not used for selection because using a single filming day keeps the within-cage comparison apples-to-apples.
+Source scan dirs (resolved per video in `video_manifest.csv` → `scan_dir`): four scan runs cover the 30 candidates — `20260317_162056_sam3_hf` (14 of the day-29 videos), `20260319_152425_sam3_hf` (C2G2 day 29), `20260308_230835_sam3_hf` and `20260309_230105_sam3_hf` (day-28 videos; latest scan run is used when duplicates exist).
 
-**LOCO alignment**: Each selected video belongs to its respective cage's LOCO test fold (e.g., C1G2 is in fold 0's test set when C1 is held out). This means tracking metrics are reported on data that was *truly held out* for the classifier in the paper's LOCO results.
+**LOCO alignment**: Each selected video belongs to its respective cage's LOCO test fold (e.g., C1G2 is in fold 0's test set when C1 is held out). This means tracking metrics are reported on data that was *truly held out* for the classifier in the paper's LOCO results. Cross-day spread (2 day-28 + 3 day-29) matches the manuscript's training distribution.
 
 ### 1.2 Chunk-guided frame selection
 Run **default-parameter chunking only** (no SAM3) on the 5 selected videos using existing infrastructure. For each video, build the annotation frame list:

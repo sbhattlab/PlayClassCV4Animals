@@ -1,6 +1,6 @@
 # Tracking Evaluation — Annotation Guidelines
 
-CVAT-based bbox annotation of 5 day-29 videos to produce MOTChallenge ground truth for HOTA / IDF1 / MOTA / IDsw evaluation. Background and the full evaluation plan are in `tracking_eval/PLAN.md`.
+CVAT-based bbox annotation of 5 videos (2 from day 28, 3 from day 29) to produce MOTChallenge ground truth for HOTA / IDF1 / MOTA / IDsw evaluation. Background and the full evaluation plan are in `tracking_eval/PLAN.md`.
 
 ## Handoff package (what to copy to the annotation machine)
 
@@ -20,10 +20,10 @@ Once annotation is complete, the only artifacts to ship back are the 5 MOTChalle
 | Video | Keyframes | Birds | Bboxes |
 |-------|---:|---:|---:|
 | C1G2_day_29 | 88 | 3 | 264 |
-| C2G1_day_29 | 88 | 3 | 264 |
+| C2G2_day_28 | 88 | 3 | 264 |
 | C3G2_day_29 | 87 | 3 | 261 |
 | C4G2_day_29 | 87 | 3 | 261 |
-| C5G1_day_29 | 88 | 3 | 264 |
+| C5G3_day_28 | 88 | 3 | 264 |
 | **Total** | **438** | | **1314** |
 
 Authoritative keyframe list: `tracking_eval/annotation_frames.csv`. CVAT linearly interpolates between keyframes, producing dense GT across all video frames. Estimated annotation effort: 6–10 person-hours.
@@ -103,10 +103,10 @@ Final layout:
 ```
 ext-data/output/results/tracker_benchmark/ground_truth/
 ├── C1G2_day_29.txt
-├── C2G1_day_29.txt
+├── C2G2_day_28.txt
 ├── C3G2_day_29.txt
 ├── C4G2_day_29.txt
-└── C5G1_day_29.txt
+└── C5G3_day_28.txt
 ```
 
 MOTChallenge row format:
