@@ -13,7 +13,7 @@ CVAT-based bbox annotation of 5 videos (2 from day 28, 3 from day 29) to produce
 | `tracking_eval/video_manifest.csv` | Selection metadata, including the source paths of the 5 `.mp4` files. |
 | The 5 `.mp4` files | Listed in `video_manifest.csv` under `path` (rows with `selected=True`). |
 
-Once annotation is complete, the only artifacts to ship back are the 5 MOTChallenge `.txt` files (see **Export** below). They go into `ext-data/output/results/tracker_benchmark/ground_truth/` on the original machine.
+Once annotation is complete, ship back the 5 **raw CVAT MOT 1.1 exports** (one per task). The keyframe-filtering step (`filter_mot_to_keyframes.py`) runs on the original machine and produces the final sparse-GT files under `ext-data/output/results/tracker_benchmark/ground_truth/`. See **Export** below for the export procedure and **`tracking_eval/PLAN.md` §1.4** for the filtering rationale.
 
 
 
@@ -26,7 +26,7 @@ Once annotation is complete, the only artifacts to ship back are the 5 MOTChalle
 | C5G3_day_28 | 88 | 3 | 264 |
 | **Total** | **438** | | **1314** |
 
-Authoritative keyframe list: `tracking_eval/annotation_frames.csv`. CVAT linearly interpolates between keyframes, producing dense GT across all video frames. Estimated annotation effort: 6–10 person-hours.
+Authoritative keyframe list: `tracking_eval/annotation_frames.csv`. **The 438 keyframes themselves are the ground truth** — there is no dense interpolated GT. Tracker metrics are computed only at these frames (see `tracking_eval/PLAN.md` Phase 1.4 / Phase 4 for the rationale and citations). CVAT's Track-mode linear interpolation is used as a navigation/identity-tagging convenience only; interpolated frames are filtered out at export. Estimated annotation effort: **3–5 person-hours** (reduced from the previous 6–10 by dropping interpolation-drift QA).
 
 ## Tooling: CVAT (local Docker)
 
@@ -51,7 +51,7 @@ docker exec -it cvat_server bash -ic 'python manage.py createsuperuser'
 
 For each task:
 
-1. Open the task. Switch to **Track mode** (not Shape mode — Track mode enables interpolation).
+1. Open the task. Switch to **Track mode** (used as a navigation / identity-tagging convenience; the interpolated frames it produces are filtered out at export — they are not GT).
 2. For **bird 1**:
    - Jump to the first listed keyframe (CVAT toolbar → "Go to frame" → enter `frame_idx` from the CSV).
    - Draw a tight bbox around the bird with the rectangle tool — CVAT creates a new Track automatically and marks this frame as a keyframe.
@@ -59,6 +59,8 @@ For each task:
    - Repeat until the last listed frame for that video.
 3. Repeat step 2 for **bird 2** and **bird 3**, each creating a separate Track.
 4. Save (Ctrl+S) frequently.
+
+**Visit only the frames listed in `annotation_frames.csv`. Do not add corrective keyframes on frames between listed ones — interpolation drift between keyframes is not a QA concern because interpolated frames are dropped before scoring.**
 
 Three Tracks per video. CVAT assigns track IDs at export — the absolute values are irrelevant; HOTA/IDF1 are permutation-invariant.
 
@@ -86,7 +88,9 @@ There is no visibility threshold below which a bird is dropped. Partial visibili
 
 ## Quality assurance
 
-Before exporting, scrub each task in CVAT's player at 2× speed and check each Track stays on the correct bird. Where an interpolated bbox visibly drifts off the bird between two keyframes, add a corrective keyframe at the drift midpoint. This is most likely around long occlusion intervals — which is why the keyframe schedule already brackets the top-3 longest occlusion periods per video.
+QA is **per-keyframe only**. Before exporting, walk through each of the 88 listed keyframes per video and confirm each bbox is on the correct bird with a tight fit. The full-video scrub-at-2×-for-interpolation-drift pass from earlier drafts of this document is **no longer required** under the sparse-GT scheme — interpolated frames are filtered out before scoring, so drift between keyframes has no effect on the reported metrics.
+
+The keyframe schedule already brackets the top-3 longest occlusion periods per video, so the identity-ambiguous moments are already densified in the listed keyframes themselves; QA at those frames is where attention should land.
 
 ## Export
 
@@ -95,10 +99,11 @@ When all 5 tasks are annotated and QA-passed:
 1. Task page → **Actions** → **Export task dataset**.
 2. Format: **MOT 1.1**.
 3. Download the zip; extract `gt/gt.txt`.
-4. Rename to `<video_id>.txt` and move to:
-   `ext-data/output/results/tracker_benchmark/ground_truth/`
+4. Rename to `<video_id>_cvat.txt` and place it somewhere convenient (e.g. `ext-data/output/results/tracker_benchmark/cvat_raw_export/`).
+5. Run `tracking_eval/scripts/filter_mot_to_keyframes.py` to filter out CVAT's interpolated frames and keep only the rows whose `frame` is in `annotation_frames.csv` for the matching `video_id`. The filtered file is written to:
+   `ext-data/output/results/tracker_benchmark/ground_truth/<video_id>.txt`
 
-Final layout:
+Final layout (after filter):
 
 ```
 ext-data/output/results/tracker_benchmark/ground_truth/
@@ -109,8 +114,12 @@ ext-data/output/results/tracker_benchmark/ground_truth/
 └── C5G3_day_28.txt
 ```
 
-MOTChallenge row format:
+MOTChallenge row format (unchanged):
 ```
 frame, id, bb_left, bb_top, bb_width, bb_height, conf, -1, -1, -1
 ```
-For ground truth, `conf = 1`. After export, sanity-check each file has exactly 3 unique IDs and the expected frame range `[0, total_frames-1]` (per `annotation_frames_summary.csv`).
+For ground truth, `conf = 1`. After filtering, sanity-check each `<video_id>.txt`:
+
+- Exactly 3 unique IDs.
+- Row count ≈ `n_keyframes × 3` minus any Outside-flagged entries (per `annotation_frames_summary.csv`).
+- Frame indices form a subset of the `frame_idx` values listed for that `video_id` in `annotation_frames.csv` — no rows on intermediate frames.
