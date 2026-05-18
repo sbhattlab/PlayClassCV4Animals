@@ -19,6 +19,7 @@ dataset = ["dataset", "cuda"]
 embeddings = ["embeddings", "cuda"]
 classifier = ["classifier", "cuda"]
 videoprism = ["videoprism"]
+tracker-evaluation = ["tracker-evaluation"]
 
 # ======= Default dependencies ======
 [dependencies]
@@ -67,6 +68,10 @@ tracker = "python -m script.run_tracker --config config/tracker.yaml"
 tracker_scan = "python -m script.run_tracker --config config/tracker_scan.yaml"
 test_tracker = "CUDA_VISIBLE_DEVICES=1 pixi run -e tracker python -m pytest tests/test_tracker.py -v"
 
+# Pre-CVAT umbrella: build-manifest + select-frames. Needs src.tracker.* + src.metrics
+# (imported by frame_selection.py), which live in this env.
+prepare-tracker-eval = "python -m tracking_eval prepare"
+
 # ======= Dataset dependencies ======
 [feature.dataset.pypi-dependencies]
 numpy = ">=1.2.6,<2"
@@ -82,6 +87,31 @@ test_features = "python -m pytest tests/test_features.py -v"
 test_postprocessing = "python -m pytest tests/test_tracking_postprocessing.py -v"
 test_post_build = "python -m pytest tests/test_post_build_dataset.py -v"
 test_postprocessing_smoke = "python -m tests.test_postprocessing_smoke"
+
+# ======= Tracker evaluation dependencies ======
+# CPU-only env for sparse-keyframe MOT evaluation (convert_predictions + evaluate_tracking).
+# Kept separate from `tracker` because `tracker` is Linux-CUDA-only.
+[feature.tracker-evaluation.pypi-dependencies]
+numpy = ">=1.2.6,<2"
+motmetrics = ">=1.4.0"
+omegaconf = ">=2.3.0"
+# Runtime deps for TrackEval (imported from the ext/TrackEval git submodule;
+# not pip-installed). The strict pins in TrackEval's requirements.txt are dev-env
+# recommendations — using loose pins compatible with the rest of the project.
+pycocotools = ">=2.0.11,<3"
+opencv-python = "*"
+scikit-image = "*"
+pillow = ">=10.0.0"
+tabulate = "*"
+
+[feature.tracker-evaluation.tasks]
+# Post-CVAT umbrella: cvat-to-mot + convert-preds + evaluate.
+score-tracker-eval = "python -m tracking_eval score"
+
+# Back-compat aliases for the previous flat task names — same canonical entry points.
+select_annotation_frames = "python -m tracking_eval select-frames"
+convert_predictions = "python -m tracking_eval convert-preds"
+evaluate_tracking = "python -m tracking_eval evaluate"
 
 # ======= Embeddings dependencies ======
 [feature.embeddings.pypi-dependencies]

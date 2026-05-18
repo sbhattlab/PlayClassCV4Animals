@@ -1,3 +1,8 @@
+.agents/
+agent-log/
+.dvc/
+.claude/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
@@ -58,7 +63,6 @@ model/
 
 # Data
 ext-data
-ext/
 video-data/
 ext-data/
 data/eval/
