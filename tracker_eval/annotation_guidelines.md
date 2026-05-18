@@ -1,19 +1,19 @@
-# Tracking Evaluation — Annotation Guidelines
+# Tracker Evaluation — Annotation Guidelines
 
-CVAT-based bbox annotation of 5 videos (2 from day 28, 3 from day 29) to produce MOTChallenge ground truth for HOTA / IDF1 / MOTA / IDsw evaluation. Background and the full evaluation plan are in `tracking_eval/PLAN.md`.
+CVAT-based bbox annotation of 5 videos (2 from day 28, 3 from day 29) to produce MOTChallenge ground truth for HOTA / IDF1 / MOTA / IDsw evaluation. Background and the full evaluation plan are in `tracker_eval/PLAN.md`.
 
 ## Handoff package (what to copy to the annotation machine)
 
 | File | Purpose |
 |------|---------|
-| `tracking_eval/PLAN.md` | Full evaluation plan (context only). |
-| `tracking_eval/annotation_guidelines.md` | This file. |
-| `tracking_eval/annotation_frames.csv` | The 438 keyframes to annotate (3 columns: `video_id, frame_idx, source`). |
-| `tracking_eval/annotation_frames_summary.csv` | Per-video keyframe counts and chunk/occlusion metadata. |
-| `tracking_eval/video_manifest.csv` | Selection metadata, including the source paths of the 5 `.mp4` files. |
+| `tracker_eval/PLAN.md` | Full evaluation plan (context only). |
+| `tracker_eval/annotation_guidelines.md` | This file. |
+| `data/tracker_eval/annotation_frames.csv` | The 438 keyframes to annotate (3 columns: `video_id, frame_idx, source`). |
+| `data/tracker_eval/annotation_frames_summary.csv` | Per-video keyframe counts and chunk/occlusion metadata. |
+| `data/tracker_eval/video_manifest.csv` | Selection metadata, including the source paths of the 5 `.mp4` files. |
 | The 5 `.mp4` files | Listed in `video_manifest.csv` under `path` (rows with `selected=True`). |
 
-Once annotation is complete, ship back the 5 **raw CVAT MOT 1.1 exports** (one per task). The keyframe-filtering step (`filter_mot_to_keyframes.py`) runs on the original machine and produces the final sparse-GT files under `ext-data/output/results/tracker_benchmark/ground_truth/`. See **Export** below for the export procedure and **`tracking_eval/PLAN.md` §1.4** for the filtering rationale.
+Once annotation is complete, export the CVAT **project Backup**. The conversion step runs on the original machine and produces the final sparse-GT files under `ext-data/output/results/tracker_benchmark/ground_truth/`. See **Export** below for the export procedure and **`tracker_eval/PLAN.md` §1.4** for the rationale.
 
 
 
@@ -26,7 +26,7 @@ Once annotation is complete, ship back the 5 **raw CVAT MOT 1.1 exports** (one p
 | C5G3_day_28 | 88 | 3 | 264 |
 | **Total** | **438** | | **1314** |
 
-Authoritative keyframe list: `tracking_eval/annotation_frames.csv`. **The 438 keyframes themselves are the ground truth** — there is no dense interpolated GT. Tracker metrics are computed only at these frames (see `tracking_eval/PLAN.md` Phase 1.4 / Phase 4 for the rationale and citations). CVAT's Track-mode linear interpolation is used as a navigation/identity-tagging convenience only; interpolated frames are filtered out at export. Estimated annotation effort: **3–5 person-hours** (reduced from the previous 6–10 by dropping interpolation-drift QA).
+Authoritative keyframe list: `data/tracker_eval/annotation_frames.csv`. **The 438 keyframes themselves are the ground truth** — there is no dense interpolated GT. Tracker metrics are computed only at these frames (see `tracker_eval/PLAN.md` Phase 1.4 / Phase 4 for the rationale and citations). CVAT's Track-mode linear interpolation is used as a navigation/identity-tagging convenience only; interpolated frames are filtered out at export. Estimated annotation effort: **3–5 person-hours** (reduced from the previous 6–10 by dropping interpolation-drift QA).
 
 ## Tooling: CVAT (local Docker)
 
@@ -42,7 +42,7 @@ docker exec -it cvat_server bash -ic 'python manage.py createsuperuser'
 
 ### Project & task setup
 
-1. Create a project named `playclass-tracking-eval`.
+1. Create a project named `playclass-tracker-eval`.
 2. Define a single label `bird` (no attributes needed — track identity is captured by Track membership, not by label).
 3. Create one **Task per video** (5 tasks total). Upload the `.mp4` directly. Use default video-frame ingestion — **do not** convert to image set; that disables interpolation.
 4. Use task name = `video_id` from the manifest (`C1G2_day_29`, etc.) so the exported zip names match downstream expectations.
@@ -96,14 +96,12 @@ The keyframe schedule already brackets the top-3 longest occlusion periods per v
 
 When all 5 tasks are annotated and QA-passed:
 
-1. Task page → **Actions** → **Export task dataset**.
-2. Format: **MOT 1.1**.
-3. Download the zip; extract `gt/gt.txt`.
-4. Rename to `<video_id>_cvat.txt` and place it somewhere convenient (e.g. `ext-data/output/results/tracker_benchmark/cvat_raw_export/`).
-5. Run `tracking_eval/scripts/filter_mot_to_keyframes.py` to filter out CVAT's interpolated frames and keep only the rows whose `frame` is in `annotation_frames.csv` for the matching `video_id`. The filtered file is written to:
+1. Project page → **Actions** → **Backup project**.
+2. Extract the backup under `ext-data/output/results/tracker_benchmark/cvat_backup/playclass-tracker-eval/`.
+3. Run `python -m src.tracker_eval cvat-to-mot`. The converter reads CVAT's native `annotations.json`, keeps only human-drawn non-`outside` rectangles, checks against `data/tracker_eval/annotation_frames.csv`, and writes:
    `ext-data/output/results/tracker_benchmark/ground_truth/<video_id>.txt`
 
-Final layout (after filter):
+Final layout (after conversion):
 
 ```
 ext-data/output/results/tracker_benchmark/ground_truth/

@@ -22,10 +22,10 @@ predicted frame); motmetrics restricts scoring to GT-present frames
 during evaluation, so we do **not** filter predictions here.
 
 Usage:
-    pixi run -e tracker-evaluation python -m tracking_eval convert-preds \
+    pixi run -e tracker-evaluation python -m src.tracker_eval convert-preds \
         --predictions-root ext-data/output/results/tracker_benchmark/tracker_outputs_adaptive \
         --predictions-root-fixed ext-data/output/results/tracker_benchmark/tracker_outputs_fixed \
-        --manifest tracking_eval/video_manifest.csv \
+        --manifest data/tracker_eval/video_manifest.csv \
         --out-dir ext-data/output/results/tracker_benchmark/predictions_mot
 """
 

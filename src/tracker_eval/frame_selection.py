@@ -1,6 +1,6 @@
-"""Select annotation frames for the tracking-eval ground-truth pass.
+"""Select annotation frames for the tracker-eval ground-truth pass.
 
-For each selected video in ``tracking_eval/video_manifest.csv`` (selected=True),
+For each selected video in ``data/tracker_eval/video_manifest.csv`` (selected=True),
 this script:
 
 1. Loads cached ``yolo_tracking.parquet`` from the YOLO scan run directory
@@ -21,12 +21,12 @@ this script:
    Frames are clamped to ``[0, total_frames-1]`` and deduplicated by source
    priority: chunk_guided > occlusion_bracketing > uniform.
 
-Output: ``tracking_eval/annotation_frames.csv`` with columns
+Output: ``data/tracker_eval/annotation_frames.csv`` with columns
 ``video_id, frame_idx, source``.
 
 Run from project root::
 
-    pixi run -e tracker-evaluation python -m tracking_eval.scripts.select_annotation_frames
+    pixi run -e tracker-evaluation python -m src.tracker_eval select-frames
 """
 
 from __future__ import annotations

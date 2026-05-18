@@ -70,7 +70,7 @@ test_tracker = "CUDA_VISIBLE_DEVICES=1 pixi run -e tracker python -m pytest test
 
 # Pre-CVAT umbrella: build-manifest + select-frames. Needs src.tracker.* + src.metrics
 # (imported by frame_selection.py), which live in this env.
-prepare-tracker-eval = "python -m tracking_eval prepare"
+prepare-tracker-eval = "python -m src.tracker_eval prepare"
 
 # ======= Dataset dependencies ======
 [feature.dataset.pypi-dependencies]
@@ -101,12 +101,12 @@ tabulate = "*"
 
 [feature.tracker-evaluation.tasks]
 # Post-CVAT umbrella: cvat-to-mot + convert-preds + evaluate.
-score-tracker-eval = "python -m tracking_eval score"
+score-tracker-eval = "python -m src.tracker_eval score"
 
 # Back-compat aliases for the previous flat task names — same canonical entry points.
-select_annotation_frames = "python -m tracking_eval select-frames"
-convert_predictions = "python -m tracking_eval convert-preds"
-evaluate_tracking = "python -m tracking_eval evaluate"
+select_annotation_frames = "python -m src.tracker_eval select-frames"
+convert_predictions = "python -m src.tracker_eval convert-preds"
+evaluate_tracker = "python -m src.tracker_eval evaluate"
 
 # ======= Embeddings dependencies ======
 [feature.embeddings.pypi-dependencies]

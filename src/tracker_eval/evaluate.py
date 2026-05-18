@@ -4,9 +4,9 @@ Reads sparse GT (from cvat_backup_to_mot.py) and dense predictions (from
 convert_predictions.py) for all 5 evaluation videos × 3 tracker variants
 (A_yolo_botsort, B_sam3_fixed, C_sam3_adaptive) and emits:
 
-    tracking_eval/results/metrics_per_video.csv
-    tracking_eval/results/metrics_per_cage.csv
-    tracking_eval/results/metrics_aggregate.csv
+    data/tracker_eval/results/metrics_per_video.csv
+    data/tracker_eval/results/metrics_per_cage.csv
+    data/tracker_eval/results/metrics_aggregate.csv
 
 Two metric libraries are used:
 
@@ -23,11 +23,11 @@ data dict are built only over GT-present frames so we only score frames
 that have human-verified ground truth.
 
 Usage:
-    pixi run -e tracker-evaluation python -m tracking_eval evaluate \
+    pixi run -e tracker-evaluation python -m src.tracker_eval evaluate \
         --gt-dir ext-data/output/results/tracker_benchmark/ground_truth \
         --predictions-mot-dir ext-data/output/results/tracker_benchmark/predictions_mot \
-        --manifest tracking_eval/video_manifest.csv \
-        --out-dir tracking_eval/results
+        --manifest data/tracker_eval/video_manifest.csv \
+        --out-dir data/tracker_eval/results
 """
 
 from __future__ import annotations
@@ -37,8 +37,6 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
-import motmetrics as mm
-import numpy as np
 import pandas as pd
 
 from .paths import (
@@ -49,26 +47,47 @@ from .paths import (
     TRACKEVAL_DIR,
 )
 
-# TrackEval is vendored as a git submodule at ext/TrackEval, not pip-installed.
-# Insert it on sys.path so `import trackeval` resolves to the submodule.
-if str(TRACKEVAL_DIR) not in sys.path:
-    sys.path.insert(0, str(TRACKEVAL_DIR))
+mm = None
+np = None
+HOTA = None
 
-# TrackEval (last upstream change ~2021) uses deprecated numpy aliases
-# np.float / np.int / np.bool / np.object, removed in numpy 1.24+. Restore as
-# builtin aliases before TrackEval is imported.
-for _name, _alias in (
-    ("float", float),
-    ("int", int),
-    ("bool", bool),
-    ("object", object),
-):
-    if not hasattr(np, _name):
-        setattr(np, _name, _alias)
 
-from trackeval.metrics.hota import (
-    HOTA,  # noqa: E402  (must follow sys.path + numpy patch)
-)
+def _ensure_eval_deps() -> None:
+    """Import evaluation-only dependencies lazily.
+
+    The `prepare` command runs in the tracker pixi env, which does not include
+    motmetrics. Keeping these imports lazy lets the shared CLI dispatcher
+    register pre-CVAT commands without requiring post-CVAT dependencies.
+    """
+    global HOTA, mm, np
+    if mm is not None and np is not None and HOTA is not None:
+        return
+
+    import motmetrics as _mm
+    import numpy as _np
+
+    # TrackEval is vendored as a git submodule at ext/TrackEval, not pip-installed.
+    # Insert it on sys.path so `import trackeval` resolves to the submodule.
+    if str(TRACKEVAL_DIR) not in sys.path:
+        sys.path.insert(0, str(TRACKEVAL_DIR))
+
+    # TrackEval (last upstream change ~2021) uses deprecated numpy aliases
+    # np.float / np.int / np.bool / np.object, removed in numpy 1.24+. Restore as
+    # builtin aliases before TrackEval is imported.
+    for _name, _alias in (
+        ("float", float),
+        ("int", int),
+        ("bool", bool),
+        ("object", object),
+    ):
+        if not hasattr(_np, _name):
+            setattr(_np, _name, _alias)
+
+    from trackeval.metrics.hota import HOTA as _HOTA
+
+    mm = _mm
+    np = _np
+    HOTA = _HOTA
 
 VARIANTS = ("A_yolo_botsort", "B_sam3_fixed", "C_sam3_adaptive")
 
@@ -245,6 +264,7 @@ def add_subparser(subparsers) -> argparse.ArgumentParser:
 
 
 def run(args: argparse.Namespace) -> None:
+    _ensure_eval_deps()
     args.out_dir.mkdir(parents=True, exist_ok=True)
     videos = selected_videos(args.manifest)
 

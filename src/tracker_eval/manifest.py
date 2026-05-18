@@ -1,4 +1,4 @@
-"""Build `tracking_eval/video_manifest.csv` from the cached YOLO scan parquets.
+"""Build `data/tracker_eval/video_manifest.csv` from the cached YOLO scan parquets.
 
 Ranks the 30 candidate videos (5 cages × 3 groups × 2 days) by a composite
 difficulty score computed across 7 proxies derived from
@@ -33,10 +33,10 @@ appears in multiple timestamped runs, the lexicographically latest run is
 used (timestamp prefix orders correctly).
 
 Usage:
-    pixi run -e tracker python -m tracking_eval build-manifest \
+    pixi run -e tracker python -m src.tracker_eval build-manifest \
         --scan-runs-root ext-data/output/results/sam3-hf \
         --raw-video-root ext-data/raw \
-        --out tracking_eval/video_manifest.csv
+        --out data/tracker_eval/video_manifest.csv
 """
 
 from __future__ import annotations

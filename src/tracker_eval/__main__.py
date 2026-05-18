@@ -1,21 +1,21 @@
-"""CLI dispatcher for the tracking-eval pipeline.
+"""CLI dispatcher for the tracker-eval pipeline.
 
 Subcommands map onto individual stages, plus two umbrella commands that
 bracket the offline CVAT annotation checkpoint:
 
-    pixi run -e tracker             python -m tracking_eval prepare
+    pixi run -e tracker             python -m src.tracker_eval prepare
     # ... offline CVAT annotation ...
-    pixi run -e tracker-evaluation  python -m tracking_eval score
+    pixi run -e tracker-evaluation  python -m src.tracker_eval score
 
 Individual stages are also callable for ad-hoc re-runs:
 
-    python -m tracking_eval build-manifest [--days 28 29 ...]
-    python -m tracking_eval select-frames
-    python -m tracking_eval cvat-to-mot
-    python -m tracking_eval convert-preds
-    python -m tracking_eval evaluate
+    python -m src.tracker_eval build-manifest [--days 28 29 ...]
+    python -m src.tracker_eval select-frames
+    python -m src.tracker_eval cvat-to-mot
+    python -m src.tracker_eval convert-preds
+    python -m src.tracker_eval evaluate
 
-Each module also retains a direct entry point (`python -m tracking_eval.evaluate`).
+Each module also retains a direct entry point (`python -m src.tracker_eval.evaluate`).
 """
 
 from __future__ import annotations
@@ -43,7 +43,7 @@ def _run_umbrella(stages: Iterable) -> None:
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="python -m tracking_eval")
+    parser = argparse.ArgumentParser(prog="python -m src.tracker_eval")
     subparsers = parser.add_subparsers(dest="cmd", required=True)
 
     manifest.add_subparser(subparsers)
