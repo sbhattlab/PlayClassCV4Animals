@@ -1,16 +1,24 @@
 # Refined Plan: Tracking Evaluation for CVPR 2026 Workshop Revision
 
-## Current status (2026-05-18)
+## Current status (2026-05-18, evening)
 
-**At Phase 5 (manuscript integration).** Phases 1–4 are complete: the 5-video held-out set has been selected, annotated in CVAT, converted to sparse MOTChallenge GT, and scored against Variants A and C. Per-video / per-cage / aggregate CSVs are already written to `data/tracker_eval/results/`.
+**At Phase 5 (manuscript integration).** Phases 1–4 are complete: the 5-video held-out set has been selected, annotated in CVAT, converted to sparse MOTChallenge GT, and scored against **all three variants (A, B, C)**. Per-video / per-cage / aggregate CSVs are written to `data/tracker_eval/results/`.
 
-**Pipeline consolidation (2026-05-18).** The previous flat `tracker_eval/scripts/` directory has been replaced by a Python package under `src/tracker_eval/` exposing a single CLI with subcommands. The canonical entry points are now the two umbrella commands `pixi run -e tracker python -m src.tracker_eval prepare` (build-manifest + select-frames) and `pixi run -e tracker-evaluation python -m src.tracker_eval score` (cvat-to-mot + convert-preds + evaluate), bracketing the offline CVAT annotation checkpoint. Individual stages remain callable for ad-hoc re-runs (e.g. `python -m src.tracker_eval evaluate`). All runtime paths previously living under `tmp/tracker_benchmark/` (CVAT Backup, tracker run parquets, the 5 source MP4 clips) have been migrated to `ext-data/output/results/tracker_benchmark/{cvat_backup,tracker_outputs_adaptive,source_videos}/` so the artefact set is co-located with the existing `ground_truth/`, `predictions_mot/`, and (eventually) `tracker_outputs_fixed/` subdirs. Path defaults live in `src/tracker_eval/paths.py`.
+**Headline aggregate (5 videos, sparse GT, 462 keyframes):**
+
+| Variant | HOTA | DetA | AssA | IDF1 | MOTA | ID switches |
+|---|---:|---:|---:|---:|---:|---:|
+| A_yolo_botsort | 0.0646 | 0.187 | 0.023 | 0.059 | 0.064 | 173 |
+| B_sam3_fixed | 0.5443 | 0.629 | 0.471 | 0.671 | 0.664 | 49 |
+| **C_sam3_adaptive** | **0.5560** | **0.631** | **0.491** | **0.701** | **0.702** | **35** |
+
+The manuscript claim `HOTA(C) > max(HOTA(A), HOTA(B))` holds, with monotone gains across association-sensitive metrics (AssA, IDF1) and a 29 % reduction in ID switches between B and C. Per-video, B and C swap on individual clips (B narrowly wins on C5G3_day_28 and C1G2_day_29; C wins clearly on C2G2_day_28 where B's chunk 0 fell back to `Sam3VideoModel` because grounding could not find ≥ 3 birds in the first 125 frames). The cross-video variance is worth a sentence in the §5 discussion.
+
+**Pipeline consolidation (2026-05-18).** The previous flat `tracker_eval/scripts/` directory has been replaced by a Python package under `src/tracker_eval/` exposing a single CLI with subcommands. The canonical entry points are now the two umbrella commands `pixi run -e tracker python -m src.tracker_eval prepare` (build-manifest + select-frames) and `pixi run -e tracker-evaluation python -m src.tracker_eval score` (cvat-to-mot + convert-preds + evaluate), bracketing the offline CVAT annotation checkpoint. Individual stages remain callable for ad-hoc re-runs (e.g. `python -m src.tracker_eval evaluate`). All runtime artefacts (CVAT Backup, tracker run parquets, the 5 source MP4 clips, ground-truth and prediction MOT files) live at `ext-data/tracker_benchmark/{cvat_backup,tracker_outputs_adaptive,tracker_outputs_fixed,source_videos,ground_truth,predictions_mot}/`. Path defaults live in `src/tracker_eval/paths.py`.
 
 **Remaining work before write-up:**
 
-1. **Run Variant B (SAM 3 with fixed 60 s chunking, no YOLO scan).** Added retrospectively to turn the head-to-head into a three-way ablation that isolates the contribution of the YOLO-driven adaptive chunking step. Without it, Variant C's gain over Variant A could be attributed to SAM 3 alone rather than to the synergy with the occlusion-informed chunker — which is the actual method claim. See the revised Phase 2 table below.
-2. **Re-run `convert_predictions.py` and `evaluate_tracker.py`** once Variant B parquets exist. The conversion script already accepts an optional `--predictions-root-fixed`; the evaluator gracefully skips a variant whose MOT files are not yet on disk, so partial re-runs are safe.
-3. **Manuscript integration (Phase 5)** under the 3-way framing.
+1. **Manuscript integration (Phase 5)** under the 3-way framing.
 
 **Retrospective renaming (2026-05-18).** The previous "Variant B: SAM3 default" is now **Variant C: SAM3 adaptive** (since the production config uses adaptive chunking), and the new fixed-chunking arm slots in as **Variant B**. Output subdirectories and the `VARIANTS` tuple in the eval scripts have been updated accordingly.
 
@@ -116,8 +124,8 @@ Documentation: `tracker_eval/annotation_guidelines.md` (already in repo; revised
 
 ### 1.4 Export to sparse GT
 1. From CVAT, take a **project Backup** export (not the per-task MOT 1.1 export). The Backup includes each task's `annotations.json` in CVAT's native schema, which stores only human-drawn keyframes — no temporal interpolation is materialised.
-2. Run `python -m src.tracker_eval cvat-to-mot` (module: `src/tracker_eval/cvat_to_mot.py`) against the backup root at `ext-data/output/results/tracker_benchmark/cvat_backup/playclass-tracker-eval/`. For each task it reads `annotations.json`, assigns track ids 1–3 in CVAT track-declaration order, drops shapes with `outside=true`, and writes `<video_id>.txt` in MOTChallenge 1.1 format. Row format: `frame, id, bb_left, bb_top, bb_width, bb_height, conf, -1, -1, -1` with `conf = 1` for GT. The `--keyframes-csv data/tracker_eval/annotation_frames.csv` default additionally reports per-bird scheduled / drawn / missing / extra counts.
-3. Output: `ext-data/output/results/tracker_benchmark/ground_truth/<video_id>.txt`.
+2. Run `python -m src.tracker_eval cvat-to-mot` (module: `src/tracker_eval/cvat_to_mot.py`) against the backup root at `ext-data/tracker_benchmark/cvat_backup/playclass-tracker-eval/`. For each task it reads `annotations.json`, assigns track ids 1–3 in CVAT track-declaration order, drops shapes with `outside=true`, and writes `<video_id>.txt` in MOTChallenge 1.1 format. Row format: `frame, id, bb_left, bb_top, bb_width, bb_height, conf, -1, -1, -1` with `conf = 1` for GT. The `--keyframes-csv data/tracker_eval/annotation_frames.csv` default additionally reports per-bird scheduled / drawn / missing / extra counts.
+3. Output: `ext-data/tracker_benchmark/ground_truth/<video_id>.txt`.
 
 This replaces the originally-planned `filter_mot_to_keyframes.py` step (which would have filtered an MOT export against the scheduled-keyframe set) — going through the Backup avoids materialising CVAT's linear interpolation in the first place, so there's nothing to filter out.
 
@@ -130,12 +138,12 @@ Three trackers are run on the 5 annotated videos; all three share the same spars
 | Variant | Description | Source | Status |
 |---------|-------------|--------|--------|
 | **A: YOLO + BoT-SORT** | Generic detector + tracker baseline. Isolates the scan stage. | Already produced by `src/tracker/scan.py:442` as `yolo_tracking.parquet`. No re-run needed. | **done** |
-| **B: SAM 3 + fixed chunking** | SAM 3 propagation, uniform 60 s chunks, no YOLO scan, no boundary refinement. Isolates the segmentation stage. | Run `script/run_tracker.py` with `config/tracker.yaml` overridden to set `use_adaptive_chunking: false`. | **TODO** (added 2026-05-18) |
+| **B: SAM 3 + fixed chunking** | SAM 3 propagation, uniform 60 s chunks, no YOLO scan, no boundary refinement. Isolates the segmentation stage. | Run `script/run_tracker.py` with `config/tracker.yaml` overridden to set `use_adaptive_chunking: false`. Configs used: `config/tracker_rerun_fixed_day_{28,29}.yaml`. | **done** (2026-05-18) |
 | **C: SAM 3 + adaptive chunking** | Full method. Boundaries shifted within a ±10 s window toward high-separation, low-occlusion frames using the YOLO-scan signal. | Run `script/run_tracker.py` with `config/tracker.yaml` defaults. | **done** |
 
 **Critical**: all three variants run **fully automated**, no manual ID correction. This is the headline reproducibility claim.
 
-Outputs: `ext-data/output/results/tracker_benchmark/predictions/{A_yolo_botsort,B_sam3_fixed,C_sam3_adaptive}/<video_id>.parquet`.
+Outputs: per-variant tracker run directories at `ext-data/tracker_benchmark/tracker_outputs_adaptive/<stem>/` (`yolo_tracking.parquet` + `tracking_outputs.parquet` → supplies A and C) and `ext-data/tracker_benchmark/tracker_outputs_fixed/<stem>/` (`tracking_outputs.parquet` → supplies B). MOT-converted forms land in `ext-data/tracker_benchmark/predictions_mot/{A_yolo_botsort,B_sam3_fixed,C_sam3_adaptive}/<video_id>.txt`.
 
 > **Tuned-SAM3 variant (Phase 3 sweep) is dropped (2026-05-12).** Original plan included a 7-config chunking hyperparameter sweep feeding a tuned variant. Under the 2026-05-21 deadline this is infeasible. The deferred sweep is noted in the manuscript's limitations section.
 
@@ -144,7 +152,7 @@ Outputs: `ext-data/output/results/tracker_benchmark/predictions/{A_yolo_botsort,
 ## Phase 4: Tracker evaluation
 
 ### 4.1 Convert predictions → MOTChallenge
-Module: `src/tracker_eval/predictions.py` (invoked as `python -m src.tracker_eval convert-preds`). Reads each Parquet, extracts bbox per (frame, track_id), writes `<video_id>.txt` in MOTChallenge format. Run for **Variants A, B, and C**. The script takes `--predictions-root` (default `ext-data/output/results/tracker_benchmark/tracker_outputs/`; supplies A and C from the adaptive run dir) and `--predictions-root-fixed` (default `ext-data/output/results/tracker_benchmark/tracker_outputs_fixed/`; supplies B; silently skipped if dir is missing or empty).
+Module: `src/tracker_eval/predictions.py` (invoked as `python -m src.tracker_eval convert-preds`). Reads each Parquet, extracts bbox per (frame, track_id), writes `<video_id>.txt` in MOTChallenge format. Run for **Variants A, B, and C**. The script takes `--predictions-root` (default `ext-data/tracker_benchmark/tracker_outputs_adaptive/`; supplies A and C from the adaptive run dir) and `--predictions-root-fixed` (default `ext-data/tracker_benchmark/tracker_outputs_fixed/`; supplies B; silently skipped if dir is missing or empty).
 
 Predictions stay **dense per-frame** (predicted for every frame). Do not filter predictions to match GT keyframes — `motmetrics` aligns automatically by only updating its accumulator on frames where GT exists. Pre-filtering predictions would hide false positives on non-keyframe frames and distort detection metrics.
 
@@ -183,7 +191,7 @@ For each tracker variant {A_yolo_botsort, B_sam3_fixed, C_sam3_adaptive}:
 - Aggregate (frame-weighted)
 - **All three variants side-by-side**
 
-Outputs: `data/tracker_eval/results/metrics_{per_video,per_cage,aggregate}.csv`. (Already written for A and C; will be regenerated to include B once that variant runs.)
+Outputs: `data/tracker_eval/results/metrics_{per_video,per_cage,aggregate}.csv`. Written for all three variants (A, B, C) as of 2026-05-18 evening.
 
 ---
 
@@ -212,13 +220,13 @@ Outputs: `data/tracker_eval/results/metrics_{per_video,per_cage,aggregate}.csv`.
 Heavy outputs (tracker parquets, MOT files, ground truth) live under `ext-data/output/results/tracker_benchmark/`, written directly through the `ext-data → /mnt/birds/rebecca2025/` symlink (no DVC). Scripts, manifests, and small result CSVs stay in the repo. The repo branch `tracker_benchmark` is already checked out.
 
 ```
-ext-data/output/results/tracker_benchmark/        # On the mounted drive, not version-controlled
+ext-data/tracker_benchmark/                       # On the mounted drive, not version-controlled
 ├── cvat_backup/
 │   ├── playclass-tracker-eval/                  # Extracted CVAT project Backup (project.json + task_*/)
 │   └── playclass-tracker-eval.zip               # Kept for re-import to CVAT
 ├── source_videos/                                # 5 MP4 clips fed to CVAT (provenance)
-├── tracker_outputs_adaptive/                     # SAM 3 adaptive-chunking + YOLO scan run dirs per video (Variant C)
-├── tracker_outputs_fixed/                        # SAM 3 fixed-chunking run dirs per video (Variant B) — TODO
+├── tracker_outputs_adaptive/                     # SAM 3 adaptive-chunking + YOLO scan run dirs per video (Variants A and C)
+├── tracker_outputs_fixed/                        # SAM 3 fixed-chunking run dirs per video (Variant B)
 ├── ground_truth/                                 # MOTChallenge .txt per video (sparse, ~88 frames × 3 birds)
 └── predictions_mot/                              # A_yolo_botsort / B_sam3_fixed / C_sam3_adaptive .txt files
 
@@ -246,7 +254,7 @@ data/tracker_eval/                               # In repo, version-controlled �
     └── metrics_aggregate.csv
 ```
 
-*(Removed under 2026-05-12 scope cuts: `predictions/C_sam3_tuned/`, `chunking_sweep/`, `tracker_eval/chunking/`, `tracker_eval/scripts/sweep_chunking.py`. Renamed under 2026-05-18 ablation refactor: `predictions/B_sam3_default/` → `predictions/C_sam3_adaptive/`. Superseded by the CVAT-Backup path: `filter_mot_to_keyframes.py` was never needed since the Backup's `annotations.json` already contains only human-drawn keyframes. Consolidated under 2026-05-18 pipeline refactor: the five standalone scripts in `tracker_eval/scripts/` were renamed and moved up one level, exposed via a single `python -m src.tracker_eval` CLI; runtime data migrated from `tmp/tracker_benchmark/` to `ext-data/output/results/tracker_benchmark/`.)*
+*(Removed under 2026-05-12 scope cuts: `predictions/C_sam3_tuned/`, `chunking_sweep/`, `tracker_eval/chunking/`, `tracker_eval/scripts/sweep_chunking.py`. Renamed under 2026-05-18 ablation refactor: `predictions/B_sam3_default/` → `predictions/C_sam3_adaptive/`. Superseded by the CVAT-Backup path: `filter_mot_to_keyframes.py` was never needed since the Backup's `annotations.json` already contains only human-drawn keyframes. Consolidated under 2026-05-18 pipeline refactor: the five standalone scripts in `tracker_eval/scripts/` were renamed and moved up one level, exposed via a single `python -m src.tracker_eval` CLI; runtime data lives at `ext-data/tracker_benchmark/`.)*
 
 ---
 
@@ -276,13 +284,13 @@ Revised 2026-05-12 after sparse-eval and Variant-C scope cuts.
 | `cvat_backup_to_mot.py` (CVAT Backup → sparse MOT GT) | done | Replaces the originally-planned `filter_mot_to_keyframes.py`. |
 | Run Variant A (already cached from chunking pipeline) | done | `yolo_tracking.parquet` from existing scan runs |
 | Run Variant C — SAM 3 + adaptive chunking (5 videos × ~30 min GPU) | done | 2.5 GPU-h spent |
-| **Run Variant B — SAM 3 + fixed chunking** (5 videos × ~30 min GPU) | **TODO** | ~2.5 GPU-h. Added 2026-05-18 for the three-way ablation. |
+| Run Variant B — SAM 3 + fixed chunking (5 videos) | done | ~13 GPU-h total wall-clock (≈ 2.5 h / video; significantly longer than the original ~30 min/video estimate due to shared-server CPU contention and chunk-0 grounding fallbacks on Day-28 clips — see `tmp/tracker_optimization_findings.md`). Added 2026-05-18 for the three-way ablation. |
 | `convert_predictions.py` (incl. `--predictions-root-fixed` for Variant B) | done | |
-| `evaluate_tracker.py` + metric computation (motmetrics + TrackEval HOTA) | done for A and C | Re-run once Variant B parquets exist (script skips missing variants). |
+| `evaluate_tracker.py` + metric computation (motmetrics + TrackEval HOTA) | done for A, B, and C | All three variants in `data/tracker_eval/results/`. |
 | Manuscript integration | ~3 | Three-way ablation framing, paragraph drop-in (`tmp/tracker_evaluation_methods.md`). |
 | ~~Sweep on 2 videos × 7 configs~~ | ~~7 GPU-h~~ | Dropped (Phase 3 deferred). |
 | ~~Run tuned-SAM3 variant on 5 videos~~ | ~~2.5 GPU-h~~ | Dropped. |
-| **Remaining (as of 2026-05-18)** | **~3 person-hours + ~2.5 GPU-hours** | Variant B run + eval re-run + manuscript write-up. |
+| **Remaining (as of 2026-05-18 evening)** | **~3 person-hours** | Manuscript write-up only. |
 
 ---
 

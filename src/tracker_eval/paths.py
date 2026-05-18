@@ -27,7 +27,7 @@ TRACKER_CONFIG = ROOT / "config" / "tracker.yaml"
 TRACKEVAL_DIR = ROOT / "ext" / "TrackEval"
 
 # Ext-data side (heavy, on /mnt/birds via symlink in production)
-BENCHMARK_DIR = EXT_DATA / "output" / "results" / "tracker_benchmark"
+BENCHMARK_DIR = EXT_DATA / "tracker_benchmark"
 CVAT_BACKUP_DIR = BENCHMARK_DIR / "cvat_backup" / "playclass-tracker-eval"
 TRACKER_RUNS_ADAPTIVE = BENCHMARK_DIR / "tracker_outputs_adaptive"
 TRACKER_RUNS_FIXED = BENCHMARK_DIR / "tracker_outputs_fixed"
