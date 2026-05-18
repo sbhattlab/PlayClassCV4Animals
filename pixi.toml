@@ -89,15 +89,10 @@ test_post_build = "python -m pytest tests/test_post_build_dataset.py -v"
 test_postprocessing_smoke = "python -m tests.test_postprocessing_smoke"
 
 # ======= Tracker evaluation dependencies ======
-# CPU-only env for sparse-keyframe MOT evaluation (convert_predictions + evaluate_tracking).
-# Kept separate from `tracker` because `tracker` is Linux-CUDA-only.
 [feature.tracker-evaluation.pypi-dependencies]
 numpy = ">=1.2.6,<2"
 motmetrics = ">=1.4.0"
 omegaconf = ">=2.3.0"
-# Runtime deps for TrackEval (imported from the ext/TrackEval git submodule;
-# not pip-installed). The strict pins in TrackEval's requirements.txt are dev-env
-# recommendations — using loose pins compatible with the rest of the project.
 pycocotools = ">=2.0.11,<3"
 opencv-python = "*"
 scikit-image = "*"
