@@ -62,6 +62,7 @@ __marimo__/
 model/
 
 # Data
+ext/
 ext-data
 video-data/
 ext-data/

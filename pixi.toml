@@ -20,6 +20,7 @@ embeddings = ["embeddings", "cuda"]
 classifier = ["classifier", "cuda"]
 videoprism = ["videoprism"]
 tracker-evaluation = ["tracker-evaluation"]
+gs2 = ["gs2", "cuda"]
 
 # ======= Default dependencies ======
 [dependencies]
@@ -159,3 +160,50 @@ opencv-python-headless = ">=4.10"
 
 [feature.videoprism.tasks]
 extract_videoprism = "python -m script.extract_embeddings_videoprism"
+
+# ======= Grounded-SAM-2 (gs2) dependencies ======
+# gs2 is a baseline tracker between YOLO+BoT-SORT and SAM3.
+# Isolated env: pins numpy >=2.4 to match the 53e7a1d gs2 setup.
+[feature.gs2]
+platforms = ["linux-64"]
+
+[feature.gs2.pypi-dependencies]
+setuptools = "*"
+transformers = { git = "https://github.com/huggingface/transformers", rev = "v5.0.0rc2" }
+opencv-python = ">=4.13.0.90,<5"
+pycocotools = ">=2.0.11,<3"
+pillow = ">=12.1.0,<13"
+numpy = ">=2.4.1,<3"
+pandas = ">=3.0.0,<4"
+supervision = ">=0.27.0,<0.28"
+tqdm = ">=4.67.1,<5"
+pyarrow = ">=23.0.0,<24"
+loguru = ">=0.7.3"
+omegaconf = ">=2.3.0"
+psutil = ">=5.9.0"
+
+[feature.gs2.tasks]
+download-sam2-checkpoints = { cmd = """
+bash -c 'if ls checkpoints/*.pt 1> /dev/null 2>&1; then echo "SAM2 checkpoints already exist, skipping download..."; else cd checkpoints && bash download_ckpts.sh; fi'
+""", cwd = "ext/Grounded-SAM-2" }
+
+download-gdino-checkpoints = { cmd = """
+bash -c 'if ls gdino_checkpoints/*.pth 1> /dev/null 2>&1; then echo "Grounding DINO checkpoints already exist, skipping download..."; else cd gdino_checkpoints && bash download_ckpts.sh; fi'
+""", cwd = "ext/Grounded-SAM-2" }
+
+install-pytorch = "uv pip install torch torchvision torchaudio"
+
+install-gs2-packages = { cmd = """
+export CUDA_HOME="/usr/lib/nvidia-cuda-toolkit/" && \
+uv pip install -e . && \
+uv pip install --no-build-isolation -e grounding_dino
+""", cwd = "ext/Grounded-SAM-2" }
+
+setup-gs2 = { depends-on = [
+    "download-sam2-checkpoints",
+    "download-gdino-checkpoints",
+    "install-pytorch",
+    "install-gs2-packages",
+] }
+
+gs2_tracker = "python -m script.run_gs2_tracker --config config/gs2_fixed_day_28.yaml"

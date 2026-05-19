@@ -1,17 +1,20 @@
 """Convert raw tracker predictions to MOTChallenge 1.1 .txt files.
 
-Three-way ablation:
+Four-way ablation (ordered by sophistication):
   - Variant A — YOLO + BoT-SORT only (`yolo_tracking.parquet` under
     `--predictions-root`).
-  - Variant B — SAM3 with fixed chunking (`tracking_outputs.parquet`
+  - Variant B — Grounded-SAM-2 with fixed chunking (`tracking_outputs.parquet`
+    under `--predictions-root-gs2`, optional).
+  - Variant C — SAM3 with fixed chunking (`tracking_outputs.parquet`
     under `--predictions-root-fixed`, optional).
-  - Variant C — SAM3 with adaptive, occlusion-informed chunking
+  - Variant D — SAM3 with adaptive, occlusion-informed chunking
     (`tracking_outputs.parquet` under `--predictions-root`).
 
 Writes:
   <out-dir>/A_yolo_botsort/<video_id>.txt
-  <out-dir>/B_sam3_fixed/<video_id>.txt       (if --predictions-root-fixed given)
-  <out-dir>/C_sam3_adaptive/<video_id>.txt
+  <out-dir>/B_gs2_fixed/<video_id>.txt        (if --predictions-root-gs2 given)
+  <out-dir>/C_sam3_fixed/<video_id>.txt       (if --predictions-root-fixed given)
+  <out-dir>/D_sam3_adaptive/<video_id>.txt
 
 MOTChallenge row format:
     frame, id, bb_left, bb_top, bb_width, bb_height, conf, -1, -1, -1
@@ -25,6 +28,7 @@ Usage:
     pixi run -e tracker-evaluation python -m src.tracker_eval convert-preds \
         --predictions-root ext-data/output/results/tracker_benchmark/tracker_outputs_adaptive \
         --predictions-root-fixed ext-data/output/results/tracker_benchmark/tracker_outputs_fixed \
+        --predictions-root-gs2 ext-data/output/results/tracker_benchmark/tracker_outputs_gs2 \
         --manifest data/tracker_eval/video_manifest.csv \
         --out-dir ext-data/output/results/tracker_benchmark/predictions_mot
 """
@@ -41,6 +45,7 @@ from .paths import (
     PREDICTIONS_MOT_DIR,
     TRACKER_RUNS_ADAPTIVE,
     TRACKER_RUNS_FIXED,
+    TRACKER_RUNS_GS2,
 )
 
 
@@ -111,13 +116,19 @@ def _add_args(parser: argparse.ArgumentParser) -> None:
         "--predictions-root",
         type=Path,
         default=TRACKER_RUNS_ADAPTIVE,
-        help="Adaptive SAM3 + YOLO scan run dir (supplies A_yolo_botsort and C_sam3_adaptive).",
+        help="Adaptive SAM3 + YOLO scan run dir (supplies A_yolo_botsort and D_sam3_adaptive).",
     )
     parser.add_argument(
         "--predictions-root-fixed",
         type=Path,
         default=TRACKER_RUNS_FIXED,
-        help="Fixed-chunking SAM3 run dir (supplies B_sam3_fixed). Skipped if dir is missing or empty.",
+        help="Fixed-chunking SAM3 run dir (supplies C_sam3_fixed). Skipped if dir is missing or empty.",
+    )
+    parser.add_argument(
+        "--predictions-root-gs2",
+        type=Path,
+        default=TRACKER_RUNS_GS2,
+        help="Grounded-SAM-2 fixed-chunking run dir (supplies B_gs2_fixed). Skipped if dir is missing or empty.",
     )
     parser.add_argument("--manifest", type=Path, default=MANIFEST_CSV)
     parser.add_argument("--out-dir", type=Path, default=PREDICTIONS_MOT_DIR)
@@ -148,35 +159,49 @@ def run(args: argparse.Namespace) -> None:
         yolo_pq = run_dir / "yolo_tracking.parquet"
 
         a_rows = yolo_to_mot_rows(yolo_pq) if yolo_pq.exists() else []
-        c_rows = sam3_to_mot_rows(sam3_pq) if sam3_pq.exists() else []
+        d_rows = sam3_to_mot_rows(sam3_pq) if sam3_pq.exists() else []
 
         a_out = args.out_dir / "A_yolo_botsort" / f"{video_id}.txt"
-        c_out = args.out_dir / "C_sam3_adaptive" / f"{video_id}.txt"
+        d_out = args.out_dir / "D_sam3_adaptive" / f"{video_id}.txt"
         write_rows(a_out, a_rows)
-        write_rows(c_out, c_rows)
+        write_rows(d_out, d_rows)
 
         b_rows: list[str] = []
+        if args.predictions_root_gs2 is not None and args.predictions_root_gs2.exists():
+            gs2_run_dir = args.predictions_root_gs2 / stem
+            gs2_pq = gs2_run_dir / "tracking_outputs.parquet"
+            if gs2_pq.exists():
+                b_rows = sam3_to_mot_rows(gs2_pq)
+                b_out = args.out_dir / "B_gs2_fixed" / f"{video_id}.txt"
+                write_rows(b_out, b_rows)
+            else:
+                print(
+                    f"  [skip] {video_id}: gs2 parquet missing at {gs2_pq}"
+                )
+
+        c_rows: list[str] = []
         if args.predictions_root_fixed is not None and args.predictions_root_fixed.exists():
             fixed_run_dir = args.predictions_root_fixed / stem
             sam3_fixed_pq = fixed_run_dir / "tracking_outputs.parquet"
             if sam3_fixed_pq.exists():
-                b_rows = sam3_to_mot_rows(sam3_fixed_pq)
-                b_out = args.out_dir / "B_sam3_fixed" / f"{video_id}.txt"
-                write_rows(b_out, b_rows)
+                c_rows = sam3_to_mot_rows(sam3_fixed_pq)
+                c_out = args.out_dir / "C_sam3_fixed" / f"{video_id}.txt"
+                write_rows(c_out, c_rows)
             else:
                 print(
                     f"  [skip] {video_id}: fixed-chunking parquet missing at {sam3_fixed_pq}"
                 )
 
-        summary.append((video_id, len(a_rows), len(b_rows), len(c_rows)))
+        summary.append((video_id, len(a_rows), len(b_rows), len(c_rows), len(d_rows)))
 
     print()
     print(
-        f"{'video_id':<14} {'A (YOLO+BoT-SORT)':>20} {'B (SAM3 fixed)':>18} {'C (SAM3 adaptive)':>20}"
+        f"{'video_id':<14} {'A (YOLO+BoT-SORT)':>20} {'B (gs2 fixed)':>16} "
+        f"{'C (SAM3 fixed)':>16} {'D (SAM3 adaptive)':>20}"
     )
-    print("-" * 80)
-    for vid, na, nb, nc in summary:
-        print(f"{vid:<14} {na:>20} {nb:>18} {nc:>20}")
+    print("-" * 90)
+    for vid, na, nb, nc, nd in summary:
+        print(f"{vid:<14} {na:>20} {nb:>16} {nc:>16} {nd:>20}")
 
 
 def _main() -> None:
