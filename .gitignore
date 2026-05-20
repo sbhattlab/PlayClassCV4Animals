@@ -72,6 +72,11 @@ data/dataset/
 data/tsne/
 tracking/
 
+# Scrapbook — source lives on the dedicated `scrapbook` orphan branch.
+# Local working copy + Quarto build artefacts stay untracked on feature branches.
+scrapbook/
+
+
 # Notes & drafts
 tmp/
 drafts*.py

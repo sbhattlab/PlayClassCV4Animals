@@ -1,18 +1,21 @@
 # Refined Plan: Tracking Evaluation for CVPR 2026 Workshop Revision
 
-## Current status (2026-05-18, evening)
+## Current status (2026-05-19, afternoon)
 
-**At Phase 5 (manuscript integration).** Phases 1–4 are complete: the 5-video held-out set has been selected, annotated in CVAT, converted to sparse MOTChallenge GT, and scored against **all three variants (A, B, C)**. Per-video / per-cage / aggregate CSVs are written to `data/tracker_eval/results/`.
+**At Phase 5 (manuscript integration), with the ablation expanded from 3-way to 4-way.** Phases 1–4 are complete for A, C, D. Variant B has been added (Grounded-SAM-2 with fixed 60 s chunking and parity recovery mechanisms) and inference is in progress as of this update. The previous Variants B and C have been renamed to C and D respectively; the new B slot is `B_gs2_fixed`.
 
-**Headline aggregate (5 videos, sparse GT, 462 keyframes):**
+**Headline aggregate from the prior 3-way run (5 videos, sparse GT, 462 keyframes; A/C/D numbers, B pending):**
 
 | Variant | HOTA | DetA | AssA | IDF1 | MOTA | ID switches |
 |---|---:|---:|---:|---:|---:|---:|
 | A_yolo_botsort | 0.0646 | 0.187 | 0.023 | 0.059 | 0.064 | 173 |
-| B_sam3_fixed | 0.5443 | 0.629 | 0.471 | 0.671 | 0.664 | 49 |
-| **C_sam3_adaptive** | **0.5560** | **0.631** | **0.491** | **0.701** | **0.702** | **35** |
+| **B_gs2_fixed** | **(pending)** | **(pending)** | **(pending)** | **(pending)** | **(pending)** | **(pending)** |
+| C_sam3_fixed (was B_sam3_fixed) | 0.5443 | 0.629 | 0.471 | 0.671 | 0.664 | 49 |
+| **D_sam3_adaptive** (was C_sam3_adaptive) | **0.5560** | **0.631** | **0.491** | **0.701** | **0.702** | **35** |
 
-The manuscript claim `HOTA(C) > max(HOTA(A), HOTA(B))` holds, with monotone gains across association-sensitive metrics (AssA, IDF1) and a 29 % reduction in ID switches between B and C. Per-video, B and C swap on individual clips (B narrowly wins on C5G3_day_28 and C1G2_day_29; C wins clearly on C2G2_day_28 where B's chunk 0 fell back to `Sam3VideoModel` because grounding could not find ≥ 3 birds in the first 125 frames). The cross-video variance is worth a sentence in the §5 discussion.
+The 3-way claim `HOTA(D) > max(HOTA(A), HOTA(C))` is established, with monotone gains across association-sensitive metrics (AssA, IDF1) and a 29 % reduction in ID switches between C and D. Per-video, C and D swap on individual clips (C narrowly wins on C5G3_day_28 and C1G2_day_29; D wins clearly on C2G2_day_28 where C's chunk 0 fell back to `Sam3VideoModel` because grounding could not find ≥ 3 birds in the first 125 frames). The cross-video variance is worth a sentence in the §5 discussion.
+
+The expected B placement is between A and C — see "Variant B (Grounded-SAM-2) — added 2026-05-19" below for design rationale.
 
 **Pipeline consolidation (2026-05-18).** The previous flat `tracker_eval/scripts/` directory has been replaced by a Python package under `src/tracker_eval/` exposing a single CLI with subcommands. The canonical entry points are now the two umbrella commands `pixi run -e tracker python -m src.tracker_eval prepare` (build-manifest + select-frames) and `pixi run -e tracker-evaluation python -m src.tracker_eval score` (cvat-to-mot + convert-preds + evaluate), bracketing the offline CVAT annotation checkpoint. Individual stages remain callable for ad-hoc re-runs (e.g. `python -m src.tracker_eval evaluate`). All runtime artefacts (CVAT Backup, tracker run parquets, the 5 source MP4 clips, ground-truth and prediction MOT files) live at `ext-data/tracker_benchmark/{cvat_backup,tracker_outputs_adaptive,tracker_outputs_fixed,source_videos,ground_truth,predictions_mot}/`. Path defaults live in `src/tracker_eval/paths.py`.
 
@@ -47,6 +50,27 @@ The hypothesis is that Variant C strictly beats $\max(\text{A}, \text{B})$ and t
 
 **Three-way ablation added (2026-05-18).** The comparison was previously framed as **A (YOLO+BoT-SORT) vs B (SAM3 default)**, where "SAM3 default" meant SAM 3 with the production adaptive-chunking config. That framing conflates two ingredients of the proposed method (SAM 3 propagation + occlusion-informed chunking) into one arm, so a win for B doesn't tell us *which* ingredient drove it. To make the ablation crisp, SAM 3 with fixed 60 s chunking is added as a new arm and the variant labels are renamed accordingly: **A (YOLO+BoT-SORT) — B (SAM 3 + fixed chunking) — C (SAM 3 + adaptive chunking)**. Variant B costs one extra ~2.5 GPU-hour run; the rest of the pipeline (annotation, GT export, evaluation) is unchanged.
 
+**Four-way ablation added (2026-05-19).** The previous 3-way A/B/C ablation isolated YOLO-only tracking from SAM 3 (B/C), but conflated the contribution of *SAM 3's video pretraining and multi-frame grounding* with the contribution of *any mask-based propagation tracker*. Reviewers could have argued that the A→B/C gap reflects "any mask propagator beats detection-only," not specifically what SAM 3 brings. To make the ablation crisp, Grounded-SAM-2 (gs2) is added as a new B between A and the two SAM 3 arms, and the existing SAM 3 arms are re-lettered to C and D. Variant labels are now **A (YOLO+BoT-SORT) — B (Grounded-SAM-2 + fixed chunking) — C (SAM 3 + fixed chunking) — D (SAM 3 + adaptive chunking)**, monotone in sophistication. gs2 is the immediate technical predecessor of SAM 3: a frozen GroundingDINO detector grounds the seed frame, SAM 2 image predictor refines boxes into masks, SAM 2 video predictor propagates them — i.e. the off-the-shelf mask-propagation baseline a practitioner would reach for before SAM 3 existed. Implementation in `src/tracker/grounded_sam_2.py`; submodule at `ext/Grounded-SAM-2/` (IDEA-Research upstream, registered 2026-05-19).
+
+### Variant B (Grounded-SAM-2) — added 2026-05-19
+
+#### Design history (paths considered and rejected)
+
+The gs2 baseline was initially run using the user's customised fork (`prince-ravi-leow/Grounded-SAM-2`, the same fork referenced on `main` at commit `53e7a1d`) with three dataset-tuned behavioural enhancements on top of the IDEA-Research reference: (i) a threshold-lowering retry loop dropping `box_threshold` from 0.25 to a floor of 0.15 until ≥ `min_objects_for_tracking=3` valid detections were found, (ii) an area filter rejecting boxes >40 % or <0.3 % of frame area, and (iii) a `min_objects_for_tracking=3` knob driving the retry. These tweaks encoded the domain prior "there are exactly 3 birds per pen" into the baseline. Keeping them would have invited the reviewer pushback "your gs2 baseline isn't really gs2 — you re-engineered it to suit your dataset." That initial run was killed mid-flight.
+
+The replacement (Path C — strict reference) stripped all three tweaks and ran a single GroundingDINO call at threshold 0.25 with no retry, no area filter, accept-whatever-comes-back, abort on 0 detections. Results were honest but exposed two catastrophic failure modes that the asymmetric recovery scaffolding between gs2 and SAM 3 was responsible for: **C3G2** returned 0 detections on frame 0 of chunk 0 and aborted the whole pipeline; **C4G2** seeded only 1 bird at chunk 0 and that bird's mask became fully empty mid-video, so the pipeline aborted at chunk 5. The strict run is preserved as `B_gs2_strict` in the supplementary because it motivates the recovery-mechanism asymmetry.
+
+The headline `B_gs2_fixed` (parity-recovery) is the IDEA-Research reference pipeline **plus** structural analogues of SAM 3's two recovery mechanisms, implemented with gs2-native components (no SAM 3 dependency). Two enhancements:
+
+1. **Best-frame seed selection** over the first 125 frames at chunk 0 (mirrors SAM 3's `text_grounding.grounding_frames=125`). GroundingDINO is run on every candidate frame; the frame with the most detections at threshold 0.25 is chosen as the seed. Ties broken by earliest frame.
+2. **GroundingDINO re-init on total carryover loss.** If `_extract_carryover_masks` returns an empty dict (no surviving masks in the last `max_lookback_frames` frames of chunk N), chunk N+1 runs the same 125-frame best-frame search to rediscover objects. New objects receive fresh integer IDs continuing from the highest ID seen so far, so the discontinuity is explicit in the parquet.
+
+Per-chunk-boundary re-grounding with IoU-based ID matching (the *additional* recovery layer SAM 3 has) is **not** implemented for gs2. The remaining gap between B and C therefore attributes to (a) the quality of the grounder — image-only GroundingDINO vs SAM 3's text-grounded video-pretrained model — and (b) the additional per-chunk re-init layer. Both are SAM 3 contributions worth attributing.
+
+Other deliberate choices: the larger Swin-B GroundingDINO variant (`IDEA-Research/grounding-dino-base`, ~340M params) is used rather than the tiny variant, matching the convention of using the larger published HF weights where available and giving the baseline the strongest grounder shipped by the same authors. SAM 2.1 (not SAM-HQ2) is used to avoid creating an asymmetric "stronger SAM" advantage that has no SAM 3 counterpart. The text prompt is `.bird.` matching SAM 3.
+
+The two staggered runs scheduled 2026-05-19 evening: parity day 29 on CUDA 1 starts immediately (day 29 strict was already complete); parity day 28 on CUDA 0 starts as soon as strict day 28 finishes (~16:00). Combined inference ETA ~17:45.
+
 Day-37 scan results are retained on disk (`ext-data/output/results/sam3-hf/`) and the old candidate manifest is archived at `data/tracker_eval/video_manifest_day_37_superseded.csv` for possible future use, but day 37 is **out of scope** for this evaluation.
 
 ## Refinements vs. previous draft (`plan.md`)
@@ -59,6 +83,7 @@ Day-37 scan results are retained on disk (`ext-data/output/results/sam3-hf/`) an
 6. **Sparse-keyframe evaluation (2026-05-12).** Dropped the dense-interpolated-GT assumption. Metrics are computed only at the ~88 human-verified keyframes per video. Removes a QA-scrubbing pass (~3–4 hours per video) and removes measurement noise from linearly-interpolated bboxes on non-linearly-moving birds. Matches TAO and multi-animal pose-estimation/tracker conventions; metric definitions are unchanged. See Phase 1.3 / 1.4 / 4 below.
 7. **Drop Phase 3 sweep (2026-05-12).** Revision deadline 2026-05-21 makes the 7-config sweep infeasible. Manuscript notes the deferred sweep in limitations.
 8. **Add SAM 3 fixed-chunking arm and re-letter variants (2026-05-18).** The earlier two-way A-vs-B comparison made a method-vs-baseline point but left the source of the lift ambiguous — SAM 3 alone might do the work, with the occlusion-informed chunker contributing nothing. Adding a SAM-3-with-fixed-chunking arm turns the experiment into a proper ablation. Variant labels are re-lettered so that A → B → C corresponds to a monotonic increase in method components (YOLO only → +SAM 3 → +adaptive chunking). Script-level rename of `B_sam3_default` → `C_sam3_adaptive` and addition of `B_sam3_fixed` are reflected in `convert_predictions.py` and `evaluate_tracker.py`.
+9. **Add Grounded-SAM-2 arm and expand to four-way ablation (2026-05-19).** The 3-way A/B/C ablation conflated "SAM 3 video pretraining + multi-frame grounding" with "any mask-propagation tracker," giving reviewers room to dismiss the SAM 3 contribution. Adding gs2 as a fourth arm between A and the SAM 3 variants (with parity recovery mechanisms scaled to match SAM 3's recovery scaffolding) makes the comparison crisp: A→B isolates mask-based identity preservation over detection-only tracking; B→C isolates SAM 3's video-pretrained text-grounded grounder + per-chunk re-grounding over GroundingDINO image-only grounding; C→D isolates occlusion-aware adaptive chunking. Variant labels re-lettered again: A (YOLO+BoT-SORT) → B (gs2 + fixed) → C (SAM 3 + fixed) → D (SAM 3 + adaptive). `src/tracker_eval/{paths,predictions,evaluate}.py` updated. Old `B_sam3_fixed` / `C_sam3_adaptive` directories under `predictions_mot/` will be regenerated under the new C/D names.
 
 ## Timeline
 

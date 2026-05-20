@@ -170,27 +170,29 @@ def run(args: argparse.Namespace) -> None:
         if args.predictions_root_gs2 is not None and args.predictions_root_gs2.exists():
             gs2_run_dir = args.predictions_root_gs2 / stem
             gs2_pq = gs2_run_dir / "tracking_outputs.parquet"
+            b_out = args.out_dir / "B_gs2_fixed" / f"{video_id}.txt"
             if gs2_pq.exists():
                 b_rows = sam3_to_mot_rows(gs2_pq)
-                b_out = args.out_dir / "B_gs2_fixed" / f"{video_id}.txt"
-                write_rows(b_out, b_rows)
             else:
                 print(
-                    f"  [skip] {video_id}: gs2 parquet missing at {gs2_pq}"
+                    f"  [empty] {video_id}: gs2 parquet missing at {gs2_pq} "
+                    f"(writing empty MOT file so the variant is scored)"
                 )
+            write_rows(b_out, b_rows)
 
         c_rows: list[str] = []
         if args.predictions_root_fixed is not None and args.predictions_root_fixed.exists():
             fixed_run_dir = args.predictions_root_fixed / stem
             sam3_fixed_pq = fixed_run_dir / "tracking_outputs.parquet"
+            c_out = args.out_dir / "C_sam3_fixed" / f"{video_id}.txt"
             if sam3_fixed_pq.exists():
                 c_rows = sam3_to_mot_rows(sam3_fixed_pq)
-                c_out = args.out_dir / "C_sam3_fixed" / f"{video_id}.txt"
-                write_rows(c_out, c_rows)
             else:
                 print(
-                    f"  [skip] {video_id}: fixed-chunking parquet missing at {sam3_fixed_pq}"
+                    f"  [empty] {video_id}: fixed-chunking parquet missing at {sam3_fixed_pq} "
+                    f"(writing empty MOT file so the variant is scored)"
                 )
+            write_rows(c_out, c_rows)
 
         summary.append((video_id, len(a_rows), len(b_rows), len(c_rows), len(d_rows)))
 

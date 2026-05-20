@@ -1,0 +1,37 @@
+# Grounded-SAM-2 Tracker — fixed 60s chunking, Day 28, PARITY-RECOVERY variant.
+#
+# Same pipeline as gs2_fixed_day_28.yaml (strict Path C), but with two
+# structural recovery mechanisms enabled to match SAM 3's recovery scaffolding:
+#   1. Best-frame seed selection over the first `seed_scan_window` frames at
+#      chunk 0 (mirrors SAM 3's `text_grounding.grounding_frames=125`).
+#   2. GDINO re-init on total carryover loss (mirrors SAM 3's text-grounded
+#      mid-video re-init, with the gs2-native grounder).
+#
+# Videos: C2G2, C5G3 (staged at ext-data/raw/rerun_fixed_day_28/).
+# Runs on CUDA 0.
+
+CUDA_VISIBLE_DEVICES: "0"
+PYTORCH_ALLOC_CONF: "expandable_segments:True,garbage_collection_threshold:0.6"
+
+job_type: "gs2_parity"
+video_dir: "ext-data/raw/rerun_fixed_day_28"
+text_prompt: ".bird."
+output_dir: "ext-data/output/results/grounded-sam-2"
+start_frame: 0
+max_frames_to_track: 0
+
+# Fixed 60s chunks — identical to SAM 3 Variant C.
+chunk_seconds: 60
+
+# Max frames to look back when extracting carryover masks at chunk boundary.
+max_lookback_frames: 10
+
+gs2:
+  model_size: "large"
+  gdino_model_id: "IDEA-Research/grounding-dino-base"
+  box_threshold: 0.25
+  text_threshold: 0.3
+  offload_video_to_cpu: true
+  # Parity-recovery knobs:
+  enable_recovery: true
+  seed_scan_window: 125    # mirrors SAM 3's text_grounding.grounding_frames

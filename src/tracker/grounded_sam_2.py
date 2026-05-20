@@ -89,30 +89,22 @@ def _write_frames_to_dir(frames: list[np.ndarray], out_dir: str) -> None:
         cv2.imwrite(str(Path(out_dir) / f"{i:05d}.jpg"), frame_bgr)
 
 
-def _detect_and_segment_first_frame(
+def _gdino_detect_boxes(
     frame_rgb: np.ndarray,
     text_prompt: str,
     gdino_processor,
     gdino_model,
-    image_predictor: SAM2ImagePredictor,
     box_threshold: float,
     text_threshold: float,
     device: str,
-) -> tuple[dict, list[str]]:
-    """Faithful IDEA-Research grounding: single GroundingDINO call at the
-    user-specified thresholds. No retry loop, no area filter. If the call
-    returns zero boxes the pipeline aborts; otherwise every detection is
-    refined into a mask and tracked, including any noise that survived the
-    threshold.
-    """
+) -> tuple[np.ndarray, list[str]]:
+    """Single GroundingDINO call. Returns (boxes, labels) — no masking."""
     image_pil = Image.fromarray(frame_rgb)
     inputs = gdino_processor(
         images=image_pil, text=text_prompt, return_tensors="pt"
     ).to(device)
-
     with torch.inference_mode():
         gdino_outputs = gdino_model(**inputs)
-
     results = gdino_processor.post_process_grounded_object_detection(
         gdino_outputs,
         inputs.input_ids,
@@ -120,23 +112,26 @@ def _detect_and_segment_first_frame(
         text_threshold=text_threshold,
         target_sizes=[image_pil.size[::-1]],
     )
-    input_boxes = results[0]["boxes"].detach().cpu().numpy()
+    boxes = results[0]["boxes"].detach().cpu().numpy()
     labels = [str(lbl) for lbl in results[0]["labels"]]
+    return boxes, labels
 
-    logger.info(
-        f"GroundingDINO: {len(input_boxes)} detections at "
-        f"box_threshold={box_threshold:.2f}, text_threshold={text_threshold:.2f}"
-    )
 
-    if input_boxes.shape[0] == 0:
-        logger.warning(
-            f"GroundingDINO: no detections for '{text_prompt}' on seed frame"
-        )
-        return {}, []
-
+def _refine_boxes_to_masks(
+    frame_rgb: np.ndarray,
+    boxes: np.ndarray,
+    image_predictor: SAM2ImagePredictor,
+    start_obj_id: int = 1,
+) -> dict[int, np.ndarray]:
+    """Refine GDINO boxes into SAM2 masks. obj_ids are assigned sequentially
+    starting at start_obj_id (lets the caller continue numbering after a
+    re-init so IDs don't collide with previously-tracked objects).
+    """
+    if boxes.shape[0] == 0:
+        return {}
     image_predictor.set_image(frame_rgb)
     obj_id_to_mask: dict[int, np.ndarray] = {}
-    for obj_id, box in enumerate(input_boxes, start=1):
+    for offset, box in enumerate(boxes):
         box_k = np.asarray(box, dtype=np.float32)[None]
         with torch.inference_mode():
             masks_k, _scores_k, _ = image_predictor.predict(
@@ -150,8 +145,91 @@ def _detect_and_segment_first_frame(
             m = m.squeeze(0).squeeze(0)
         elif m.ndim == 3:
             m = m.squeeze(0)
-        obj_id_to_mask[int(obj_id)] = m.astype(np.uint8)
+        obj_id_to_mask[int(start_obj_id + offset)] = m.astype(np.uint8)
+    return obj_id_to_mask
 
+
+def _select_best_seed_frame(
+    frames: list[np.ndarray],
+    text_prompt: str,
+    gdino_processor,
+    gdino_model,
+    box_threshold: float,
+    text_threshold: float,
+    device: str,
+    scan_window: int = 125,
+) -> tuple[int, np.ndarray, list[str]]:
+    """Scan the first `scan_window` frames with GroundingDINO; pick the frame
+    with the most detections at the given threshold. Tie-break: earliest.
+
+    Returns (best_frame_idx, best_boxes, best_labels). If no frame yields
+    any detections, returns (0, empty_array, []).
+    """
+    n_scan = min(scan_window, len(frames))
+    logger.info(
+        f"  Best-frame seed selection: scanning {n_scan} frames "
+        f"(box_threshold={box_threshold:.2f})"
+    )
+    best_idx = 0
+    best_boxes = np.zeros((0, 4), dtype=np.float32)
+    best_labels: list[str] = []
+    best_count = -1
+    for i in range(n_scan):
+        boxes, labels = _gdino_detect_boxes(
+            frames[i],
+            text_prompt,
+            gdino_processor,
+            gdino_model,
+            box_threshold,
+            text_threshold,
+            device,
+        )
+        n = len(boxes)
+        if n > best_count:
+            best_count = n
+            best_idx = i
+            best_boxes = boxes
+            best_labels = labels
+    logger.info(
+        f"  Best seed frame: idx={best_idx} with {best_count} detections "
+        f"(scanned {n_scan} frames)"
+    )
+    return best_idx, best_boxes, best_labels
+
+
+def _detect_and_segment_first_frame(
+    frame_rgb: np.ndarray,
+    text_prompt: str,
+    gdino_processor,
+    gdino_model,
+    image_predictor: SAM2ImagePredictor,
+    box_threshold: float,
+    text_threshold: float,
+    device: str,
+) -> tuple[dict, list[str]]:
+    """Strict IDEA-Research grounding: single GroundingDINO call on the given
+    frame at the user-specified thresholds. No retry loop, no area filter.
+    Returns ({}, []) if zero boxes survive the threshold.
+    """
+    boxes, labels = _gdino_detect_boxes(
+        frame_rgb,
+        text_prompt,
+        gdino_processor,
+        gdino_model,
+        box_threshold,
+        text_threshold,
+        device,
+    )
+    logger.info(
+        f"GroundingDINO: {len(boxes)} detections at "
+        f"box_threshold={box_threshold:.2f}, text_threshold={text_threshold:.2f}"
+    )
+    if boxes.shape[0] == 0:
+        logger.warning(
+            f"GroundingDINO: no detections for '{text_prompt}' on seed frame"
+        )
+        return {}, []
+    obj_id_to_mask = _refine_boxes_to_masks(frame_rgb, boxes, image_predictor)
     logger.info(
         f"SAM2 image predictor: generated {len(obj_id_to_mask)} masks "
         f"(obj_ids: {list(obj_id_to_mask.keys())})"
@@ -166,7 +244,17 @@ def _process_chunk(
     obj_id_to_mask: dict,
     video_predictor,
     offload_video_to_cpu: bool = True,
+    seed_frame_offset: int = 0,
 ) -> dict:
+    """Run SAM2 video propagation over a chunk.
+
+    seed_frame_offset: the chunk-local frame index at which the mask prompts
+    apply. 0 = mask prompts are anchored to the first frame of the chunk
+    (standard for carryover). >0 = mask prompts are anchored later in the
+    chunk (best-frame selection chose that frame); propagation runs from
+    there forward, so chunk frames before seed_frame_offset have no
+    tracking outputs in this run.
+    """
     num_frames = len(chunk_frames)
     model_type = "gs2_grounded" if chunk_idx == 0 else "gs2_tracker"
 
@@ -195,7 +283,7 @@ def _process_chunk(
                 continue
             video_predictor.add_new_mask(
                 inference_state=inference_state,
-                frame_idx=0,
+                frame_idx=seed_frame_offset,
                 obj_id=int(obj_id),
                 mask=mask_bool,
             )
@@ -206,7 +294,10 @@ def _process_chunk(
         del inference_state
         return {}
 
-    logger.info(f"  Seeded {seeded} objects, propagating {num_frames} frames...")
+    logger.info(
+        f"  Seeded {seeded} objects at chunk-local frame {seed_frame_offset}, "
+        f"propagating {num_frames - seed_frame_offset} frames..."
+    )
 
     outputs_per_frame: dict = {}
     with torch.inference_mode():
@@ -316,6 +407,9 @@ def _run_single_video(cfg, run_dir: Path, config_path: Path | None = None) -> No
     text_threshold = gs2_cfg.get("text_threshold", 0.3)
     offload_video_to_cpu = gs2_cfg.get("offload_video_to_cpu", True)
     gdino_model_id = gs2_cfg.get("gdino_model_id", DEFAULT_GDINO_MODEL_ID)
+    # Parity-recovery flags (default off = strict IDEA-Research reference).
+    enable_recovery = bool(gs2_cfg.get("enable_recovery", False))
+    seed_scan_window = int(gs2_cfg.get("seed_scan_window", 125))
 
     chunk_seconds = float(cfg.get("chunk_seconds", 60))
     max_lookback_frames = int(cfg.get("max_lookback_frames", 10))
@@ -374,6 +468,13 @@ def _run_single_video(cfg, run_dir: Path, config_path: Path | None = None) -> No
     carryover_masks: dict = {}
     results_path = run_dir / "tracking_outputs.parquet"
     total_frames_written = 0
+    next_obj_id = 1  # incremented across re-inits so fresh objects don't collide
+
+    if enable_recovery:
+        logger.info(
+            f"Recovery enabled: best-frame seed selection (scan_window={seed_scan_window}); "
+            "GDINO re-init on total carryover loss."
+        )
 
     for chunk_idx, (start_idx, end_idx, _chunk_type) in enumerate(chunks):
         global_chunk_start = start_frame + start_idx
@@ -409,47 +510,141 @@ def _run_single_video(cfg, run_dir: Path, config_path: Path | None = None) -> No
             "num_objects": 0,
         }
 
+        # -------------------------------------------------------------
+        # Determine prompts for this chunk
+        # -------------------------------------------------------------
+        # 4 cases:
+        #   chunk 0, recovery off → GDINO on frame 0 (strict)
+        #   chunk 0, recovery on  → GDINO best-frame search over scan_window
+        #   chunk N>0, carryover OK → propagate carryover masks
+        #   chunk N>0, carryover empty AND recovery on → GDINO best-frame
+        #                                                 search; fresh IDs
+        #   chunk N>0, carryover empty AND recovery off → abort
         if chunk_idx == 0:
-            logger.info("  Running GroundingDINO + SAM2 image predictor on first frame...")
-            obj_id_to_mask, _labels = _detect_and_segment_first_frame(
-                frame_rgb=chunk_frames[0],
-                text_prompt=text_prompt,
-                gdino_processor=gdino_processor,
-                gdino_model=gdino_model,
-                image_predictor=image_predictor,
-                box_threshold=box_threshold,
-                text_threshold=text_threshold,
-                device=device,
-            )
+            if enable_recovery:
+                logger.info(
+                    f"  Best-frame seed selection over first {seed_scan_window} frames..."
+                )
+                best_idx, best_boxes, _best_labels = _select_best_seed_frame(
+                    frames=chunk_frames,
+                    text_prompt=text_prompt,
+                    gdino_processor=gdino_processor,
+                    gdino_model=gdino_model,
+                    box_threshold=box_threshold,
+                    text_threshold=text_threshold,
+                    device=device,
+                    scan_window=seed_scan_window,
+                )
+                if best_boxes.shape[0] == 0:
+                    logger.error(
+                        f"GDINO returned 0 detections across all {seed_scan_window} "
+                        "scanned frames — aborting pipeline"
+                    )
+                    return
+                obj_id_to_mask = _refine_boxes_to_masks(
+                    chunk_frames[best_idx],
+                    best_boxes,
+                    image_predictor,
+                    start_obj_id=next_obj_id,
+                )
+                next_obj_id += len(obj_id_to_mask)
+                chunk_info["prompt_type"] = "grounding_dino_best_frame"
+                chunk_info["best_frame_idx"] = int(best_idx)
+                chunk_info["num_objects"] = len(obj_id_to_mask)
+                logger.info(
+                    f"  Seed selected: chunk-local frame {best_idx} → "
+                    f"{len(obj_id_to_mask)} masks (obj_ids: {list(obj_id_to_mask.keys())})"
+                )
+                # NOTE: when the best seed is not frame 0, masks are anchored
+                # to that frame; the SAM2 video predictor will still be init'd
+                # on the whole chunk, but add_new_mask is called at frame
+                # best_idx, so frames 0..best_idx-1 of this chunk produce no
+                # tracking output. Acceptable: matches SAM3's behavior on
+                # frames before its chosen grounding frame.
+                chunk_info["seed_frame_offset"] = int(best_idx)
+            else:
+                logger.info("  Running GroundingDINO + SAM2 image predictor on first frame...")
+                obj_id_to_mask, _labels = _detect_and_segment_first_frame(
+                    frame_rgb=chunk_frames[0],
+                    text_prompt=text_prompt,
+                    gdino_processor=gdino_processor,
+                    gdino_model=gdino_model,
+                    image_predictor=image_predictor,
+                    box_threshold=box_threshold,
+                    text_threshold=text_threshold,
+                    device=device,
+                )
+                if not obj_id_to_mask:
+                    logger.error("No objects detected on first frame — aborting pipeline")
+                    return
+                next_obj_id += len(obj_id_to_mask)
+                chunk_info["prompt_type"] = "grounding_dino"
+                chunk_info["num_objects"] = len(obj_id_to_mask)
+                chunk_info["seed_frame_offset"] = 0
 
-            if not obj_id_to_mask:
-                logger.error("No objects detected on first frame — aborting pipeline")
-                return
-
-            chunk_info["prompt_type"] = "grounding_dino"
-            chunk_info["num_objects"] = len(obj_id_to_mask)
-
-            logger.info("  Freeing GroundingDINO + SAM2 image predictor to reclaim VRAM...")
-            del gdino_model, gdino_processor, image_predictor
-            gc.collect()
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-                alloc_mb = torch.cuda.memory_allocated() / 1024**2
-                logger.info(f"  GPU after model free: {alloc_mb:.1f} MB allocated")
+            if not enable_recovery:
+                logger.info("  Freeing GroundingDINO + SAM2 image predictor to reclaim VRAM...")
+                del gdino_model, gdino_processor, image_predictor
+                gc.collect()
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                    alloc_mb = torch.cuda.memory_allocated() / 1024**2
+                    logger.info(f"  GPU after model free: {alloc_mb:.1f} MB allocated")
+            else:
+                # Keep GDINO + image_predictor resident for re-init recovery.
+                logger.info(
+                    "  Recovery on: keeping GDINO + SAM2 image predictor resident."
+                )
         else:
-            if not carryover_masks:
+            if carryover_masks:
+                obj_id_to_mask = carryover_masks
+                chunk_info["prompt_type"] = "mask_carryover"
+                chunk_info["num_objects"] = len(obj_id_to_mask)
+                chunk_info["seed_frame_offset"] = 0
+                logger.info(
+                    f"  Using carryover masks: {len(obj_id_to_mask)} objects "
+                    f"(IDs: {list(obj_id_to_mask.keys())})"
+                )
+            elif enable_recovery:
+                logger.warning(
+                    f"  Carryover empty at chunk {chunk_idx} — attempting GDINO re-init..."
+                )
+                best_idx, best_boxes, _best_labels = _select_best_seed_frame(
+                    frames=chunk_frames,
+                    text_prompt=text_prompt,
+                    gdino_processor=gdino_processor,
+                    gdino_model=gdino_model,
+                    box_threshold=box_threshold,
+                    text_threshold=text_threshold,
+                    device=device,
+                    scan_window=seed_scan_window,
+                )
+                if best_boxes.shape[0] == 0:
+                    logger.error(
+                        f"Re-init failed at chunk {chunk_idx}: 0 detections across "
+                        f"{seed_scan_window} scanned frames — aborting pipeline"
+                    )
+                    return
+                obj_id_to_mask = _refine_boxes_to_masks(
+                    chunk_frames[best_idx],
+                    best_boxes,
+                    image_predictor,
+                    start_obj_id=next_obj_id,
+                )
+                next_obj_id += len(obj_id_to_mask)
+                chunk_info["prompt_type"] = "grounding_dino_reinit"
+                chunk_info["best_frame_idx"] = int(best_idx)
+                chunk_info["seed_frame_offset"] = int(best_idx)
+                chunk_info["num_objects"] = len(obj_id_to_mask)
+                logger.info(
+                    f"  Re-init successful: chunk-local frame {best_idx} → "
+                    f"{len(obj_id_to_mask)} masks (fresh obj_ids: {list(obj_id_to_mask.keys())})"
+                )
+            else:
                 logger.error(
                     f"No carryover masks available for chunk {chunk_idx} — aborting"
                 )
                 return
-
-            obj_id_to_mask = carryover_masks
-            chunk_info["prompt_type"] = "mask_carryover"
-            chunk_info["num_objects"] = len(obj_id_to_mask)
-            logger.info(
-                f"  Using carryover masks: {len(obj_id_to_mask)} objects "
-                f"(IDs: {list(obj_id_to_mask.keys())})"
-            )
 
         chunk_outputs = _process_chunk(
             chunk_frames=chunk_frames,
@@ -458,6 +653,7 @@ def _run_single_video(cfg, run_dir: Path, config_path: Path | None = None) -> No
             obj_id_to_mask=obj_id_to_mask,
             video_predictor=video_predictor,
             offload_video_to_cpu=offload_video_to_cpu,
+            seed_frame_offset=int(chunk_info.get("seed_frame_offset", 0)),
         )
 
         if not chunk_outputs:
