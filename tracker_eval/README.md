@@ -49,41 +49,90 @@ The limitation is that an ID switch that starts and self-corrects entirely withi
 
 ## Tracker variants
 
-Four fully automated variants are evaluated in a monotone-sophistication ablation. None uses manual identity correction.
+Six fully automated variants are evaluated in a structural ablation that
+isolates three orthogonal mechanisms of the proposed method: (1) adaptive
+grounding (the scan-and-select stage that finds a usable seed frame past
+chunk-start failure modes), (2) adaptive chunking (occlusion-informed
+boundary placement), and (3) failure compensation (whole-chunk and prev-chunk
+fallbacks). None uses manual identity correction.
 
-| Variant | Name | Purpose |
-| --- | --- | --- |
-| A | `A_yolo_botsort` | YOLO + BoT-SORT detector-tracker baseline. Detection-only tracking; no mask propagation. |
-| B | `B_gs2_fixed` | Grounded-SAM-2 with fixed 60 s chunks **and parity recovery mechanisms** (best-frame seed selection + GroundingDINO re-init on total mask loss). Mask-propagation baseline using the immediate predecessor to SAM 3, with the recovery scaffolding scaled to match SAM 3's, so the remaining gap attributes cleanly to the quality of the grounder (GroundingDINO image-only vs SAM 3 text-grounded video). |
-| C | `C_sam3_fixed` | SAM 3 propagation with fixed 60 s chunks. Isolates SAM 3 without YOLO-guided boundary refinement. |
-| D | `D_sam3_adaptive` | Full method: SAM 3 with adaptive, occlusion-informed chunking. |
+| Variant | Name | Family | Recovery | Purpose |
+| --- | --- | --- | --- | --- |
+| A | `A_yolo_botsort` | YOLO + BoT-SORT | — | Detection-only baseline; no mask propagation. |
+| B-strict | `B_gs2_strict` | gs2 | none (frame-0 GDINO, abort on failure) | Strict mask-propagation baseline. Exposes the failure modes that motivate gs2-parity. |
+| B-parity | `B_gs2_fixed` | gs2 | best-frame seed + GDINO reinit on total loss | gs2 with parity-recovery mechanisms scaled to match SAM 3's. Mask-propagation baseline using SAM 3's immediate predecessor. |
+| C-strict | `C_sam3_frame_zero` | SAM 3 | none (frame-0 grounding, no scan, both fallbacks disabled) | SAM 3 propagation without the adaptive grounding scaffolding. Isolates the contribution of the scan-and-select stage from the SAM 2 → SAM 3 backbone swap. |
+| D | `D_sam3_fixed` | SAM 3 | adaptive grounding (scan + ranking + fallbacks) | SAM 3 with adaptive grounding, fixed 60 s chunking. |
+| E | `E_sam3_adaptive` | SAM 3 | adaptive grounding + adaptive chunking | Full method. |
 
-Variant D is the proposed tracker. Variants A–C are ablations of its constituent parts. The intended manuscript comparison is:
+A supplementary seventh variant, `F_sam3_adaptive_strict` (full method with both
+fallback mechanisms disabled), is reported in supplementary materials to
+quantify the failure-compensation contribution independently.
+
+Variant E is the proposed tracker. Each pairwise step in the table now isolates
+one mechanism rather than folding several into a single gap:
+
+- **A → B-strict / B-parity**: adds mask-based identity preservation over
+  detection-only tracking; gs2-strict → gs2-parity quantifies what gs2-style
+  recovery scaffolding is worth on its own.
+- **B-strict → C-strict**: isolates the SAM 2 → SAM 3 backbone swap **at strict
+  recovery parity** (no scan, no reinit, no fallback on either side).
+- **B-parity → D**: same backbone swap at **full recovery parity**, where each
+  family runs with the recovery mechanisms structurally appropriate to it.
+- **C-strict → D**: isolates the **adaptive grounding** contribution alone
+  (scan + best-frame ranking + fallbacks). The lighting cliff at chunk 0 of
+  every video is part of what the scan exists to handle and is therefore part
+  of what this gap measures.
+- **D → E**: isolates the **adaptive chunking** contribution (occlusion-aware
+  boundary placement, with grounding held constant).
+- **E → F** *(supplementary)*: isolates the **failure-compensation** contribution
+  (Sam3VideoModel and prev-chunk fallbacks combined). 47 GT keyframes lie
+  inside chunks that trigger the prev-chunk fallback in the existing D / E
+  runs; 4 lie inside the single chunk that triggers the Sam3VideoModel
+  whole-chunk fallback.
+
+The intended manuscript comparison is:
 
 ```text
-HOTA(D) > max(HOTA(A), HOTA(B), HOTA(C))
+HOTA(E) > HOTA(D) > HOTA(C-strict)
 ```
 
-with corresponding gains expected in association-sensitive metrics such as AssA, IDF1, and ID switches. Each successive variant addresses one specific weakness of the prior:
+with the cross-family contrast `B-parity → D` carrying the model-family
+attribution. A non-monotone dip at C-strict relative to B-parity is empirically
+expected — it would demonstrate that the model-family swap alone does not
+explain the gains, and that the contribution is concentrated in the adaptive
+grounding scaffolding around SAM 3.
 
-- **A → B**: adds mask-based identity preservation over detection-only tracking.
-- **B → C**: adds video-pretrained text grounding, multi-frame seed selection, and mid-video re-initialisation (SAM 3 vs SAM 2).
-- **C → D**: adds occlusion-aware adaptive chunk boundary placement.
+### Grounded-SAM-2 baselines (Variants B-strict and B-parity)
 
-### Grounded-SAM-2 baseline (Variant B)
+The gs2 pipeline (`src/tracker/grounded_sam_2.py`) is the IDEA-Research Grounded-SAM-2 reference. A GroundingDINO call at a fixed confidence threshold (0.25) grounds the seed frame with the text prompt "`.bird.`"; every surviving detection is refined into a mask by the SAM 2 image predictor and propagated by the SAM 2 video predictor. No retry loop, no area filtering, and no dataset-tuned knobs are used. The Swin-B GroundingDINO variant (`IDEA-Research/grounding-dino-base`) is used rather than the tiny variant, matching the convention of using the larger published weights where available. SAM 2.1 (not SAM-HQ2) is used to avoid an asymmetric "stronger SAM" advantage with no SAM 3 counterpart.
 
-The gs2 pipeline (`src/tracker/grounded_sam_2.py`) is the IDEA-Research Grounded-SAM-2 reference with **parity recovery mechanisms** added to scale gs2's recovery scaffolding to match SAM 3's. A GroundingDINO call at a fixed confidence threshold (0.25) grounds the seed frame with the text prompt "`.bird.`"; every surviving detection is refined into a mask by the SAM 2 image predictor and propagated by the SAM 2 video predictor. No retry loop, no area filtering, and no dataset-tuned knobs are used. The Swin-B GroundingDINO variant (`IDEA-Research/grounding-dino-base`) is used rather than the tiny variant, matching the convention of using the larger published weights where available.
+Two configurations of this pipeline are reported as main-table variants:
 
-Two structural recovery mechanisms — exact analogues of those in SAM 3's reference behaviour — are enabled (`gs2.enable_recovery: true`):
+#### B-strict (`B_gs2_strict`)
+
+The reference pipeline with no recovery scaffolding (`gs2.enable_recovery: false`): single GroundingDINO call on frame 0 of each chunk, abort on 0 detections, abort on total mask loss. Of the five eval videos, one (`C3G2`) returned zero detections on frame 0 and aborted at chunk 0; another (`C4G2`) had its single tracked bird's mask drop to empty in chunk 4 and the pipeline aborted at chunk 5. Both failures are visible in the per-video metrics. Its role in the main table is as the strict-recovery anchor for the cross-family `B-strict → C-strict` comparison, where neither family receives recovery scaffolding.
+
+#### B-parity (`B_gs2_fixed`)
+
+The reference pipeline with two structural recovery mechanisms — exact analogues of those in SAM 3's reference behaviour — enabled (`gs2.enable_recovery: true`):
 
 1. **Best-frame seed selection** over the first `seed_scan_window = 125` frames at chunk 0. GroundingDINO is run on every candidate; the frame with the most detections at threshold 0.25 is chosen as the seed (ties broken by earliest frame). This mirrors SAM 3's `text_grounding.grounding_frames = 125`.
 2. **GroundingDINO re-init on total carryover loss.** If `_extract_carryover_masks` finds zero non-empty masks in the last `max_lookback_frames` frames of chunk N (all tracked objects have died), chunk N+1 runs the same 125-frame best-frame search to rediscover objects from scratch. New objects are assigned fresh integer IDs continuing from the highest ID seen so far, so the discontinuity is explicit in the parquet and visible to MOT scoring.
 
-The remaining departure from the IDEA-Research reference is chunked processing with mask carryover: SAM 2's `init_state` cannot fit a 15-minute video in VRAM, so each video is split into 60 s chunks (matching Variant C). At each chunk boundary the masks of the last frame of chunk N seed chunk N+1, preserving object IDs without re-grounding. **Per-boundary re-grounding with IoU-based ID matching is not done** — that is the additional recovery layer SAM 3 has and gs2 (parity) does not. The remaining gap between B and C therefore attributes to (a) the quality of the grounder (image-only GroundingDINO vs SAM 3's text-grounded video model) and (b) per-chunk re-grounding, separable from the recovery-mechanism asymmetry that strict gs2 would have introduced.
-
-The strict, no-recovery variant of the gs2 pipeline (best-frame selection and re-init both disabled, single GroundingDINO call on frame 0, abort on 0 detections or total mask loss) was also run, and is reported in the supplementary as `B_gs2_strict`. Inspection of the strict run motivates the recovery mechanisms: of five videos, one (`C3G2`) returned zero detections on frame 0 and aborted at chunk 0; another (`C4G2`) had its single tracked bird's mask drop to empty in chunk 4 and the pipeline aborted at chunk 5. Both failures are recovered by the parity-recovery variant.
+The departure from the IDEA-Research reference is chunked processing with mask carryover: SAM 2's `init_state` cannot fit a 15-minute video in VRAM, so each video is split into 60 s chunks (matching Variant D). At each chunk boundary the masks of the last frame of chunk N seed chunk N+1, preserving object IDs without re-grounding. **Per-boundary re-grounding with IoU-based ID matching is not done** — that is the additional recovery layer SAM 3 has and gs2 (parity) does not. The remaining gap between `B-parity` and `D` therefore attributes to (a) the quality of the grounder (image-only GroundingDINO vs SAM 3's text-grounded video model), (b) per-chunk re-grounding, and (c) the prev-chunk and Sam3VideoModel fallbacks that gs2 does not have.
 
 Predicted failure modes that remain under parity recovery (and motivate the SAM 3 contribution): brittle single-frame grounding even with best-frame search when no frame in the first 125 has clear views of all birds; ID-discontinuity penalties whenever re-init fires (fresh IDs cannot be matched to pre-loss IDs because gs2 has no IoU-matching infrastructure); fixed chunk boundaries that do not avoid occlusion events.
+
+### SAM 3 frame-zero baseline (Variant C-strict)
+
+The C-strict variant (`C_sam3_frame_zero`) ablates the adaptive grounding stage of the SAM 3 pipeline. Configured with `text_grounding.best_frame_method: "frame_zero"`, `text_grounding.allow_sam3_videomodel_fallback: false`, `text_grounding.fallback_to_prev_chunk: false`, and `use_adaptive_chunking: false`, it (i) grounds at a single fixed frame per chunk regardless of detection quality (no candidate selection), (ii) disables both failure-compensation fallbacks so that a chunk producing no usable grounding output produces empty predictions for the chunk, and (iii) uses fixed 60 s chunking. This is the structural analogue of `B_gs2_strict` for the SAM 3 family.
+
+**Chunk-0 exception** (`text_grounding.chunk_zero_init_offset_frames: 125`): for chunk 0 only, the grounding scan window is shifted forward by 125 frames (≈ 5 s at 25 FPS) before the frame-zero lookup is performed. The motivation is that *literal* frame 0 of each recording is dominated by per-recording start-of-video artefacts (lighting transition still resolving, camera auto-adjustment, occasional initial-frame motion blur) that have nothing to do with the grounding-pipeline contribution being measured. Under a strict frame-0 null with no offset, C-strict has zero chance of producing useful predictions on chunk 0 of any video, and a reviewer can reasonably object that this measures dataset physics rather than the proposed method. Shifting by 125 frames lets chunk 0 init at the first frame past where adaptive grounding (variant D) would have finished its scan anyway — the chunk-0 measurement then reflects grounding-quality difference, not start-of-recording artefacts. Chunks 1+ are unaffected and ground at their own first frame. Output frame indices remain global; the first 125 frames of each video simply have no predictions for variant C.
+
+The lighting transition at the start of each recording — lights are still adjusting in approximately the first few seconds, depending on the video — means frame 0 of chunk 0 reliably fails to find 3 separated birds. This is the failure mode the adaptive grounding scan was designed to handle. Empirical inspection of the existing D / E grounding outputs confirms that 4 of 5 eval videos require the scan to find a usable seed past the lighting cliff (earliest viable frames in the production runs: 72, 78, 46, 286); the fifth (`C2G2`) has no viable frame in the scan window at all and triggers the `Sam3VideoModel` whole-chunk fallback. Variant C-strict disables that fallback, so chunks where grounding cannot find any usable seed produce no predictions.
+
+The `C_sam3_frame_zero` configs use the same per-video `grounding_frames` values as the corresponding D-fixed runs (125 for `C1G2`, `C2G2`, `C3G2`, `C4G2`; 375 for `C5G3`) to keep the scan-window length constant across the C → D ablation. See the current-status section below for the existing inconsistency in `grounding_frames` across the benchmark; the new C runs preserve the per-video value used by D rather than introducing a third configuration.
 
 ## Annotation and conversion
 
@@ -148,25 +197,34 @@ Path defaults are centralised in `src/tracker_eval/paths.py`.
 
 ## Current status
 
-As of 2026-05-19, the ablation has been expanded from three variants (A/B/C) to four (A/B/C/D). The rename is: the previous B (`B_sam3_fixed`) and C (`C_sam3_adaptive`) are now C and D; the new B slot is occupied by `B_gs2_fixed` (Grounded-SAM-2 with fixed chunking and parity recovery).
+As of 2026-05-20, the ablation has been expanded again — from 4 variants (A / B / C / D, mapped to {YOLO+BoT-SORT, gs2-parity, SAM 3 fixed, SAM 3 adaptive}) to a 6-variant structural ablation that explicitly isolates three mechanisms: adaptive grounding, adaptive chunking, and failure compensation.
+
+The relabelling is:
+
+| Old slot | New slot | Notes |
+| --- | --- | --- |
+| `A_yolo_botsort` | `A_yolo_botsort` | unchanged |
+| *(supplementary)* `B_gs2_strict` | **`B_gs2_strict`** *(promoted to main table)* | Strict-recovery anchor for the cross-family comparison. |
+| `B_gs2_fixed` | `B_gs2_fixed` *(now denoted "B-parity")* | unchanged; pipeline and recovery mechanisms identical. |
+| *(new)* | **`C_sam3_frame_zero`** *(new run)* | SAM 3 frame-0 grounding, no scan, both fallbacks disabled, fixed chunking. |
+| `C_sam3_fixed` | `D_sam3_fixed` | unchanged — re-lettered. |
+| `D_sam3_adaptive` | `E_sam3_adaptive` | unchanged — re-lettered. |
+| — | `F_sam3_adaptive_strict` *(supplementary, optional)* | Full method with both fallbacks disabled. |
 
 | Variant | Inference | Predictions converted | Scored |
 | --- | --- | --- | --- |
 | A `A_yolo_botsort` | ✓ done | ✓ done | ✓ done |
-| B `B_gs2_fixed` (parity-recovery, headline) | ⏳ in progress (day 29 on CUDA 1; day 28 queued behind strict gs2 on CUDA 0) | ⏳ pending | ⏳ pending |
-| B `B_gs2_strict` (supplementary, motivates recovery) | ✓ day 29 done (3 videos: 1 full, 1 chunk-0 abort, 1 chunk-5 abort), ⏳ day 28 in progress (C5G3 chunk 5/14) | ⏳ pending | ⏳ pending |
-| C `C_sam3_fixed` | ✓ done | ✓ done | ✓ done |
-| D `D_sam3_adaptive` | ✓ done | ✓ done | ✓ done |
+| B-strict `B_gs2_strict` | ✓ done | ⏳ to do (promote from supplementary) | ⏳ pending |
+| B-parity `B_gs2_fixed` | ✓ done | ✓ done | ✓ done |
+| C-strict `C_sam3_frame_zero` | ⏳ to run (2 configs, day 28 + day 29) | ⏳ pending | ⏳ pending |
+| D `D_sam3_fixed` (was `C_sam3_fixed`) | ✓ done | ⏳ rename | ⏳ pending |
+| E `E_sam3_adaptive` (was `D_sam3_adaptive`) | ✓ done | ⏳ rename | ⏳ pending |
+| F `F_sam3_adaptive_strict` *(supplementary)* | ⏳ optional | ⏳ pending | ⏳ pending |
 
-`src/tracker_eval/{paths,predictions,evaluate}.py` already reflect the four-variant layout. The scorer will skip missing variants, so A/C/D results can be regenerated at any time. The manuscript should only make final comparative claims after Variant B (parity) has completed and `data/tracker_eval/results/*.csv` has been regenerated with all four variants.
+`src/tracker_eval/{paths,predictions,evaluate}.py` need updating: the `VARIANTS` tuple expands to 6 entries (plus optional F), and a new `TRACKER_RUNS_FRAME_ZERO` path is added for the staged frame-zero outputs.
 
-The supplementary `B_gs2_strict` run uses the same module (`src/tracker/grounded_sam_2.py`) with `gs2.enable_recovery: false`, single-frame grounding on chunk-0 frame 0 with no scan window, and no GroundingDINO re-init on total carryover loss. Its outputs land under `ext-data/output/results/grounded-sam-2/<timestamp>_gs2_fixed/` and will be staged separately (not into `tracker_outputs_gs2/`) so the headline scorer sees only the parity variant.
+### Per-video `grounding_frames` inconsistency
 
-### Inference ETA at last check (15:59)
+A pre-existing inconsistency in the benchmark, surfaced 2026-05-20: across the 18 existing run dirs in `ext-data/output/results/sam3-hf/tracker_day_28_29/`, 11 use `text_grounding.grounding_frames: 125` and 7 use `375`. The 5 eval videos specifically are 4 × 125 (`C1G2`, `C2G2`, `C3G2`, `C4G2`) + 1 × 375 (`C5G3` only). The `C5G3` run was given the wider window because its earliest viable grounding frame is at frame 286, outside the 125-frame default. This is documented here so the C-strict and F runs can preserve the per-video value used by the existing D / E runs and the comparison stays apples-to-apples.
 
-| | GPU | Status | ETA |
-| --- | --- | --- | --- |
-| Strict gs2 day 28 (C2G2 ✓, C5G3 in progress) | CUDA 0 | C5G3 on chunk 5 of 14 | ~16:00 |
-| Strict gs2 day 29 (C1G2 ✓, C3G2 aborted ch0, C4G2 aborted ch5) | CUDA 1 | done | — |
-| Parity gs2 day 29 (3 videos) | CUDA 1 | C1G2 in chunk 0 best-frame scan | ~18:30 |
-| Parity gs2 day 28 (2 videos) | CUDA 0 | queued behind strict | start ~16:00, finish ~17:45 |
+A uniform-window re-run of D and E (e.g. all five videos at `grounding_frames: 375`) is a defensible follow-up if reviewer pushback warrants it, but is out of scope for the current revision.

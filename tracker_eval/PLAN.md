@@ -1,6 +1,24 @@
 # Refined Plan: Tracking Evaluation for CVPR 2026 Workshop Revision
 
-## Current status (2026-05-19, afternoon)
+## Current status (2026-05-20, evening)
+
+**At Phase 5 (manuscript integration), with the ablation expanded from 4 variants to 6 (plus one supplementary).** The previous 4-way ablation (A `YOLO+BoT-SORT` → B `gs2_fixed` → C `sam3_fixed` → D `sam3_adaptive`) made a monotone-capability point but folded three orthogonal mechanism contributions (adaptive grounding, adaptive chunking, failure compensation) into two table steps, making attribution ambiguous. The revised 6-variant ablation isolates each mechanism.
+
+The new layout:
+
+- A `A_yolo_botsort` — detection-only baseline (unchanged)
+- B-strict `B_gs2_strict` — gs2 with no recovery (promoted from supplementary)
+- B-parity `B_gs2_fixed` — gs2 with structural-parity recovery (unchanged)
+- C-strict `C_sam3_frame_zero` — **new**: SAM 3, frame-0 grounding, no scan, both fallbacks disabled, fixed chunking
+- D `D_sam3_fixed` — SAM 3 adaptive grounding + fixed chunking (was `C_sam3_fixed`)
+- E `E_sam3_adaptive` — SAM 3 adaptive grounding + adaptive chunking (was `D_sam3_adaptive`)
+- F `F_sam3_adaptive_strict` — supplementary: full method with both fallbacks disabled (optional)
+
+This isolates: B-strict → C-strict = SAM 2 → SAM 3 backbone swap at strict-recovery parity; C-strict → D = adaptive-grounding contribution; D → E = adaptive-chunking contribution; E → F = failure-compensation contribution. Cross-family comparison B-parity → D additionally gives the SAM 2 → SAM 3 swap at full-recovery parity.
+
+The remaining work for the revision is summarised below in "Variant C-strict — implementation plan (2026-05-20)".
+
+## Previous status (2026-05-19, afternoon — superseded by 2026-05-20 above)
 
 **At Phase 5 (manuscript integration), with the ablation expanded from 3-way to 4-way.** Phases 1–4 are complete for A, C, D. Variant B has been added (Grounded-SAM-2 with fixed 60 s chunking and parity recovery mechanisms) and inference is in progress as of this update. The previous Variants B and C have been renamed to C and D respectively; the new B slot is `B_gs2_fixed`.
 
@@ -84,6 +102,316 @@ Day-37 scan results are retained on disk (`ext-data/output/results/sam3-hf/`) an
 7. **Drop Phase 3 sweep (2026-05-12).** Revision deadline 2026-05-21 makes the 7-config sweep infeasible. Manuscript notes the deferred sweep in limitations.
 8. **Add SAM 3 fixed-chunking arm and re-letter variants (2026-05-18).** The earlier two-way A-vs-B comparison made a method-vs-baseline point but left the source of the lift ambiguous — SAM 3 alone might do the work, with the occlusion-informed chunker contributing nothing. Adding a SAM-3-with-fixed-chunking arm turns the experiment into a proper ablation. Variant labels are re-lettered so that A → B → C corresponds to a monotonic increase in method components (YOLO only → +SAM 3 → +adaptive chunking). Script-level rename of `B_sam3_default` → `C_sam3_adaptive` and addition of `B_sam3_fixed` are reflected in `convert_predictions.py` and `evaluate_tracker.py`.
 9. **Add Grounded-SAM-2 arm and expand to four-way ablation (2026-05-19).** The 3-way A/B/C ablation conflated "SAM 3 video pretraining + multi-frame grounding" with "any mask-propagation tracker," giving reviewers room to dismiss the SAM 3 contribution. Adding gs2 as a fourth arm between A and the SAM 3 variants (with parity recovery mechanisms scaled to match SAM 3's recovery scaffolding) makes the comparison crisp: A→B isolates mask-based identity preservation over detection-only tracking; B→C isolates SAM 3's video-pretrained text-grounded grounder + per-chunk re-grounding over GroundingDINO image-only grounding; C→D isolates occlusion-aware adaptive chunking. Variant labels re-lettered again: A (YOLO+BoT-SORT) → B (gs2 + fixed) → C (SAM 3 + fixed) → D (SAM 3 + adaptive). `src/tracker_eval/{paths,predictions,evaluate}.py` updated. Old `B_sam3_fixed` / `C_sam3_adaptive` directories under `predictions_mot/` will be regenerated under the new C/D names.
+
+10. **Decompose the contribution into three mechanisms and expand to six-way ablation (2026-05-20).** The 4-way A/B/C/D ablation isolates the YOLO-only → mask-propagation jump (A → B) and the gs2 → SAM 3 family jump (B → C), but the C → D step still folds two of the proposed method's contributions (adaptive grounding + adaptive chunking) into a single gap, and the SAM 3 family's failure-compensation fallbacks are invisible to the table. The contribution claim was re-decomposed into three orthogonal mechanisms — adaptive grounding (scan + best-frame ranking), adaptive chunking (occlusion-informed boundary placement), and failure compensation (`Sam3VideoModel` whole-chunk fallback + prev-chunk-mask fallback) — and the ablation expanded to isolate each.
+
+    Empirical analyses run during this session ruled out an earlier null candidate: comparing `earliest`-from-pool against the production `combined` ranking across all 75 chunks of the 5 eval videos showed they pick the same frame on **74 / 75 chunks (98.7 %)**, so an earliest-vs-combined ablation would have produced near-zero signal. The chosen C-variant null instead removes the scan entirely: ground at frame 0 of each chunk, no candidate filtering, and disable both fallbacks. Variant labels re-lettered: A (YOLO+BoT-SORT) → B-strict (gs2 no recovery) → B-parity (gs2 with parity recovery) → C-strict (SAM 3 frame-0 no fallback) → D (SAM 3 adaptive grounding + fixed chunking, was `C_sam3_fixed`) → E (SAM 3 adaptive grounding + adaptive chunking, was `D_sam3_adaptive`), with optional supplementary F (full method, both fallbacks disabled). `B_gs2_strict` is promoted from supplementary to main table; `src/tracker_eval/{paths,predictions,evaluate}.py` and the prediction-MOT directory layout need updating accordingly.
+
+    The non-monotone dip at C-strict relative to B-parity is anticipated and intentional: it would demonstrate that the SAM 2 → SAM 3 backbone swap alone does not explain the tracking-quality gains, and that the proposed method's contribution is concentrated in the adaptive-grounding scaffolding around SAM 3. Reverting B to gs2-strict to maintain a monotone column ordering was explicitly considered and rejected — the parity recovery was added in the previous session for a documented, defensible reason, and rolling it back would invite reviewer suspicion.
+
+## Variant C-strict — implementation plan (2026-05-20, finalised)
+
+This section describes the concrete implementation for the new
+`C_sam3_frame_zero` variant. Scope: one selection-method branch plus one
+new config flag, two YAML configs (one per day), two GPU runs in
+parallel, and eval-wiring updates. Supplementary Variant F (full method
+with both fallbacks disabled) is **deferred** under the 2026-05-21
+deadline.
+
+### Design summary
+
+C-strict is SAM 3 with the adaptive grounding mechanism removed:
+
+- **Selection**: `text_grounding.best_frame_method = "frame_zero"`. The
+  scan still runs over the `grounding_frames` window (so `Sam3VideoModel`
+  receives normal multi-frame video context and produces honest
+  segmentations), but `find_best_grounding_frame` is modified to **look
+  up the chunk's first frame specifically** rather than picking the best
+  candidate. If SAM 3 emitted any output at the chunk's start frame, the
+  tracker is initialised from that frame's masks; otherwise selection
+  returns `None`.
+- **Chunk-0 exception** (`text_grounding.chunk_zero_init_offset_frames =
+  125`): for chunk 0 only, the grounding scan is shifted by 125 frames
+  (≈ 5 s at 25 FPS) before looking up the chunk's "first" frame. This
+  mirrors the scan window adaptive grounding (variant D) would have had
+  anyway and gives the strict baseline a fair shot past
+  per-recording start-of-video failure modes (lighting cliff, camera
+  adjustment). Chunks 1+ are unaffected — they still ground at their own
+  first frame. Output frame indices remain global; the first 125 frames
+  of each video simply have no predictions for variant C. The motivation
+  is reviewer-defence: under a literal frame-0 null, C-strict has no
+  chance on chunk 0 because of recording artefacts rather than a
+  fundamental method weakness, which a reviewer could rightly object to.
+  Shifting by 125 lets the chunk-0 measurement reflect grounding-quality
+  difference, not start-of-recording physics.
+- **Fallbacks disabled**: `text_grounding.allow_sam3_videomodel_fallback
+  = false` (new flag, default `true` for backward compatibility) and
+  `text_grounding.fallback_to_prev_chunk = false` (existing flag). When
+  grounding produces no usable seed at the chunk's first frame, the
+  chunk emits empty predictions instead of escalating to a whole-chunk
+  `Sam3VideoModel` pass or copying masks from the previous chunk.
+- **Chunking**: fixed 60 s chunks (`use_adaptive_chunking: false`).
+- **Scan window**: `text_grounding.grounding_frames = 125` uniformly
+  across all 5 videos. This eliminates the per-video 125 / 375
+  inconsistency from the existing D-fixed runs because C-strict ignores
+  everything past frame 0 anyway — the scan-window length is
+  effectively cosmetic but kept at 125 to give SAM 3 enough video
+  context for honest segmentation quality at frame 0.
+
+The contribution being measured by C → D is the value of running the
+adaptive grounding scan + best-frame selection + failure-compensation
+fallbacks together, on top of the same underlying SAM 3 propagation. The
+lighting cliff at chunk 0 of every video is part of the failure mode the
+scan exists to handle, and the C → D gap therefore includes the lighting
+cliff's contribution to grounding-pipeline value. This trade-off is
+acknowledged in `tracker_eval/README.md` under "SAM 3 frame-zero baseline".
+
+### Code changes
+
+#### `src/tracker/grounding.py`
+
+Extend `find_best_grounding_frame` with a `chunk_start_frame_idx`
+parameter (default `None` for backward compatibility) and a `frame_zero`
+branch that looks up exactly that frame:
+
+```python
+def find_best_grounding_frame(
+    grounding_outputs: dict,
+    min_objects: int = 3,
+    method: str = "combined",
+    chunk_start_frame_idx: int | None = None,
+) -> tuple[int | None, list, list, list]:
+    if method == "frame_zero":
+        if chunk_start_frame_idx is None or chunk_start_frame_idx not in grounding_outputs:
+            return None, [], [], []
+        results = grounding_outputs[chunk_start_frame_idx]
+        masks_list, boxes_list, object_ids_list = get_all_objects_from_results(results)
+        return int(chunk_start_frame_idx), masks_list, boxes_list, object_ids_list
+    # ... existing branches unchanged ...
+```
+
+The `frame_zero` branch deliberately does *not* apply the `min_objects`
+filter — the goal is to feed the tracker whatever SAM 3 returned at the
+chunk's first frame, even if that's 0 or 1 objects, and let the
+resulting under-initialised tracker demonstrate the failure mode.
+
+#### `src/tracker/tracker.py`
+
+Three edits at the existing grounding call site:
+
+```python
+grounding_frames_count = grounding_cfg.get("grounding_frames", 25)
+chunk_zero_offset = (
+    grounding_cfg.get("chunk_zero_init_offset_frames", 0)
+    if chunk_idx == 0
+    else 0
+)
+if chunk_zero_offset > 0 and chunk_zero_offset < len(chunk_frames):
+    scan_frames = chunk_frames[chunk_zero_offset:]
+    scan_start_idx = global_chunk_start + chunk_zero_offset
+else:
+    scan_frames = chunk_frames
+    scan_start_idx = global_chunk_start
+
+grounding_outputs = run_grounding(
+    scan_frames, scan_start_idx, grounding_frames_count, _process_video_chunk, cfg, device,
+)
+gr_out_frame_idx, gr_out_masks, gr_out_boxes, gr_out_ids = (
+    find_best_grounding_frame(
+        grounding_outputs,
+        min_objects=grounding_cfg.get("min_objects", cfg.min_objects_for_tracking),
+        method=grounding_cfg.get("best_frame_method", "combined"),
+        chunk_start_frame_idx=scan_start_idx,   # NEW: shifts for chunk-0 exception
+    )
+)
+```
+
+Gate the `Sam3VideoModel` whole-chunk fallback behind a new config flag,
+defaulting to `True` for backward compatibility. At the existing
+`if not use_tracker:` block:
+
+```python
+allow_s3vm_fallback = cfg.get("text_grounding", {}).get(
+    "allow_sam3_videomodel_fallback", True
+)
+
+if not use_tracker:
+    if not allow_s3vm_fallback:
+        chunk_info["model_type"] = "EmptyChunk"
+        chunk_info["fallback_reason"] = "grounding_failed_no_fallback_allowed"
+        chunk_outputs = {}
+    else:
+        if chunk_info["fallback_reason"] is None:
+            chunk_info["fallback_reason"] = (
+                "first_chunk" if chunk_idx == 0 else "grounding_failed_no_fallback"
+            )
+        chunk_info["model_type"] = "Sam3VideoModel"
+```
+
+The `if use_tracker / else _process_video_chunk` block below also needs
+to short-circuit when `chunk_outputs` is already `{}` (empty chunk).
+
+The prev-chunk fallback is already gated by the existing
+`text_grounding.fallback_to_prev_chunk` flag — no code change needed
+there.
+
+### New configs
+
+Two configs in `config/`, mirroring the existing
+`tracker_rerun_fixed_day_{28,29}.yaml` layout:
+
+#### `config/tracker_frame_zero_day_28.yaml`
+
+```yaml
+CUDA_VISIBLE_DEVICES: "0"
+PYTORCH_ALLOC_CONF: "expandable_segments:True,garbage_collection_threshold:0.6"
+
+job_type: "sam3_hf_frame_zero"
+video_dir: "ext-data/raw/rerun_fixed_day_28"   # contains C2G2, C5G3
+text_prompt: "bird"
+output_dir: "ext-data/output/results/sam3-hf"
+start_frame: 0
+max_frames_to_track: 0
+
+reuse_chunk_info: false
+reuse_run_dir: null
+yolo_scan_only: false
+use_adaptive_chunking: false
+chunk_seconds: 60
+
+min_objects_for_tracking: 3
+max_lookback_frames: 10
+
+text_grounding:
+  enabled: true
+  grounding_frames: 125
+  min_objects: 3
+  best_frame_method: "frame_zero"
+  fallback_to_prev_chunk: false
+  allow_sam3_videomodel_fallback: false
+  id_matching: true
+  id_match_iou_threshold: 0.10
+
+tracking:
+  init_trk_keep_alive: 60
+  max_trk_keep_alive: 60
+  min_trk_keep_alive: 0
+  trk_assoc_iou_thresh: 0.3
+  hotstart_dup_thresh: 12
+  suppress_overlap_thresh: 0.8
+  recondition_every_nth_frame: 8
+
+metrics:
+  occlusion_iou_threshold: 0.15
+  clustering_distance_threshold: 50.0
+```
+
+#### `config/tracker_frame_zero_day_29.yaml`
+
+Identical to day 28 except `CUDA_VISIBLE_DEVICES: "1"` and
+`video_dir: "ext-data/raw/rerun_fixed_day_29"` (contains C1G2, C3G2,
+C4G2).
+
+### Run plan
+
+Two GPUs in parallel; total wall-clock dominated by CUDA 1 (the
+3-video day).
+
+| Run | Video(s) | Config | GPU | ETA |
+| --- | --- | --- | --- | --- |
+| C-strict day 28 | `C2G2`, `C5G3` | `tracker_frame_zero_day_28.yaml` | CUDA 0 | ~5 h (2 × 2.5 h) |
+| C-strict day 29 | `C1G2`, `C3G2`, `C4G2` | `tracker_frame_zero_day_29.yaml` | CUDA 1 | ~7.5 h (3 × 2.5 h) |
+
+Outputs land at `ext-data/output/results/sam3-hf/<timestamp>_sam3_hf_frame_zero/day_{28,29}/<stem>/`. Symlink the per-video output dirs into `ext-data/tracker_benchmark/tracker_outputs_sam3_frame_zero/<stem>/` for the eval pipeline.
+
+### Fallback rule if C-strict collapses
+
+Pre-committed contingency: if the aggregate C-strict HOTA falls below
+the A baseline (≈ 0.065), the variant carries no useful signal — the
+table would just be reporting "the pipeline produced little output."
+In that case re-run C with `allow_sam3_videomodel_fallback: true` (but
+`fallback_to_prev_chunk: false`, and `best_frame_method: "frame_zero"`
+preserved), document the swap as a measurement-floor adjustment, and
+label the row `C_sam3_frame_zero_with_s3vm` in the final table.
+
+### Eval wiring updates (after inference)
+
+`src/tracker_eval/paths.py`:
+
+```python
+TRACKER_RUNS_FRAME_ZERO = BENCHMARK_DIR / "tracker_outputs_sam3_frame_zero"
+TRACKER_RUNS_GS2_STRICT = BENCHMARK_DIR / "tracker_outputs_gs2_strict"  # promoted
+```
+
+`src/tracker_eval/predictions.py`:
+
+- Add `--predictions-root-frame-zero` (default `TRACKER_RUNS_FRAME_ZERO`).
+- Promote `--predictions-root-gs2-strict` from supplementary handling.
+- Bucket layout: `A_yolo_botsort`, `B_gs2_strict`, `B_gs2_fixed`,
+  `C_sam3_frame_zero`, `D_sam3_fixed`, `E_sam3_adaptive`.
+
+`src/tracker_eval/evaluate.py`:
+
+```python
+VARIANTS = (
+    "A_yolo_botsort",
+    "B_gs2_strict",
+    "B_gs2_fixed",
+    "C_sam3_frame_zero",
+    "D_sam3_fixed",
+    "E_sam3_adaptive",
+)
+```
+
+On disk: rename `predictions_mot/C_sam3_fixed/` → `D_sam3_fixed/` and
+`predictions_mot/D_sam3_adaptive/` → `E_sam3_adaptive/`. Stage
+`B_gs2_strict/` into `predictions_mot/`.
+
+### Figure regeneration
+
+`tmp/viz_tracker_eval.py`:
+
+- Update `VARIANT_ORDER`, `VARIANT_LABELS`, `VARIANT_COLORS` for 6 rows.
+- `BAR_WIDTH = 0.13`; recentre `_offset(i)` for 6 bars per group.
+- Y-axis range may need extension downward to accommodate B-strict's
+  negative MOTA and any C-strict negative MOTA values.
+- Per-cage HOTA figure: 6 bars per cage. Consider grouping by family
+  (yellow YOLO; green pair gs2-strict / gs2-parity; blue triple
+  C-strict / D / E) for readability.
+- DetA-vs-AssA scatter: 6 dots, colour-coded by family.
+
+Drop the existing 4-way figures as superseded; regenerate all from
+the new aggregate / per-video CSVs.
+
+### Manuscript integration
+
+The §3.2 framing changes from "best initiation point" to the
+three-mechanism decomposition described in `tracker_eval/README.md`.
+The supplementary evidence that `earliest` and `combined` ranking agree
+on 74 / 75 chunks goes into supplementary as a paragraph justifying
+why the production ranking criterion is reported as `combined` even
+though `earliest` would produce the same predictions on this dataset.
+
+### Effort estimate
+
+| Task | Hours | Notes |
+| --- | --- | --- |
+| Code changes (`grounding.py`, `tracker.py`) | ~1 | One new method, one new config gate. |
+| New configs (2 YAMLs) | ~0.25 | One per day. |
+| Inference (C-strict, 5 videos) | ~7.5 GPU-h wall-clock | 2 GPUs in parallel. |
+| Symlink + stage outputs | ~0.25 | Mirror existing layout. |
+| Eval wiring updates | ~0.5 | `paths.py`, `predictions.py`, `evaluate.py` + bucket renames. |
+| Re-score | ~0.25 | `pixi run -e tracker-evaluation score-tracker-eval`. |
+| Figure regen | ~1 | `tmp/viz_tracker_eval.py` 6-row update. |
+| Manuscript revisions | ~3 | §3.2 framing + supplementary. |
+| **Total** | **~12 person-hours + ~7.5 GPU-hours** | One-run budget; multi-seed runs out of scope. |
+
+**Supplementary F deferred.** Variant F (full method, strict
+no-fallback) is not in scope under the 2026-05-21 deadline. The
+failure-compensation contribution stays implicit in the D / E numbers
+for this revision; F can be added in a follow-up if reviewers ask.
+
+---
 
 ## Timeline
 

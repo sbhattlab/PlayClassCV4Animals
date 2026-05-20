@@ -1,0 +1,81 @@
+# SAM3 HuggingFace Tracking Pipeline — Variant C-strict (frame-0 grounding), Day 29
+# Videos: C1G2, C3G2, C4G2 (staged at ext-data/raw/rerun_fixed_day_29/).
+# Runs on CUDA 1 (pair with tracker_frame_zero_day_28.yaml on CUDA 0).
+#
+# Strict ablation null for the tracker_benchmark study:
+#   - frame-0 grounding only (no scan, no candidate ranking)
+#   - both fallbacks disabled (no Sam3VideoModel whole-chunk escape,
+#     no prev-chunk mask carry-over)
+#   - chunks where SAM 3 emits nothing at frame 0 produce empty predictions.
+
+# =============================================================================
+# ENVIRONMENT
+# =============================================================================
+CUDA_VISIBLE_DEVICES: "1"
+PYTORCH_ALLOC_CONF: "expandable_segments:True,garbage_collection_threshold:0.6"
+
+# =============================================================================
+# INPUT / OUTPUT
+# =============================================================================
+job_type: "sam3_hf_frame_zero"
+video_dir: "ext-data/raw/rerun_fixed_day_29"
+text_prompt: "bird"
+output_dir: "ext-data/output/results/sam3-hf"
+start_frame: 0
+max_frames_to_track: 0
+
+# =============================================================================
+# CHUNKING MODE — fixed chunking
+# =============================================================================
+reuse_chunk_info: false
+reuse_run_dir: null
+
+yolo_scan_only: false
+use_adaptive_chunking: false
+chunk_seconds: 60
+
+# =============================================================================
+# TRACKING HEURISTICS
+# =============================================================================
+min_objects_for_tracking: 3
+max_lookback_frames: 10
+
+# =============================================================================
+# TEXT GROUNDING — strict frame-0 null
+# =============================================================================
+text_grounding:
+  enabled: true
+  grounding_frames: 125
+  min_objects: 3
+  best_frame_method: "frame_zero"
+  # Chunk-0 exception: shift the scan window by 125 frames (5 s at 25 FPS) so
+  # chunk 0 grounds at the first frame past where adaptive grounding (variant
+  # D) would have ended its scan. Avoids reviewer pushback that frame-0
+  # grounding has no chance against per-recording start-of-video failure modes
+  # (lighting cliff, camera adjustment). Chunks 1+ are unaffected — they still
+  # ground at their own first frame. Output frame indices remain global; the
+  # first 125 frames of the video simply have no predictions for variant C.
+  chunk_zero_init_offset_frames: 125
+  fallback_to_prev_chunk: false
+  allow_sam3_videomodel_fallback: false
+  id_matching: true
+  id_match_iou_threshold: 0.10
+
+# =============================================================================
+# SAM3 TRACKER PARAMETERS
+# =============================================================================
+tracking:
+  init_trk_keep_alive: 60
+  max_trk_keep_alive: 60
+  min_trk_keep_alive: 0
+  trk_assoc_iou_thresh: 0.3
+  hotstart_dup_thresh: 12
+  suppress_overlap_thresh: 0.8
+  recondition_every_nth_frame: 8
+
+# =============================================================================
+# METRICS
+# =============================================================================
+metrics:
+  occlusion_iou_threshold: 0.15
+  clustering_distance_threshold: 50.0
