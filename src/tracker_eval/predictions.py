@@ -1,36 +1,23 @@
 """Convert raw tracker predictions to MOTChallenge 1.1 .txt files.
 
-Four-way ablation (ordered by sophistication):
-  - Variant A — YOLO + BoT-SORT only (`yolo_tracking.parquet` under
-    `--predictions-root`).
-  - Variant B — Grounded-SAM-2 with fixed chunking (`tracking_outputs.parquet`
-    under `--predictions-root-gs2`, optional).
-  - Variant C — SAM3 with fixed chunking (`tracking_outputs.parquet`
-    under `--predictions-root-fixed`, optional).
-  - Variant D — SAM3 with adaptive, occlusion-informed chunking
-    (`tracking_outputs.parquet` under `--predictions-root`).
+Six-way ablation (ordered by Family → Recovery):
+  - Variant A         — YOLO + BoT-SORT only.
+  - Variant B-strict  — Grounded-SAM-2 strict (no recovery scaffolding).
+  - Variant B-parity  — Grounded-SAM-2 with parity recovery.
+  - Variant C-strict  — SAM 3 frame-zero (no scan, no fallbacks).
+  - Variant D         — SAM 3 adaptive grounding + fixed chunking.
+  - Variant E         — SAM 3 adaptive grounding + adaptive chunking.
 
-Writes:
-  <out-dir>/A_yolo_botsort/<video_id>.txt
-  <out-dir>/B_gs2_fixed/<video_id>.txt        (if --predictions-root-gs2 given)
-  <out-dir>/C_sam3_fixed/<video_id>.txt       (if --predictions-root-fixed given)
-  <out-dir>/D_sam3_adaptive/<video_id>.txt
+Writes one .txt per variant per selected video, under `<out-dir>/<bucket>/`.
+Variants whose source dir is missing produce an empty MOT file so the
+scorer still sees the variant (rather than silently dropping its row).
 
 MOTChallenge row format:
     frame, id, bb_left, bb_top, bb_width, bb_height, conf, -1, -1, -1
 
-video_id is resolved from `--manifest` (matches the GT files emitted by
-cvat_backup_to_mot.py). The MOT files emitted here are dense (every
-predicted frame); motmetrics restricts scoring to GT-present frames
-during evaluation, so we do **not** filter predictions here.
-
-Usage:
-    pixi run -e tracker-evaluation python -m src.tracker_eval convert-preds \
-        --predictions-root ext-data/output/results/tracker_benchmark/tracker_outputs_adaptive \
-        --predictions-root-fixed ext-data/output/results/tracker_benchmark/tracker_outputs_fixed \
-        --predictions-root-gs2 ext-data/output/results/tracker_benchmark/tracker_outputs_gs2 \
-        --manifest data/tracker_eval/video_manifest.csv \
-        --out-dir ext-data/output/results/tracker_benchmark/predictions_mot
+video_id is resolved from `--manifest`. Predictions emitted here are
+dense (every predicted frame); motmetrics / TrackEval restrict scoring
+to GT-present frames at evaluation time, so we do not filter here.
 """
 
 from __future__ import annotations
@@ -45,7 +32,9 @@ from .paths import (
     PREDICTIONS_MOT_DIR,
     TRACKER_RUNS_ADAPTIVE,
     TRACKER_RUNS_FIXED,
+    TRACKER_RUNS_FRAME_ZERO,
     TRACKER_RUNS_GS2,
+    TRACKER_RUNS_GS2_STRICT,
 )
 
 
@@ -57,11 +46,7 @@ def load_video_id_map(manifest_csv: Path) -> dict[str, str]:
 
 
 def sam3_to_mot_rows(parquet_path: Path) -> list[str]:
-    """tracking_outputs.parquet (SAM3) → MOTChallenge rows.
-
-    Index is MultiIndex(frame_idx, object_id). Column `bbox` is [x1,y1,x2,y2].
-    Confidence is `tracker_score` (per-frame tracker quality).
-    """
+    """tracking_outputs.parquet (SAM 3 / gs2) → MOTChallenge rows."""
     df = pd.read_parquet(parquet_path, columns=["bbox", "tracker_score"])
     rows: list[tuple[int, int, str]] = []
     for (frame_idx, object_id), row in df.iterrows():
@@ -81,13 +66,7 @@ def sam3_to_mot_rows(parquet_path: Path) -> list[str]:
 
 
 def yolo_to_mot_rows(parquet_path: Path) -> list[str]:
-    """yolo_tracking.parquet (YOLO+BoT-SORT) → MOTChallenge rows.
-
-    Flat schema: [frame, track_id, x1, y1, x2, y2, ..., confidence].
-    Rows with `track_id == -1` are untracked detections (BoT-SORT did
-    not assign an identity) — dropped, since they cannot contribute to
-    identity-association metrics.
-    """
+    """yolo_tracking.parquet (YOLO+BoT-SORT) → MOTChallenge rows."""
     df = pd.read_parquet(parquet_path)
     df = df[df["track_id"] != -1]
     rows: list[tuple[int, int, str]] = []
@@ -111,24 +90,68 @@ def write_rows(out_path: Path, rows: list[str]) -> None:
     out_path.write_text("\n".join(rows) + ("\n" if rows else ""))
 
 
+def _convert_sam3_bucket(
+    args: argparse.Namespace,
+    stem: str,
+    video_id: str,
+    root_attr: str,
+    bucket: str,
+) -> int:
+    """Convert one stem's tracking_outputs.parquet from a SAM3-family root.
+
+    Writes an empty MOT file if the root or the per-stem parquet is missing,
+    so the scorer always sees this variant (and counts it as a zero-
+    prediction penalty rather than dropping the row).
+    """
+    root = getattr(args, root_attr)
+    out_path = args.out_dir / bucket / f"{video_id}.txt"
+    if root is None or not root.exists():
+        write_rows(out_path, [])
+        return 0
+    run_dir = root / stem
+    pq = run_dir / "tracking_outputs.parquet"
+    if not pq.exists():
+        print(
+            f"  [empty] {video_id}: {bucket} parquet missing at {pq} "
+            f"(writing empty MOT file so the variant is scored)"
+        )
+        write_rows(out_path, [])
+        return 0
+    rows = sam3_to_mot_rows(pq)
+    write_rows(out_path, rows)
+    return len(rows)
+
+
 def _add_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--predictions-root",
         type=Path,
         default=TRACKER_RUNS_ADAPTIVE,
-        help="Adaptive SAM3 + YOLO scan run dir (supplies A_yolo_botsort and D_sam3_adaptive).",
+        help="Adaptive SAM 3 + YOLO scan run dir (supplies A_yolo_botsort and E_sam3_adaptive).",
     )
     parser.add_argument(
         "--predictions-root-fixed",
         type=Path,
         default=TRACKER_RUNS_FIXED,
-        help="Fixed-chunking SAM3 run dir (supplies C_sam3_fixed). Skipped if dir is missing or empty.",
+        help="Fixed-chunking SAM 3 run dir (supplies D_sam3_fixed). Skipped if dir is missing or empty.",
+    )
+    parser.add_argument(
+        "--predictions-root-frame-zero",
+        type=Path,
+        default=TRACKER_RUNS_FRAME_ZERO,
+        help="SAM 3 frame-zero run dir (supplies C_sam3_frame_zero). Skipped if dir is missing or empty.",
     )
     parser.add_argument(
         "--predictions-root-gs2",
         type=Path,
         default=TRACKER_RUNS_GS2,
-        help="Grounded-SAM-2 fixed-chunking run dir (supplies B_gs2_fixed). Skipped if dir is missing or empty.",
+        help="Grounded-SAM-2 parity-recovery run dir (supplies B_gs2_fixed). Skipped if dir is missing or empty.",
+    )
+    parser.add_argument(
+        "--predictions-root-gs2-strict",
+        type=Path,
+        default=TRACKER_RUNS_GS2_STRICT,
+        help="Grounded-SAM-2 strict run dir (supplies B_gs2_strict). Skipped if dir is missing or empty.",
     )
     parser.add_argument("--manifest", type=Path, default=MANIFEST_CSV)
     parser.add_argument("--out-dir", type=Path, default=PREDICTIONS_MOT_DIR)
@@ -137,7 +160,7 @@ def _add_args(parser: argparse.ArgumentParser) -> None:
 def add_subparser(subparsers) -> argparse.ArgumentParser:
     p = subparsers.add_parser(
         "convert-preds",
-        help="Convert tracker prediction parquets (3-way ablation) to MOTChallenge .txt files.",
+        help="Convert tracker prediction parquets (6-way ablation) to MOTChallenge .txt files.",
     )
     _add_args(p)
     p.set_defaults(func=run)
@@ -155,55 +178,40 @@ def run(args: argparse.Namespace) -> None:
             print(f"  [WARN] {video_id}: adaptive run dir missing at {run_dir}; skipping")
             continue
 
-        sam3_pq = run_dir / "tracking_outputs.parquet"
         yolo_pq = run_dir / "yolo_tracking.parquet"
+        sam3_adaptive_pq = run_dir / "tracking_outputs.parquet"
 
         a_rows = yolo_to_mot_rows(yolo_pq) if yolo_pq.exists() else []
-        d_rows = sam3_to_mot_rows(sam3_pq) if sam3_pq.exists() else []
+        e_rows = sam3_to_mot_rows(sam3_adaptive_pq) if sam3_adaptive_pq.exists() else []
+        write_rows(args.out_dir / "A_yolo_botsort" / f"{video_id}.txt", a_rows)
+        write_rows(args.out_dir / "E_sam3_adaptive" / f"{video_id}.txt", e_rows)
 
-        a_out = args.out_dir / "A_yolo_botsort" / f"{video_id}.txt"
-        d_out = args.out_dir / "D_sam3_adaptive" / f"{video_id}.txt"
-        write_rows(a_out, a_rows)
-        write_rows(d_out, d_rows)
+        n_b_strict = _convert_sam3_bucket(
+            args, stem, video_id, "predictions_root_gs2_strict", "B_gs2_strict"
+        )
+        n_b_parity = _convert_sam3_bucket(
+            args, stem, video_id, "predictions_root_gs2", "B_gs2_fixed"
+        )
+        n_c_strict = _convert_sam3_bucket(
+            args, stem, video_id, "predictions_root_frame_zero", "C_sam3_frame_zero"
+        )
+        n_d = _convert_sam3_bucket(
+            args, stem, video_id, "predictions_root_fixed", "D_sam3_fixed"
+        )
 
-        b_rows: list[str] = []
-        if args.predictions_root_gs2 is not None and args.predictions_root_gs2.exists():
-            gs2_run_dir = args.predictions_root_gs2 / stem
-            gs2_pq = gs2_run_dir / "tracking_outputs.parquet"
-            b_out = args.out_dir / "B_gs2_fixed" / f"{video_id}.txt"
-            if gs2_pq.exists():
-                b_rows = sam3_to_mot_rows(gs2_pq)
-            else:
-                print(
-                    f"  [empty] {video_id}: gs2 parquet missing at {gs2_pq} "
-                    f"(writing empty MOT file so the variant is scored)"
-                )
-            write_rows(b_out, b_rows)
-
-        c_rows: list[str] = []
-        if args.predictions_root_fixed is not None and args.predictions_root_fixed.exists():
-            fixed_run_dir = args.predictions_root_fixed / stem
-            sam3_fixed_pq = fixed_run_dir / "tracking_outputs.parquet"
-            c_out = args.out_dir / "C_sam3_fixed" / f"{video_id}.txt"
-            if sam3_fixed_pq.exists():
-                c_rows = sam3_to_mot_rows(sam3_fixed_pq)
-            else:
-                print(
-                    f"  [empty] {video_id}: fixed-chunking parquet missing at {sam3_fixed_pq} "
-                    f"(writing empty MOT file so the variant is scored)"
-                )
-            write_rows(c_out, c_rows)
-
-        summary.append((video_id, len(a_rows), len(b_rows), len(c_rows), len(d_rows)))
+        summary.append(
+            (video_id, len(a_rows), n_b_strict, n_b_parity, n_c_strict, n_d, len(e_rows))
+        )
 
     print()
-    print(
-        f"{'video_id':<14} {'A (YOLO+BoT-SORT)':>20} {'B (gs2 fixed)':>16} "
-        f"{'C (SAM3 fixed)':>16} {'D (SAM3 adaptive)':>20}"
+    header = (
+        f"{'video_id':<14} {'A':>10} {'B-strict':>10} {'B-parity':>10} "
+        f"{'C-strict':>10} {'D':>10} {'E':>10}"
     )
-    print("-" * 90)
-    for vid, na, nb, nc, nd in summary:
-        print(f"{vid:<14} {na:>20} {nb:>16} {nc:>16} {nd:>20}")
+    print(header)
+    print("-" * len(header))
+    for vid, na, nbs, nbp, ncs, nd, ne in summary:
+        print(f"{vid:<14} {na:>10} {nbs:>10} {nbp:>10} {ncs:>10} {nd:>10} {ne:>10}")
 
 
 def _main() -> None:

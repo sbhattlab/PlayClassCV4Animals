@@ -1,8 +1,9 @@
-"""Sparse-keyframe MOT evaluation for Variants A, B, C, and D.
+"""Sparse-keyframe MOT evaluation for the 6-way ablation.
 
 Reads sparse GT (from cvat_backup_to_mot.py) and dense predictions (from
-convert_predictions.py) for all 5 evaluation videos × 4 tracker variants
-(A_yolo_botsort, B_gs2_fixed, C_sam3_fixed, D_sam3_adaptive) and emits:
+convert_predictions.py) for all 5 evaluation videos × 6 tracker variants
+(A_yolo_botsort, B_gs2_strict, B_gs2_fixed, C_sam3_frame_zero,
+D_sam3_fixed, E_sam3_adaptive) and emits:
 
     data/tracker_eval/results/metrics_per_video.csv
     data/tracker_eval/results/metrics_per_cage.csv
@@ -89,7 +90,14 @@ def _ensure_eval_deps() -> None:
     np = _np
     HOTA = _HOTA
 
-VARIANTS = ("A_yolo_botsort", "B_gs2_fixed", "C_sam3_fixed", "D_sam3_adaptive")
+VARIANTS = (
+    "A_yolo_botsort",
+    "B_gs2_strict",
+    "B_gs2_fixed",
+    "C_sam3_frame_zero",
+    "D_sam3_fixed",
+    "E_sam3_adaptive",
+)
 
 # motmetrics fields. (HOTA-family fields come from TrackEval.)
 MOTMETRICS_FIELDS = [
