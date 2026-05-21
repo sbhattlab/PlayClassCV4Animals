@@ -7,8 +7,8 @@ track-declaration order, and writes `<video_id>.txt` files in MOTChallenge
 
 Usage:
     pixi run -e tracker-evaluation python -m src.tracker_eval cvat-to-mot \
-        --backup-root ext-data/output/results/tracker_benchmark/cvat_backup/playclass-tracker-eval \
-        --out-dir ext-data/output/results/tracker_benchmark/ground_truth \
+        --backup-root ext-data/tracker_benchmark/cvat_backup/playclass-tracker-eval \
+        --out-dir ext-data/tracker_benchmark/ground_truth \
         [--keyframes-csv data/tracker_eval/annotation_frames.csv]
 
 If --keyframes-csv is passed, the converter additionally reports which

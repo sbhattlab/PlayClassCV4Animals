@@ -1,7 +1,7 @@
 """Sparse-keyframe MOT evaluation for the 6-way ablation.
 
-Reads sparse GT (from cvat_backup_to_mot.py) and dense predictions (from
-convert_predictions.py) for all 5 evaluation videos × 6 tracker variants
+Reads sparse GT (from `cvat_to_mot.py`) and dense predictions (from
+`predictions.py`) for all 5 evaluation videos × 6 tracker variants
 (A_yolo_botsort, B_gs2_strict, B_gs2_fixed, C_sam3_frame_zero,
 D_sam3_fixed, E_sam3_adaptive) and emits:
 
@@ -25,8 +25,8 @@ that have human-verified ground truth.
 
 Usage:
     pixi run -e tracker-evaluation python -m src.tracker_eval evaluate \
-        --gt-dir ext-data/output/results/tracker_benchmark/ground_truth \
-        --predictions-mot-dir ext-data/output/results/tracker_benchmark/predictions_mot \
+        --gt-dir ext-data/tracker_benchmark/ground_truth \
+        --predictions-mot-dir ext-data/tracker_benchmark/predictions_mot \
         --manifest data/tracker_eval/video_manifest.csv \
         --out-dir data/tracker_eval/results
 """

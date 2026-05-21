@@ -26,7 +26,11 @@ Output: ``data/tracker_eval/annotation_frames.csv`` with columns
 
 Run from project root::
 
-    pixi run -e tracker-evaluation python -m src.tracker_eval select-frames
+    pixi run -e tracker python -m src.tracker_eval select-frames
+
+Requires the ``tracker`` pixi env (not ``tracker-evaluation``): the deferred
+imports below pull in ``src.metrics`` and ``src.tracker.*``, which transitively
+require torch.
 """
 
 from __future__ import annotations

@@ -1,11 +1,12 @@
-"""
-Launcher for the Grounded-SAM-2 (gs2) tracker pipeline.
+"""Launcher for the Grounded-SAM-2 (gs2) tracker pipeline (Variant B of the
+tracker_eval ablation).
 
 Sets CUDA_VISIBLE_DEVICES and PYTORCH_ALLOC_CONF from the YAML config BEFORE
 torch is imported, then hands off to src.tracker.grounded_sam_2.run.
 
 Usage:
-    pixi run -e gs2 python -m script.run_gs2_tracker --config config/gs2_fixed_day_28.yaml
+    pixi run -e gs2 python -m src.tracker_eval.run_gs2_tracker \\
+        --config data/tracker_eval/config/gs2_fixed_day_28.yaml
 """
 
 import argparse
@@ -13,14 +14,16 @@ import os
 
 from omegaconf import OmegaConf
 
+DEFAULT_CONFIG = "data/tracker_eval/config/gs2_fixed_day_28.yaml"
+
 
 def main():
     parser = argparse.ArgumentParser(description="Grounded-SAM-2 Tracker")
     parser.add_argument(
         "--config",
         type=str,
-        default="config/gs2_fixed_day_28.yaml",
-        help="Path to config file (default: config/gs2_fixed_day_28.yaml)",
+        default=DEFAULT_CONFIG,
+        help=f"Path to config file (default: {DEFAULT_CONFIG})",
     )
     args, _ = parser.parse_known_args()
 

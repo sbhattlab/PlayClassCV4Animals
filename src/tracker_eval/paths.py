@@ -1,10 +1,10 @@
 """Single source of truth for all paths used by the tracker-eval pipeline.
 
 Data-side paths host small, version-controlled artefacts (manifests,
-keyframe schedules, results CSVs). Ext-data-side paths host heavy
-artefacts (CVAT Backup, tracker run parquets, source MP4 clips, MOT
-files) on the mounted `/mnt/birds/rebecca2025/` drive (symlinked at
-`ext-data/` on the Linux box; a regular directory on local dev).
+keyframe schedules, per-variant YAML configs under `data/tracker_eval/config/`,
+results CSVs). Ext-data-side paths host heavy artefacts (CVAT Backup,
+tracker run parquets, source MP4 clips, MOT files) — symlinked at
+`ext-data/`; a regular directory on local dev.
 
 Each subcommand's CLI accepts `--manifest` / `--out` / `--predictions-root`
 overrides; these constants supply the defaults.
@@ -26,7 +26,7 @@ RESULTS_DIR = DATA_DIR / "results"
 TRACKER_CONFIG = ROOT / "config" / "tracker.yaml"
 TRACKEVAL_DIR = ROOT / "ext" / "TrackEval"
 
-# Ext-data side (heavy, on /mnt/birds via symlink in production)
+# Ext-data side (heavy, on ext-data symlink)
 BENCHMARK_DIR = EXT_DATA / "tracker_benchmark"
 CVAT_BACKUP_DIR = BENCHMARK_DIR / "cvat_backup" / "playclass-tracker-eval"
 TRACKER_RUNS_ADAPTIVE = BENCHMARK_DIR / "tracker_outputs_adaptive"

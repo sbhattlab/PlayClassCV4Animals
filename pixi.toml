@@ -6,7 +6,7 @@ authors = [
 ]
 channels = ["conda-forge"]
 platforms = ["linux-64", "osx-arm64"]
-name = "birdplay"
+name = "PlayClass"
 version = "0.1.0"
 
 [feature.cuda.system-requirements]
@@ -68,10 +68,12 @@ simpler-timer = ">=0.0.2"
 tracker = "python -m script.run_tracker --config config/tracker.yaml"
 tracker_scan = "python -m script.run_tracker --config config/tracker_scan.yaml"
 test_tracker = "CUDA_VISIBLE_DEVICES=1 pixi run -e tracker python -m pytest tests/test_tracker.py -v"
-
-# Pre-CVAT umbrella: build-manifest + select-frames. Needs src.tracker.* + src.metrics
-# (imported by frame_selection.py), which live in this env.
+# Pre-CVAT tracker_eval stages: select-frames imports src.metrics / src.tracker.*
+# transitively, which requires torch — so these live in the tracker env, not
+# tracker-evaluation. Post-CVAT stages (score, convert-preds, evaluate) are
+# torch-free and live under [feature.tracker-evaluation.tasks].
 prepare-tracker-eval = "python -m src.tracker_eval prepare"
+select_annotation_frames = "python -m src.tracker_eval select-frames"
 
 # ======= Dataset dependencies ======
 [feature.dataset.pypi-dependencies]
@@ -101,11 +103,9 @@ pillow = ">=10.0.0"
 tabulate = "*"
 
 [feature.tracker-evaluation.tasks]
-# Post-CVAT umbrella: cvat-to-mot + convert-preds + evaluate.
+# Post-CVAT tracker_eval stages: torch-free (motmetrics + vendored TrackEval).
+# Pre-CVAT stages (prepare, select-frames) live in [feature.tracker.tasks].
 score-tracker-eval = "python -m src.tracker_eval score"
-
-# Back-compat aliases for the previous flat task names — same canonical entry points.
-select_annotation_frames = "python -m src.tracker_eval select-frames"
 convert_predictions = "python -m src.tracker_eval convert-preds"
 evaluate_tracker = "python -m src.tracker_eval evaluate"
 
@@ -162,8 +162,6 @@ opencv-python-headless = ">=4.10"
 extract_videoprism = "python -m script.extract_embeddings_videoprism"
 
 # ======= Grounded-SAM-2 (gs2) dependencies ======
-# gs2 is a baseline tracker between YOLO+BoT-SORT and SAM3.
-# Isolated env: pins numpy >=2.4 to match the 53e7a1d gs2 setup.
 [feature.gs2]
 platforms = ["linux-64"]
 
@@ -206,4 +204,4 @@ setup-gs2 = { depends-on = [
     "install-gs2-packages",
 ] }
 
-gs2_tracker = "python -m script.run_gs2_tracker --config config/gs2_fixed_day_28.yaml"
+gs2_tracker = "python -m src.tracker_eval.run_gs2_tracker --config data/tracker_eval/config/gs2_fixed_day_28.yaml"
