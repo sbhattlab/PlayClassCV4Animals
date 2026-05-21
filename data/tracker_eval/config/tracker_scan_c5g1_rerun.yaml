@@ -1,0 +1,34 @@
+# Diagnostic re-run of C5G1_day_37 to test whether the prior 87-min wall-clock
+# reproduces. Same params as tracker_scan_day37.yaml; single video; isolated output.
+
+job_type: "yolo_scan"
+
+CUDA_VISIBLE_DEVICES: "0"
+PYTORCH_ALLOC_CONF: "expandable_segments:True,garbage_collection_threshold:0.6"
+
+video_path: "/mnt/birds/rebecca2025/raw/day_37/C5G1_Test_6_day_37_3_Camera_4_2025_02_13_11_53_59_1.mp4"
+text_prompt: "bird"
+
+output_dir: "ext-data/output/results/tracker_benchmark/diagnostic/c5g1_rerun"
+
+start_frame: 0
+max_frames_to_track: 0
+
+yolo_scan_only: true
+use_adaptive_chunking: true
+
+chunk_seconds: 60
+adaptive_max_chunk_seconds: 120
+adaptive_search_window_seconds: 10.0
+
+yolo_scan:
+  model: "model/yolo26x.pt"
+  conf_thresh: 0.25
+  iou_thresh: 0.45
+  tracker_config: "config/botsort.yaml"
+  allowed_classes: ["bird"]
+
+  separation_min_objects: 3
+  occlusion_iou_threshold: 0.07
+  separation_min_distance: 0.10
+  clustering_distance_threshold: 0.15

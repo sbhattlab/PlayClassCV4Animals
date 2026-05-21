@@ -52,6 +52,7 @@ def find_best_grounding_frame(
     grounding_outputs: dict,
     min_objects: int = 3,
     method: str = "combined",
+    chunk_start_frame_idx: int | None = None,
 ) -> tuple[int | None, list, list, list]:
     """
     Select best frame from grounding outputs by detection quality.
@@ -61,11 +62,33 @@ def find_best_grounding_frame(
       "best_scores"    — highest mean detection score
       "combined"       — low-occlusion frames first (max_iou < 0.10),
                          then by descending mean score within that tier
+      "frame_zero"     — strict ablation null. Returns SAM 3's output at
+                         exactly `chunk_start_frame_idx`, ignoring the
+                         `min_objects` filter. Used by Variant C in the
+                         tracker_benchmark study to remove the adaptive
+                         grounding scan/select stage.
 
     Returns:
         (frame_idx, masks_list, boxes_list, object_ids_list) or
         (None, [], [], []) if no frame qualifies.
     """
+    if method == "frame_zero":
+        # Strict frame-0 ablation: look up the chunk's first frame directly.
+        # No min_objects filter, but if SAM 3 emitted zero objects at that
+        # frame we still return None — downstream tracker init requires at
+        # least one mask, and an empty-masks chunk is exactly the failure
+        # mode the ablation should expose via an empty-prediction chunk.
+        if (
+            chunk_start_frame_idx is None
+            or chunk_start_frame_idx not in grounding_outputs
+        ):
+            return None, [], [], []
+        results = grounding_outputs[chunk_start_frame_idx]
+        masks_list, boxes_list, object_ids_list = get_all_objects_from_results(results)
+        if not masks_list:
+            return None, [], [], []
+        return int(chunk_start_frame_idx), masks_list, boxes_list, object_ids_list
+
     candidates = []
     for frame_idx, results in grounding_outputs.items():
         masks_list, boxes_list, object_ids_list = get_all_objects_from_results(results)

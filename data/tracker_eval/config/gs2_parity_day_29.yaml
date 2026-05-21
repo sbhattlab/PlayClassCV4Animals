@@ -1,0 +1,25 @@
+# Grounded-SAM-2 Tracker — fixed 60s chunking, Day 29, PARITY-RECOVERY variant.
+# See gs2_parity_day_28.yaml for the design rationale (same pipeline, CUDA 1).
+# Videos: C1G2, C3G2, C4G2 (staged at ext-data/raw/rerun_fixed_day_29/).
+
+CUDA_VISIBLE_DEVICES: "1"
+PYTORCH_ALLOC_CONF: "expandable_segments:True,garbage_collection_threshold:0.6"
+
+job_type: "gs2_parity"
+video_dir: "ext-data/raw/rerun_fixed_day_29"
+text_prompt: ".bird."
+output_dir: "ext-data/output/results/grounded-sam-2"
+start_frame: 0
+max_frames_to_track: 0
+
+chunk_seconds: 60
+max_lookback_frames: 10
+
+gs2:
+  model_size: "large"
+  gdino_model_id: "IDEA-Research/grounding-dino-base"
+  box_threshold: 0.25
+  text_threshold: 0.3
+  offload_video_to_cpu: true
+  enable_recovery: true
+  seed_scan_window: 125

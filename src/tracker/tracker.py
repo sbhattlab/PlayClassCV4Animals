@@ -771,10 +771,33 @@ def _run_single_video(cfg, run_dir: Path, config_path: Path | None = None):
 
         if grounding_enabled:
             # --- Text grounding drives EVERY chunk: grounding → tracker ---
+            grounding_frames_count = grounding_cfg.get("grounding_frames", 25)
+            # Chunk-0 init offset: variant C-strict (frame_zero) optionally
+            # shifts chunk 0's grounding scan window past a configurable prefix
+            # to give the strict baseline a fair shot past per-recording
+            # start-of-video failure modes (e.g. lighting transition). Chunks
+            # 1+ are unaffected. Frame indices in the output remain global —
+            # frames [chunk_start, chunk_start + offset) simply have no
+            # predictions because the tracker initialises at the offset.
+            chunk_zero_offset = (
+                grounding_cfg.get("chunk_zero_init_offset_frames", 0)
+                if chunk_idx == 0
+                else 0
+            )
+            if chunk_zero_offset > 0 and chunk_zero_offset < len(chunk_frames):
+                scan_frames = chunk_frames[chunk_zero_offset:]
+                scan_start_idx = global_chunk_start + chunk_zero_offset
+                logger.info(
+                    f"  [chunk-0-offset] shifting grounding scan by {chunk_zero_offset} "
+                    f"frames; scan window starts at global frame {scan_start_idx}"
+                )
+            else:
+                scan_frames = chunk_frames
+                scan_start_idx = global_chunk_start
             grounding_outputs = run_grounding(
-                chunk_frames,
-                global_chunk_start,
-                grounding_cfg.get("grounding_frames", 25),
+                scan_frames,
+                scan_start_idx,
+                grounding_frames_count,
                 _process_video_chunk,
                 cfg,
                 device,
@@ -786,6 +809,7 @@ def _run_single_video(cfg, run_dir: Path, config_path: Path | None = None):
                         "min_objects", cfg.min_objects_for_tracking
                     ),
                     method=grounding_cfg.get("best_frame_method", "combined"),
+                    chunk_start_frame_idx=scan_start_idx,
                 )
             )
 
@@ -976,17 +1000,33 @@ def _run_single_video(cfg, run_dir: Path, config_path: Path | None = None):
                 else:
                     chunk_info["fallback_reason"] = "no_objects_found"
 
+        allow_s3vm_fallback = cfg.get("text_grounding", {}).get(
+            "allow_sam3_videomodel_fallback", True
+        )
+
+        emit_empty_chunk = False
         if not use_tracker:
-            if chunk_info["fallback_reason"] is None:
-                chunk_info["fallback_reason"] = (
-                    "first_chunk" if chunk_idx == 0 else "grounding_failed_no_fallback"
+            if not allow_s3vm_fallback:
+                chunk_info["model_type"] = "EmptyChunk"
+                chunk_info["fallback_reason"] = "grounding_failed_no_fallback_allowed"
+                emit_empty_chunk = True
+                logger.warning(
+                    f"  [no-fallback] chunk {chunk_idx} produces empty predictions "
+                    f"(grounding failed and allow_sam3_videomodel_fallback=false)"
                 )
-            chunk_info["model_type"] = "Sam3VideoModel"
+            else:
+                if chunk_info["fallback_reason"] is None:
+                    chunk_info["fallback_reason"] = (
+                        "first_chunk" if chunk_idx == 0 else "grounding_failed_no_fallback"
+                    )
+                chunk_info["model_type"] = "Sam3VideoModel"
 
         # --- Process chunk with appropriate model ---
         # start_frame offset ensures global frame indices match original video positions
         global_start_idx = global_chunk_start + grounding_frame_offset
-        if use_tracker:
+        if emit_empty_chunk:
+            chunk_outputs = {}
+        elif use_tracker:
             chunk_outputs = _process_tracker_chunk(
                 chunk_frames[grounding_frame_offset:],
                 global_start_idx,

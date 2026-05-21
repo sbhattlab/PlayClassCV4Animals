@@ -7,7 +7,7 @@ Requires CUDA and the test video at
 
 Usage::
 
-    CUDA_VISIBLE_DEVICES=1 pixi run -e sam3-hf pytest tests/test_tracker_video.py -v
+    CUDA_VISIBLE_DEVICES=1 pixi run -e tracker pytest tests/test_tracker.py -v
 """
 
 from pathlib import Path
@@ -20,7 +20,9 @@ from src.io import load_video_frames_torchcodec as load_video_frames
 TEXT = "bird"
 START_IDX = 10
 N_GROUNDING_FRAMES = 125
-VIDEO_PATH = Path("data/video/test_10_sec.mp4")
+VIDEO_PATH = Path(
+    "data/video/sample_footage.mp4"
+)  # Placeholder path, bring your own test footage
 
 pytestmark = [
     pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available"),
@@ -134,9 +136,9 @@ class TestSam3VideoInference:
         first_ids = set(outputs_per_frame[sorted_frames[0]]["object_ids"].tolist())
         for frame_idx in sorted_frames[1:]:
             frame_ids = set(outputs_per_frame[frame_idx]["object_ids"].tolist())
-            assert first_ids.issubset(
-                frame_ids
-            ), f"Frame {frame_idx} missing IDs: {first_ids - frame_ids}"
+            assert first_ids.issubset(frame_ids), (
+                f"Frame {frame_idx} missing IDs: {first_ids - frame_ids}"
+            )
 
     def test_output_keys(self, outputs_per_frame):
         """Each frame output should contain expected keys."""

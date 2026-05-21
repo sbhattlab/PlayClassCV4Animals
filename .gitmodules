@@ -1,0 +1,6 @@
+[submodule "ext/TrackEval"]
+	path = ext/TrackEval
+	url = https://github.com/JonathonLuiten/TrackEval
+[submodule "ext/Grounded-SAM-2"]
+	path = ext/Grounded-SAM-2
+	url = https://github.com/IDEA-Research/Grounded-SAM-2

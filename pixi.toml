@@ -5,20 +5,22 @@ authors = [
     "David Duchêne <david.duchene@sund.ku.dk>",
 ]
 channels = ["conda-forge"]
-platforms = ["linux-64"]
-name = "birdplay"
+platforms = ["linux-64", "osx-arm64"]
+name = "PlayClass"
 version = "0.1.0"
 
-[system-requirements]
+[feature.cuda.system-requirements]
 cuda = "12.6"
 
 # ======= Environments ======
 [environments]
-tracker = ["tracker"]
-dataset = ["dataset"]
-embeddings = ["embeddings"]
-classifier = ["classifier"]
+tracker = ["tracker", "cuda"]
+dataset = ["dataset", "cuda"]
+embeddings = ["embeddings", "cuda"]
+classifier = ["classifier", "cuda"]
 videoprism = ["videoprism"]
+tracker-evaluation = ["tracker-evaluation"]
+gs2 = ["gs2", "cuda"]
 
 # ======= Default dependencies ======
 [dependencies]
@@ -39,11 +41,13 @@ tqdm = ">=4.67.1,<5"
 pyarrow = ">=23.0.0,<24"
 ipykernel = ">=7.1.0"
 ipywidgets = ">=8.1.8"
-torch = "==2.9.1+cu126"
-torchvision = "==0.24.1+cu126"
 matplotlib = ">=3.7.0,<4"
 seaborn = ">=0.13.2"
 nbconvert = ">=7.16.6,<8"
+
+[feature.cuda.target.linux-64.pypi-dependencies]
+torch = "==2.9.1+cu126"
+torchvision = "==0.24.1+cu126"
 
 # ======= Tracker dependencies ======
 [feature.tracker.pypi-dependencies]
@@ -64,6 +68,12 @@ simpler-timer = ">=0.0.2"
 tracker = "python -m script.run_tracker --config config/tracker.yaml"
 tracker_scan = "python -m script.run_tracker --config config/tracker_scan.yaml"
 test_tracker = "CUDA_VISIBLE_DEVICES=1 pixi run -e tracker python -m pytest tests/test_tracker.py -v"
+# Pre-CVAT tracker_eval stages: select-frames imports src.metrics / src.tracker.*
+# transitively, which requires torch — so these live in the tracker env, not
+# tracker-evaluation. Post-CVAT stages (score, convert-preds, evaluate) are
+# torch-free and live under [feature.tracker-evaluation.tasks].
+prepare-tracker-eval = "python -m src.tracker_eval prepare"
+select_annotation_frames = "python -m src.tracker_eval select-frames"
 
 # ======= Dataset dependencies ======
 [feature.dataset.pypi-dependencies]
@@ -80,6 +90,24 @@ test_features = "python -m pytest tests/test_features.py -v"
 test_postprocessing = "python -m pytest tests/test_tracking_postprocessing.py -v"
 test_post_build = "python -m pytest tests/test_post_build_dataset.py -v"
 test_postprocessing_smoke = "python -m tests.test_postprocessing_smoke"
+
+# ======= Tracker evaluation dependencies ======
+[feature.tracker-evaluation.pypi-dependencies]
+numpy = ">=1.2.6,<2"
+motmetrics = ">=1.4.0"
+omegaconf = ">=2.3.0"
+pycocotools = ">=2.0.11,<3"
+opencv-python = "*"
+scikit-image = "*"
+pillow = ">=10.0.0"
+tabulate = "*"
+
+[feature.tracker-evaluation.tasks]
+# Post-CVAT tracker_eval stages: torch-free (motmetrics + vendored TrackEval).
+# Pre-CVAT stages (prepare, select-frames) live in [feature.tracker.tasks].
+score-tracker-eval = "python -m src.tracker_eval score"
+convert_predictions = "python -m src.tracker_eval convert-preds"
+evaluate_tracker = "python -m src.tracker_eval evaluate"
 
 # ======= Embeddings dependencies ======
 [feature.embeddings.pypi-dependencies]
@@ -121,7 +149,7 @@ test_val_rotation = "python -m pytest tests/test_val_rotation.py -v"
 [feature.videoprism.system-requirements]
 cuda = "12"
 
-[feature.videoprism.pypi-dependencies]
+[feature.videoprism.target.linux-64.pypi-dependencies]
 jax = { version = "*", extras = ["cuda12"] }
 opt-einsum = ">=3.3,<3.4"
 videoprism = { git = "https://github.com/google-deepmind/videoprism" }
@@ -132,3 +160,48 @@ opencv-python-headless = ">=4.10"
 
 [feature.videoprism.tasks]
 extract_videoprism = "python -m script.extract_embeddings_videoprism"
+
+# ======= Grounded-SAM-2 (gs2) dependencies ======
+[feature.gs2]
+platforms = ["linux-64"]
+
+[feature.gs2.pypi-dependencies]
+setuptools = "*"
+transformers = { git = "https://github.com/huggingface/transformers", rev = "v5.0.0rc2" }
+opencv-python = ">=4.13.0.90,<5"
+pycocotools = ">=2.0.11,<3"
+pillow = ">=12.1.0,<13"
+numpy = ">=2.4.1,<3"
+pandas = ">=3.0.0,<4"
+supervision = ">=0.27.0,<0.28"
+tqdm = ">=4.67.1,<5"
+pyarrow = ">=23.0.0,<24"
+loguru = ">=0.7.3"
+omegaconf = ">=2.3.0"
+psutil = ">=5.9.0"
+
+[feature.gs2.tasks]
+download-sam2-checkpoints = { cmd = """
+bash -c 'if ls checkpoints/*.pt 1> /dev/null 2>&1; then echo "SAM2 checkpoints already exist, skipping download..."; else cd checkpoints && bash download_ckpts.sh; fi'
+""", cwd = "ext/Grounded-SAM-2" }
+
+download-gdino-checkpoints = { cmd = """
+bash -c 'if ls gdino_checkpoints/*.pth 1> /dev/null 2>&1; then echo "Grounding DINO checkpoints already exist, skipping download..."; else cd gdino_checkpoints && bash download_ckpts.sh; fi'
+""", cwd = "ext/Grounded-SAM-2" }
+
+install-pytorch = "uv pip install torch torchvision torchaudio"
+
+install-gs2-packages = { cmd = """
+export CUDA_HOME="/usr/lib/nvidia-cuda-toolkit/" && \
+uv pip install -e . && \
+uv pip install --no-build-isolation -e grounding_dino
+""", cwd = "ext/Grounded-SAM-2" }
+
+setup-gs2 = { depends-on = [
+    "download-sam2-checkpoints",
+    "download-gdino-checkpoints",
+    "install-pytorch",
+    "install-gs2-packages",
+] }
+
+gs2_tracker = "python -m src.tracker_eval.run_gs2_tracker --config data/tracker_eval/config/gs2_fixed_day_28.yaml"

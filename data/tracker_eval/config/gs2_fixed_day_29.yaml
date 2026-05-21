@@ -1,0 +1,39 @@
+# Grounded-SAM-2 Tracker — fixed 60s chunking, Day 29
+# Videos: C1G2, C3G2, C4G2 (staged at ext-data/raw/rerun_fixed_day_29/).
+# Runs on CUDA 1 (pair with gs2_fixed_day_28.yaml on CUDA 0).
+#
+# Strict IDEA-Research reference behavior: single GroundingDINO call at
+# the thresholds below, no retry loop, no area filter. The only adaptation
+# vs upstream is chunking-with-mask-carryover (unavoidable for 15min videos).
+
+# =============================================================================
+# ENVIRONMENT
+# =============================================================================
+CUDA_VISIBLE_DEVICES: "1"
+PYTORCH_ALLOC_CONF: "expandable_segments:True,garbage_collection_threshold:0.6"
+
+# =============================================================================
+# INPUT / OUTPUT
+# =============================================================================
+job_type: "gs2_fixed"
+video_dir: "ext-data/raw/rerun_fixed_day_29"
+text_prompt: ".bird."
+output_dir: "ext-data/output/results/grounded-sam-2"
+start_frame: 0
+max_frames_to_track: 0
+
+# =============================================================================
+# CHUNKING — fixed 60s, matching Variant C (SAM3 fixed)
+# =============================================================================
+chunk_seconds: 60
+max_lookback_frames: 10
+
+# =============================================================================
+# Grounded-SAM-2 parameters
+# =============================================================================
+gs2:
+  model_size: "large"
+  gdino_model_id: "IDEA-Research/grounding-dino-base"
+  box_threshold: 0.25
+  text_threshold: 0.3
+  offload_video_to_cpu: true
