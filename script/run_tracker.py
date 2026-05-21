@@ -5,7 +5,7 @@ Sets CUDA_VISIBLE_DEVICES and other env vars from the YAML config
 BEFORE torch is imported, then hands off to the real pipeline module.
 
 Usage:
-    python -m script.run_tracker --config config/sam3_hf_config.yaml
+    python -m script.run_tracker --config config/tracker.yaml
 """
 
 import argparse
@@ -19,8 +19,8 @@ def main():
     parser.add_argument(
         "--config",
         type=str,
-        default="config/sam3_hf_config.yaml",
-        help="Path to config file (default: config/tracker_config.yaml)",
+        default="config/tracker.yaml",
+        help="Path to config file (default: config/tracker.yaml)",
     )
     args, _ = parser.parse_known_args()
 

@@ -1,7 +1,6 @@
-# Chicken behaviour classification
+# PlayClass
 
-Multi-object tracking and segmentation of chickens in video data using SAM3,
-with postprocessing, feature extraction, and behaviour classification.
+A pipeline for play behaviour recognition in videos of poultry with tracking, postprocessing, feature extraction and classification.
 
 ## Installation
 
@@ -12,7 +11,7 @@ git submodule update --init --recursive
 pixi install
 ```
 
-Pixi environments: `default` (base), `tracker` (SAM3), `dataset` (build + features), `embeddings` (DINOv3/V-JEPA), `classifier` (training), `videoprism` (JAX). Platform is Linux-only (CUDA 12.6).
+Pixi environments: `default` (base), `tracker` (SAM3), `dataset` (build + features), `embeddings` (DINOv3/V-JEPA), `classifier` (training), `videoprism` (JAX), `gs2` (Grounded-SAM-2; used for tracker benchmarking). Platform is Linux-only (CUDA 12.6).
 
 ## Data
 
@@ -21,9 +20,7 @@ data/
   labels/          Registration protocol Excel files (behaviour labels + bird info)
   tracking/        Symlinks to tracking run output dirs (gitignored)
   postprocessing/  Version-controlled per-video postprocessing JSONs + parquets (day_28/, day_29/)
-  dataset/         Combined dataset outputs (tracks, labels, features, embeddings)
-  video/           Symlinks to video directories (batch/, batch2/, week_1_day_2/)
-ext-data/          Symlink to /mnt/birds/rebecca2025/ (results, image sequences)
+ext-data/          Symlink to large data outputs (results, image sequences, embeddings, etc.)
 ```
 
 ### Dataset
@@ -100,7 +97,7 @@ pixi run -e tracker test_tracker
 
 Behaviour classification using LOCO (Leave-One-Cage-Out) cross-validation.
 Best result: **0.773 pooled macro F1** (TemporalCNNv2 on features + DINOv3 plain256 + V-JEPA 2.1).
-See `notes/ablation_v2.md` for full ablation tables.
+See v0.2.0 release notes for full ablation tables.
 
 ```sh
 # Features only (MLP baseline)
@@ -112,3 +109,7 @@ pixi run -e classifier train --model temporal_cnn2 --input features+embeddings_v
 # XGBoost baseline
 pixi run -e classifier train_xgboost --exclude social
 ```
+
+## Data availability
+
+The 30 video recordings analysed in the accompanying paper are part of an ongoing study of play behaviour in young chickens. The full dataset (videos, ethograms, tracking labels) will be released publicly upon completion of the broader study, subject to institutional review. For early access requests, please contact the corresponding authors.

@@ -1,8 +1,3 @@
-.agents/
-agent-log/
-.dvc/
-.claude/
-
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
@@ -71,11 +66,7 @@ data/video/
 data/dataset/
 data/tsne/
 tracking/
-
-# Scrapbook — source lives on the dedicated `scrapbook` orphan branch.
-# Local working copy + Quarto build artefacts stay untracked on feature branches.
-scrapbook/
-
+.dvc/
 
 # Notes & drafts
 tmp/
@@ -84,6 +75,7 @@ drafts*.ipynb
 notes/
 paper/
 papers/
+scrapbook/
 
 # Shelved experiments
 shelf/
@@ -93,6 +85,8 @@ sandbox/
 .matplotlib/
 img/
 
-# Claude — ignore settings but track rules
-.claude/*
-!.claude/rules/
+# AGENTS
+.claude/
+!.claude/rules/ # ignore settings but track rules
+.agents/
+agent-log/
