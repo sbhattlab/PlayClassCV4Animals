@@ -258,21 +258,19 @@ def _process_chunk(
     num_frames = len(chunk_frames)
     model_type = "gs2_grounded" if chunk_idx == 0 else "gs2_tracker"
 
-    temp_dir = tempfile.mkdtemp(prefix=f"gs2_chunk{chunk_idx}_")
-    try:
-        logger.info(f"  Writing {num_frames} frames to temp dir...")
-        _write_frames_to_dir(chunk_frames, temp_dir)
+    temp_dir_ctx = tempfile.TemporaryDirectory(prefix=f"gs2_chunk{chunk_idx}_")
+    temp_dir = temp_dir_ctx.name
+    logger.info(f"  Writing {num_frames} frames to temp dir...")
+    _write_frames_to_dir(chunk_frames, temp_dir)
 
-        logger.info("  Initialising SAM2 inference state...")
-        with torch.inference_mode():
-            inference_state = video_predictor.init_state(
-                video_path=temp_dir,
-                offload_video_to_cpu=offload_video_to_cpu,
-                offload_state_to_cpu=False,
-                async_loading_frames=False,
-            )
-    finally:
-        shutil.rmtree(temp_dir, ignore_errors=True)
+    logger.info("  Initialising SAM2 inference state...")
+    with torch.inference_mode():
+        inference_state = video_predictor.init_state(
+            video_path=temp_dir,
+            offload_video_to_cpu=offload_video_to_cpu,
+            offload_state_to_cpu=False,
+            async_loading_frames=False,
+        )
 
     seeded = 0
     with torch.inference_mode():
