@@ -45,7 +45,7 @@ matplotlib = ">=3.7.0,<4"
 seaborn = ">=0.13.2"
 nbconvert = ">=7.16.6,<8"
 
-[target.linux-64.pypi-dependencies]
+[feature.cuda.target.linux-64.pypi-dependencies]
 torch = "==2.9.1+cu126"
 torchvision = "==0.24.1+cu126"
 
