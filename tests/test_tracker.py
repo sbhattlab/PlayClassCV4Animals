@@ -7,7 +7,7 @@ Requires CUDA and the test video at
 
 Usage::
 
-    CUDA_VISIBLE_DEVICES=1 pixi run -e tracker pytest tests/test_tracker_video.py -v
+    CUDA_VISIBLE_DEVICES=1 pixi run -e tracker pytest tests/test_tracker.py -v
 """
 
 from pathlib import Path
