@@ -11,7 +11,7 @@ git submodule update --init --recursive
 pixi install
 ```
 
-Pixi environments: `default` (base), `tracker` (SAM3), `dataset` (build + features), `embeddings` (DINOv3/V-JEPA), `classifier` (training), `videoprism` (JAX), `gs2` (Grounded-SAM-2; used for tracker benchmarking). Platform is Linux-only (CUDA 12.6).
+Pixi environments: `default` (base), `tracker` (SAM3), `dataset` (build + features), `embeddings` (DINOv3/V-JEPA), `classifier` (training), `videoprism` (JAX), `gs2` (Grounded-SAM-2; used for tracker benchmarking), `tracker-evaluation` (CPU-only tracker scoring; motmetrics + pycocotools). Platform is Linux-only (CUDA 12.6).
 
 ## Data
 
@@ -20,6 +20,7 @@ data/
   labels/          Registration protocol Excel files (behaviour labels + bird info)
   tracking/        Symlinks to tracking run output dirs (gitignored)
   postprocessing/  Version-controlled per-video postprocessing JSONs + parquets (day_28/, day_29/)
+  tracker_eval/    Version-controlled tracker benchmark artefacts (video manifest, keyframes, ablation configs, scored results)
 ext-data/          Symlink to large data outputs (results, image sequences, embeddings, etc.)
 ```
 
@@ -109,6 +110,21 @@ pixi run -e classifier train --model temporal_cnn2 --input features+embeddings_v
 # XGBoost baseline
 pixi run -e classifier train_xgboost --exclude social
 ```
+
+## Tracker evaluation
+
+Held-out tracker benchmark over 5 videos with sparse CVAT-annotated keyframes, scored with motmetrics + TrackEval. Compares SAM3 variants against Grounded-SAM-2 baselines. Preparation runs in the `tracker` env (needs torch); scoring runs in the CPU-only `tracker-evaluation` env.
+
+```sh
+# Prepare video manifest + keyframe schedule (tracker env)
+pixi run -e tracker prepare-tracker-eval
+
+# Convert tracker outputs to MOT format, then score against CVAT ground truth
+pixi run -e tracker-evaluation convert_predictions
+pixi run -e tracker-evaluation score-tracker-eval
+```
+
+See [`src/tracker_eval/README.md`](src/tracker_eval/README.md) for the full ablation table, CVAT handoff workflow, per-variant configs, and results schema.
 
 ## Data availability
 
